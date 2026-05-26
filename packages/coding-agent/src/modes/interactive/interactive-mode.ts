@@ -1406,6 +1406,7 @@ export class InteractiveMode {
 					const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(userExtensions));
 					addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
 				}
+			}
 
 			// Show loaded themes (excluding built-in)
 			const loadedThemes = themesResult.themes;

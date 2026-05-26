@@ -27,7 +27,7 @@ import { builtin as lsMany } from "./ls-many.ts";
 import { builtin as piHealth } from "./pi-health.ts";
 import { builtin as promptUrlWidget } from "./prompt-url-widget.ts";
 import { builtin as readMany } from "./read-many.ts";
-import { builtin as subagentLite } from "./subagent-lite/index.ts";
+
 import { builtin as themeColor } from "./theme-color.ts";
 import { builtin as todoTracker } from "./todo-tracker.ts";
 import { builtin as tps } from "./tps.ts";
@@ -52,7 +52,7 @@ export const builtinExtensionFactories: (ExtensionFactory & { extensionName?: st
 	Object.assign(piHealth, { extensionName: "pi-health" }),
 	Object.assign(promptUrlWidget, { extensionName: "prompt-url-widget" }),
 	Object.assign(readMany, { extensionName: "read-many" }),
-	Object.assign(subagentLite, { extensionName: "subagent-lite" }),
+
 	Object.assign(themeColor, { extensionName: "theme-color" }),
 	Object.assign(tps, { extensionName: "tps" }),
 	Object.assign(webTools, { extensionName: "web-tools" }),

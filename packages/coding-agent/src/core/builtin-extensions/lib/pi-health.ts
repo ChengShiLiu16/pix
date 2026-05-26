@@ -77,11 +77,6 @@ export function collectPiHealth(agentRoot: string): HealthReport {
 	pushExists(items, path.join(agentRoot, "settings.json"), "agent settings");
 	pushExists(items, path.join(agentRoot, "models.json"), "custom models");
 	pushExists(items, path.join(extensionsDir, "lib", "tsconfig.test.json"), "extension lib test tsconfig");
-	pushExists(
-		items,
-		path.join(extensionsDir, "subagent-lite", "lib", "tsconfig.test.json"),
-		"subagent-lite test tsconfig",
-	);
 	pushExists(items, path.join(thinkingDir, "tsconfig.json"), "thinking-steps tsconfig");
 	pushExists(items, path.join(thinkingDir, "test", "thinking-steps.test.ts"), "thinking-steps unit test");
 	pushExists(items, path.join(thinkingDir, "test", "summarizer-challenger.test.ts"), "thinking-steps summarizer test");

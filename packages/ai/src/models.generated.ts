@@ -11003,7 +11003,7 @@ export const MODELS = {
 				cacheWrite: 0,
 			},
 			contextWindow: 262144,
-			maxTokens: 32000,
+			maxTokens: 32768,
 		} satisfies Model<"openai-completions">,
 		"poolside/laguna-xs.2:free": {
 			id: "poolside/laguna-xs.2:free",
