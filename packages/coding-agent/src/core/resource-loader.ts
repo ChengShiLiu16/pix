@@ -784,7 +784,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const errors: Array<{ path: string; error: string }> = [];
 
 		for (const [index, factory] of this.extensionFactories.entries()) {
-			const extensionPath = `<inline:${index + 1}>`;
+			const extensionPath = (factory as any).extensionName ? `<builtin:${(factory as any).extensionName}>` : `<inline:${index + 1}>`;
 			try {
 				const extension = await loadExtensionFromFactory(factory, this.cwd, this.eventBus, runtime, extensionPath);
 				extensions.push(extension);

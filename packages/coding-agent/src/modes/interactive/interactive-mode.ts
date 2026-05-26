@@ -1394,15 +1394,18 @@ export class InteractiveMode {
 			}
 
 			if (extensions.length > 0) {
-				const groups = this.buildScopeGroups(extensions);
-				const extList = this.formatScopeGroups(groups, {
-					formatPath: (item) => this.formatExtensionDisplayPath(item.path),
-					formatPackagePath: (item) =>
-						this.formatExtensionDisplayPath(this.getShortPath(item.path, item.sourceInfo)),
-				});
-				const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(extensions));
-				addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
-			}
+				// Hide builtin extensions from startup display — they're compiled into source
+				const userExtensions = extensions.filter((ext) => !ext.path.startsWith("<builtin:"));
+				if (userExtensions.length > 0) {
+					const groups = this.buildScopeGroups(userExtensions);
+					const extList = this.formatScopeGroups(groups, {
+						formatPath: (item) => this.formatExtensionDisplayPath(item.path),
+						formatPackagePath: (item) =>
+							this.formatExtensionDisplayPath(this.getShortPath(item.path, item.sourceInfo)),
+					});
+					const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(userExtensions));
+					addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
+				}
 
 			// Show loaded themes (excluding built-in)
 			const loadedThemes = themesResult.themes;

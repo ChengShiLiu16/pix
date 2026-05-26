@@ -58,6 +58,7 @@ export async function getLatestPiRelease(
 	options: { timeoutMs?: number } = {},
 ): Promise<LatestPiRelease | undefined> {
 	if (process.env.PIX_SKIP_VERSION_CHECK || process.env.PIX_OFFLINE) return undefined;
+	if (currentVersion.includes("-pix.")) return undefined;
 
 	const response = await fetch(LATEST_VERSION_URL, {
 		headers: {

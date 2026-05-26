@@ -35,24 +35,25 @@ import { builtin as webTools } from "./web-tools/index.ts";
 
 /**
  * All built-in extension factories, in load order.
+ * Each entry has a name for display in the startup screen.
  * Later extensions can override tools/commands registered by earlier ones.
  */
-export const builtinExtensionFactories: ExtensionFactory[] = [
-	activityWidget,
-	compactTools,
-	todoTracker,
-	askUserQuestion,
-	autoCompactEnhanced,
-	diffCommand,
-	generationWatchdog,
-	gitCheckpoint,
-	grepMany,
-	lsMany,
-	piHealth,
-	promptUrlWidget,
-	readMany,
-	subagentLite,
-	themeColor,
-	tps,
-	webTools,
+export const builtinExtensionFactories: (ExtensionFactory & { extensionName?: string })[] = [
+	Object.assign(activityWidget, { extensionName: "activity-widget" }),
+	Object.assign(compactTools, { extensionName: "compact-tools" }),
+	Object.assign(todoTracker, { extensionName: "todo-tracker" }),
+	Object.assign(askUserQuestion, { extensionName: "ask-user-question" }),
+	Object.assign(autoCompactEnhanced, { extensionName: "auto-compact-enhanced" }),
+	Object.assign(diffCommand, { extensionName: "diff-command" }),
+	Object.assign(generationWatchdog, { extensionName: "generation-watchdog" }),
+	Object.assign(gitCheckpoint, { extensionName: "git-checkpoint" }),
+	Object.assign(grepMany, { extensionName: "grep-many" }),
+	Object.assign(lsMany, { extensionName: "ls-many" }),
+	Object.assign(piHealth, { extensionName: "pi-health" }),
+	Object.assign(promptUrlWidget, { extensionName: "prompt-url-widget" }),
+	Object.assign(readMany, { extensionName: "read-many" }),
+	Object.assign(subagentLite, { extensionName: "subagent-lite" }),
+	Object.assign(themeColor, { extensionName: "theme-color" }),
+	Object.assign(tps, { extensionName: "tps" }),
+	Object.assign(webTools, { extensionName: "web-tools" }),
 ];
