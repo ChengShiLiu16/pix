@@ -285,7 +285,7 @@ export function builtin(pi: ExtensionAPI) {
 	const toolCallInvalidators = new Map<string, () => void>();
 	let widgetCtx: ExtensionContext | null = null;
 	let terminalInputUnsub: (() => void) | undefined;
-	let multitaskEnabled = false;
+	let multitaskEnabled = true;
 	let backgroundRunning = 0;
 
 	const persistWorkerCompletion = (details: TaskDetails) => {
@@ -668,18 +668,16 @@ export function builtin(pi: ExtensionAPI) {
 			if (Array.isArray(args.tasks) && args.tasks.length > 0) {
 				const text =
 					theme.fg("toolTitle", theme.bold("task ")) +
-					theme.fg("accent", "#parallel") +
-					theme.fg("muted", ` · ${args.tasks.length} foreground tasks`);
+					theme.fg("accent", "parallel") +
+					theme.fg("muted", ` · ${args.tasks.length} workers`);
 				return new Text(text, 0, 0);
 			}
-			const desc = args.description ?? resolveTaskPrompt(args)?.slice(0, 48) ?? "worker";
-			const mode = args.background ? "background" : "foreground";
-			const agent = args.agent ?? "worker";
+			const desc = args.description ?? resolveTaskPrompt(args)?.slice(0, 60) ?? "worker";
+			const mode = args.background ? "bg" : "fg";
 			const text =
 				theme.fg("toolTitle", theme.bold("task ")) +
-				theme.fg("accent", `#${agent}`) +
-				theme.fg("muted", ` · ${mode}`) +
-				`\n${theme.fg("dim", desc)}`;
+				theme.fg("accent", desc) +
+				theme.fg("muted", ` · ${mode}`);
 			return new Text(text, 0, 0);
 		},
 		renderResult(result, _opts, theme, context) {
@@ -689,45 +687,39 @@ export function builtin(pi: ExtensionAPI) {
 
 			const stored = (context as { result?: AgentToolResult<TaskDetails | ParallelTaskDetails> }).result ?? result;
 			const storedDetails = stored.details as TaskDetails | ParallelTaskDetails | undefined;
-			const body =
-				stored.content?.[0]?.type === "text"
-					? stored.content[0].text
-					: result.content[0]?.type === "text"
-						? result.content[0].text
-						: "";
-			const showExpanded = context.toolCallId ? isWorkerExpanded(context.toolCallId) : false;
 
+			// Simple status display: "worked" or "working" + description
 			if (isParallelTaskDetails(storedDetails)) {
-				const parallel: ParallelTaskDetails = {
-					parallel: true,
-					results: storedDetails.results.map((r) => {
-						const live = workers.get(r.workerId);
-						const completed = completedWorkers.get(r.workerId);
-						return resolveTaskDetails(r, live ? buildTaskDetails(live) : undefined, completed) ?? r;
-					}),
-				};
-				if (context.toolCallId) {
-					for (const r of parallel.results) registerWorkerToolCall(r.workerId, context.toolCallId);
-				}
-				const text = showExpanded
-					? formatParallelTaskResultExpanded(parallel, body, theme, context.isError)
-					: formatParallelTaskResultCollapsed(parallel, body, theme, getWorkerShortcutIndex);
-				return new Text(text, 0, 0);
+				const allDone = storedDetails.results.every((r) => r.status === "done" || r.status === "failed");
+				const failed = storedDetails.results.some((r) => r.status === "failed");
+				const label = allDone
+					? (failed ? theme.fg("error", "worked") : theme.fg("success", "worked"))
+					: theme.fg("warning", "working");
+				const count = `${storedDetails.results.length} workers`;
+				return new Text(theme.fg("toolTitle", theme.bold("task ")) + label + theme.fg("muted", ` · ${count}`), 0, 0);
 			}
 
-			if (!storedDetails?.workerId) return new Text(body, 0, 0);
-
-			if (context.toolCallId) registerWorkerToolCall(storedDetails.workerId, context.toolCallId);
+			if (!storedDetails?.workerId) {
+				const body = stored.content?.[0]?.type === "text" ? stored.content[0].text : "";
+				return new Text(body, 0, 0);
+			}
 
 			const live = workers.get(storedDetails.workerId);
 			const completed = completedWorkers.get(storedDetails.workerId);
 			const details = resolveTaskDetails(storedDetails, live ? buildTaskDetails(live) : undefined, completed);
-			if (!details) return new Text(body, 0, 0);
+			if (!details) return new Text("", 0, 0);
 
-			const text = showExpanded
-				? formatWorkerResultExpanded(details, body, theme, context.isError, getWorkerShortcutIndex)
-				: formatWorkerResultCollapsed(details, body, theme, getWorkerShortcutIndex);
-			return new Text(text, 0, 0);
+			const isRunning = details.status === "running";
+			const isFailed = details.status === "failed";
+			const statusLabel = isRunning
+				? theme.fg("warning", "working")
+				: (isFailed ? theme.fg("error", "worked") : theme.fg("success", "worked"));
+			const desc = details.description || storedDetails.workerId;
+			const duration = details.durationMs ? theme.fg("dim", ` · ${formatDuration(details.durationMs)}`) : "";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("task ")) + statusLabel + theme.fg("muted", ` · ${desc}`) + duration,
+				0, 0,
+			);
 		},
 		async execute(_id, params: RawTaskParams, signal, onUpdate, ctx) {
 			if (!multitaskEnabled) {
