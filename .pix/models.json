@@ -1,0 +1,29 @@
+{
+  "providers": {
+    "anyone-ai": {
+      "baseUrl": "https://api.anyone.ai/v1",
+      "api": "openai-responses",
+      "apiKey": "ANYONE_AI_API_KEY",
+      "models": [
+        {
+          "id": "gpt-5.5",
+          "name": "GPT-5.5 (Anyone AI)",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": "none",
+            "xhigh": "xhigh"
+          },
+          "input": ["text", "image"],
+          "contextWindow": 272000,
+          "maxTokens": 128000,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

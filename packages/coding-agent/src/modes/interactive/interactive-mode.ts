@@ -789,7 +789,7 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.PI_OFFLINE) {
+		if (process.env.PIX_OFFLINE) {
 			return [];
 		}
 
@@ -885,7 +885,7 @@ export class InteractiveMode {
 	}
 
 	private reportInstallTelemetry(version: string): void {
-		if (process.env.PI_OFFLINE) {
+		if (process.env.PIX_OFFLINE) {
 			return;
 		}
 

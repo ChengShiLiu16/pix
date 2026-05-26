@@ -47,14 +47,14 @@ export class AssistantMessageComponent extends Container {
 
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
-		if (this.lastMessage) {
+		if (this.lastMessage && this.contentContainer) {
 			this.updateContent(this.lastMessage);
 		}
 	}
 
 	setHiddenThinkingLabel(label: string): void {
 		this.hiddenThinkingLabel = label;
-		if (this.lastMessage) {
+		if (this.lastMessage && this.contentContainer) {
 			this.updateContent(this.lastMessage);
 		}
 	}
@@ -72,6 +72,7 @@ export class AssistantMessageComponent extends Container {
 
 	updateContent(message: AssistantMessage): void {
 		this.lastMessage = message;
+		if (!this.contentContainer) return;
 
 		// Clear content container
 		this.contentContainer.clear();

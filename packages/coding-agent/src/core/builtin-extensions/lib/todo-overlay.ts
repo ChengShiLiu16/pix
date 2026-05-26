@@ -1,0 +1,153 @@
+import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import type { Theme } from "../../../modes/interactive/theme/theme.ts";
+import type { ExtensionUIContext } from "../../index.ts";
+import { countByStatus, type TodoItem, type TodoState } from "./todo-state.ts";
+
+export const WIDGET_ID = "todo-list";
+export const MAX_WIDGET_LINES = 12;
+
+function overlayGlyph(status: TodoItem["status"], theme: Theme): string {
+	switch (status) {
+		case "pending":
+			return theme.fg("dim", "●");
+		case "in_progress":
+			return theme.fg("warning", "◐");
+		case "completed":
+			return theme.fg("success", "✓");
+	}
+}
+
+function formatTaskLine(task: TodoItem, theme: Theme): string {
+	const glyph = overlayGlyph(task.status, theme);
+	const subjectColor = task.status === "completed" ? "dim" : "text";
+	let subject = theme.fg(subjectColor, task.text);
+	if (task.status === "completed") {
+		subject = theme.strikethrough(subject);
+	}
+	let line = `${glyph} ${subject}`;
+	if (task.status === "in_progress" && task.activeForm) {
+		line += ` ${theme.fg("dim", `(${task.activeForm})`)}`;
+	}
+	return line;
+}
+
+function selectVisibleTasks(state: TodoState): TodoItem[] {
+	return state.todos.filter((t) => t.status !== "completed");
+}
+
+function buildLayout(tasks: TodoItem[], maxBodyLines: number): { visible: TodoItem[]; hidden: number } {
+	if (tasks.length <= maxBodyLines) {
+		return { visible: tasks, hidden: 0 };
+	}
+	return {
+		visible: tasks.slice(0, maxBodyLines),
+		hidden: tasks.length - maxBodyLines,
+	};
+}
+
+export class TodoOverlay {
+	private uiCtx: ExtensionUIContext | undefined;
+	private widgetRegistered = false;
+	private tui: TUI | undefined;
+	private getState: () => TodoState;
+	private completedFlash: TodoItem[] = [];
+	private completedFlashTimer: ReturnType<typeof setTimeout> | undefined;
+
+	constructor(getState: () => TodoState) {
+		this.getState = getState;
+	}
+
+	setUICtx(ctx: ExtensionUIContext): void {
+		if (ctx !== this.uiCtx) {
+			this.uiCtx = ctx;
+			this.widgetRegistered = false;
+			this.tui = undefined;
+		}
+	}
+
+	update(): void {
+		if (!this.uiCtx) return;
+		const state = this.getState();
+		const open = selectVisibleTasks(state);
+
+		if (open.length === 0 && this.completedFlash.length === 0) {
+			if (this.widgetRegistered) {
+				this.uiCtx.setWidget(WIDGET_ID, undefined);
+				this.widgetRegistered = false;
+				this.tui = undefined;
+			}
+			return;
+		}
+
+		if (!this.widgetRegistered) {
+			this.uiCtx.setWidget(
+				WIDGET_ID,
+				(tui, theme) => {
+					this.tui = tui;
+					return {
+						render: (width: number) => this.renderWidget(theme, width),
+						invalidate: () => {
+							this.widgetRegistered = false;
+							this.tui = undefined;
+						},
+					};
+				},
+				{ placement: "aboveEditor" },
+			);
+			this.widgetRegistered = true;
+		} else {
+			this.tui?.requestRender();
+		}
+	}
+
+	flashCompleted(tasks: TodoItem[]): void {
+		if (tasks.length === 0) return;
+		this.completedFlash = tasks;
+		if (this.completedFlashTimer) clearTimeout(this.completedFlashTimer);
+		this.completedFlashTimer = setTimeout(() => {
+			this.completedFlash = [];
+			this.update();
+		}, 3000);
+		this.update();
+	}
+
+	dispose(): void {
+		if (this.completedFlashTimer) clearTimeout(this.completedFlashTimer);
+		if (this.uiCtx) this.uiCtx.setWidget(WIDGET_ID, undefined);
+		this.widgetRegistered = false;
+		this.tui = undefined;
+		this.uiCtx = undefined;
+		this.completedFlash = [];
+	}
+
+	private renderWidget(theme: Theme, width: number): string[] {
+		const state = this.getState();
+		const open = selectVisibleTasks(state);
+		const tasks = open.length > 0 ? open : this.completedFlash;
+		if (tasks.length === 0) return [];
+
+		const truncate = (line: string): string => truncateToWidth(line, width, "…");
+		const counts = countByStatus(state);
+		const hasActive = state.todos.some((t) => t.status === "in_progress");
+		const headingColor = hasActive ? "accent" : "dim";
+		const headingIcon = hasActive ? "◐" : "●";
+		const heading = truncate(
+			`${theme.fg(headingColor, headingIcon)} ${theme.fg(headingColor, `计划 · ${counts.completed}/${counts.total}`)}`,
+		);
+
+		const lines: string[] = [heading];
+		const layout = buildLayout(tasks, MAX_WIDGET_LINES - 1);
+		for (const task of layout.visible) {
+			lines.push(truncate(`${theme.fg("dim", "├─")} ${formatTaskLine(task, theme)}`));
+		}
+
+		if (layout.hidden === 0) {
+			const last = lines.length - 1;
+			lines[last] = lines[last]!.replace("├─", "└─");
+			return lines;
+		}
+
+		lines.push(truncate(`${theme.fg("dim", "└─")} ${theme.fg("dim", `+${layout.hidden} more`)}`));
+		return lines;
+	}
+}

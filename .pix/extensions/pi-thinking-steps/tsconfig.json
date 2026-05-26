@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "paths": {
+      "@earendil-works/pi-ai": ["../lib/test-mocks/pi-ai.ts"],
+      "@earendil-works/pi-coding-agent": ["../lib/test-mocks/pi-coding-agent.ts"],
+      "@earendil-works/pi-tui": ["../lib/test-mocks/pi-tui.ts"]
+    }
+  },
+  "include": [
+    "*.ts",
+    "test/**/*.ts",
+    "types/**/*.d.ts",
+    "../lib/markdown-render.ts",
+    "../lib/test-mocks/*.ts"
+  ]
+}

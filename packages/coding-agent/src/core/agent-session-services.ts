@@ -4,6 +4,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";
+import { builtinExtensionFactories } from "./builtin-extensions/index.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { DefaultResourceLoader, type DefaultResourceLoaderOptions, type ResourceLoader } from "./resource-loader.ts";
@@ -140,6 +141,7 @@ export async function createAgentSessionServices(
 		cwd,
 		agentDir,
 		settingsManager,
+		extensionFactories: [...builtinExtensionFactories, ...(options.resourceLoaderOptions?.extensionFactories ?? [])],
 	});
 	await resourceLoader.reload();
 

@@ -5,7 +5,7 @@
  * working indicator shown while pi is streaming a response.
  *
  * Usage:
- *   pi --extension examples/extensions/working-indicator.ts
+ *   pix --extension examples/extensions/working-indicator.ts
  *
  * Commands:
  *   /working-indicator           Show current mode

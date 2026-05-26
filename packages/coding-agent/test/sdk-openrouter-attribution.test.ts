@@ -27,15 +27,15 @@ describe("createAgentSession OpenRouter attribution headers", () => {
 		agentDir = join(tempDir, "agent");
 		mkdirSync(cwd, { recursive: true });
 		mkdirSync(agentDir, { recursive: true });
-		originalTelemetryEnv = process.env.PI_TELEMETRY;
-		delete process.env.PI_TELEMETRY;
+		originalTelemetryEnv = process.env.PIX_TELEMETRY;
+		delete process.env.PIX_TELEMETRY;
 	});
 
 	afterEach(() => {
 		if (originalTelemetryEnv === undefined) {
-			delete process.env.PI_TELEMETRY;
+			delete process.env.PIX_TELEMETRY;
 		} else {
-			process.env.PI_TELEMETRY = originalTelemetryEnv;
+			process.env.PIX_TELEMETRY = originalTelemetryEnv;
 		}
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true, force: true });

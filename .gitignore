@@ -36,6 +36,9 @@ out.html
 packages/coding-agent/binaries/
 todo.md
 plans/
-.pi/hf-sessions/
-.pi/hf-sessions-backup/
+.pix/hf-sessions/
+.pix/hf-sessions-backup/
+.pix/extensions/web-tools/node_modules/
+.pix/extensions/lib/test-mocks/
 collect.sh
+.pix/auth.json

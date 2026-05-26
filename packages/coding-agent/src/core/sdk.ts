@@ -34,7 +34,7 @@ import {
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
 	cwd?: string;
-	/** Global config directory. Default: ~/.pi/agent */
+	/** Global config directory. Default: ~/.pix/agent */
 	agentDir?: string;
 
 	/** Auth storage for credentials. Default: AuthStorage.create(agentDir/auth.json) */
@@ -60,7 +60,7 @@ export interface CreateAgentSessionOptions {
 	/**
 	 * Optional allowlist of tool names.
 	 *
-	 * When omitted, pi enables the default built-in tools (read, bash, edit, write)
+	 * When omitted, pix enables the default built-in tools (read, bash, edit, write)
 	 * and leaves extension/custom tools enabled unless `noTools` changes that default.
 	 * When provided, only the listed tool names are enabled.
 	 */
@@ -135,7 +135,7 @@ function getAttributionHeaders(
 		sessionId &&
 		(model.provider === "opencode" || model.provider === "opencode-go" || model.baseUrl.includes("opencode.ai"))
 	) {
-		return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+		return { "x-opencode-session": sessionId, "x-opencode-client": "pix" };
 	}
 
 	if (!isInstallTelemetryEnabled(settingsManager)) {
@@ -145,7 +145,7 @@ function getAttributionHeaders(
 	if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
 		return {
 			"HTTP-Referer": "https://pi.dev",
-			"X-OpenRouter-Title": "pi",
+			"X-OpenRouter-Title": "pix",
 			"X-OpenRouter-Categories": "cli-agent",
 		};
 	}
@@ -157,7 +157,7 @@ function getAttributionHeaders(
 		model.baseUrl.includes("gateway.ai.cloudflare.com")
 	) {
 		return {
-			"User-Agent": "pi-coding-agent",
+			"User-Agent": "pix-coding-agent",
 		};
 	}
 

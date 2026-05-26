@@ -431,9 +431,11 @@ function getBuiltinThemes(): Record<string, ThemeJson> {
 		const themesDir = getThemesDir();
 		const darkPath = path.join(themesDir, "dark.json");
 		const lightPath = path.join(themesDir, "light.json");
+		const noBgDarkPath = path.join(themesDir, "no-bg-dark.json");
 		BUILTIN_THEMES = {
 			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
 			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
+			"no-bg-dark": JSON.parse(fs.readFileSync(noBgDarkPath, "utf-8")) as ThemeJson,
 		};
 	}
 	return BUILTIN_THEMES;
