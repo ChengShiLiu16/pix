@@ -88,7 +88,7 @@ function displaySearchPath(p: string, maxLen = 120): string {
 }
 
 function shortPattern(p: string): string {
-	return p.length <= 50 ? p : p.slice(0, 47) + "...";
+	return p.length <= 50 ? p : `${p.slice(0, 47)}...`;
 }
 
 function formatSearchLabel(search: SearchItem): string {
@@ -206,11 +206,11 @@ export function builtin(pi: ExtensionAPI) {
 			},
 			renderResult(result, { expanded }, theme, context) {
 				const args = context.args as GrepManyInput;
-				let searches: SearchItem[];
+				let _searches: SearchItem[];
 				try {
-					searches = normalizeSearches(args);
+					_searches = normalizeSearches(args);
 				} catch {
-					searches = [];
+					_searches = [];
 				}
 				const body = extractText(result.content as Content[]);
 				if (!expanded) {

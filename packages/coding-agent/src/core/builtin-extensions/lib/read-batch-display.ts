@@ -149,7 +149,7 @@ function makeReadRange(offset?: number, limit?: number): ReadRange {
 /** Ranges for one read_many path — offset only when requested and the read succeeded. */
 function resolveReadManyPathRanges(offset?: number, limit?: number, file?: { isError?: boolean }): ReadRange[] {
 	if (!hasReadRangeParams(offset, limit)) return [];
-	if (file && file.isError) return [];
+	if (file?.isError) return [];
 	if (file) return [makeReadRange(offset, limit)];
 	// Before per-file results arrive, don't paint the global offset on every path.
 	return [];

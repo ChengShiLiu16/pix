@@ -2,8 +2,10 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import { getAgentDir } from "../../../config.ts";
-import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
-import { formatEditorInputRenderLines, type EditorInputThemeLike } from "../../../core/builtin-extensions/lib/editor-input-style.ts";
+import {
+	type EditorInputThemeLike,
+	formatEditorInputRenderLines,
+} from "../../../core/builtin-extensions/lib/editor-input-style.ts";
 import {
 	createInputHistoryFile,
 	INPUT_HISTORY_LIMIT,
@@ -11,6 +13,7 @@ import {
 	parseInputHistoryFile,
 	recordInputHistoryEntry,
 } from "../../../core/builtin-extensions/lib/persistent-input-history.ts";
+import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
 import { theme } from "../theme/theme.ts";
 
 // ---------------------------------------------------------------------------
@@ -23,7 +26,9 @@ type HistoryStore = {
 };
 
 function hasErrorCode(error: unknown, code: string): boolean {
-	return typeof error === "object" && error !== null && "code" in error && (error as Record<string, unknown>).code === code;
+	return (
+		typeof error === "object" && error !== null && "code" in error && (error as Record<string, unknown>).code === code
+	);
 }
 
 function createHistoryStore(historyPath: string): HistoryStore {
@@ -76,7 +81,9 @@ function createHistoryStore(historyPath: string): HistoryStore {
 }
 
 function getEditorHistory(editor: { history?: unknown }): string[] {
-	return Array.isArray((editor as Record<string, unknown>).history) ? ((editor as Record<string, unknown>).history as string[]) : [];
+	return Array.isArray((editor as Record<string, unknown>).history)
+		? ((editor as Record<string, unknown>).history as string[])
+		: [];
 }
 
 function setEditorHistory(editor: { history?: unknown; historyIndex?: unknown }, entries: readonly string[]): void {

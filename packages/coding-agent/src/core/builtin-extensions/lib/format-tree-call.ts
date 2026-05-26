@@ -36,7 +36,7 @@ export function formatTreeCall(theme: ThemeLike, header: string, items: string[]
 	let line = theme.fg("toolTitle", theme.bold(header));
 	for (let index = 0; index < items.length; index++) {
 		const connector = index === items.length - 1 ? "└─" : "├─";
-		line += "\n" + theme.fg("dim", ` ${connector} `) + formatToolDetail(items[index] ?? "");
+		line += `\n${theme.fg("dim", ` ${connector} `)}${formatToolDetail(items[index] ?? "")}`;
 	}
 	return new Text(line, 0, 0);
 }
@@ -69,8 +69,8 @@ export function displayFullPath(p: string, maxLen = 120): string {
 	const shortened = shortenPath(abs);
 	if (shortened.length <= maxLen) return shortened;
 	const parts = shortened.split("/");
-	if (parts.length <= 3) return shortened.slice(0, maxLen - 1) + "…";
-	return "..." + "/" + parts.slice(-3).join("/");
+	if (parts.length <= 3) return `${shortened.slice(0, maxLen - 1)}…`;
+	return `.../${parts.slice(-3).join("/")}`;
 }
 
 export function displayPath(p: string, maxLen = 120): string {
@@ -78,6 +78,6 @@ export function displayPath(p: string, maxLen = 120): string {
 	const shortened = pathForDisplay(p);
 	if (shortened.length <= maxLen) return shortened;
 	const parts = shortened.split("/");
-	if (parts.length <= 3) return shortened.slice(0, maxLen - 1) + "…";
-	return "..." + "/" + parts.slice(-3).join("/");
+	if (parts.length <= 3) return `${shortened.slice(0, maxLen - 1)}…`;
+	return `.../${parts.slice(-3).join("/")}`;
 }

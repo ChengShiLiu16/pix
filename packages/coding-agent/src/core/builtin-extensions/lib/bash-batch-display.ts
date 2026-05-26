@@ -201,10 +201,10 @@ export function recordBashToolCall(toolCallId: string, command: string): void {
 function truncateOneLine(text: string, maxLen = 120): string {
 	const oneLine = text.split(/\r?\n/)[0] || text;
 	if (oneLine.length <= maxLen) return oneLine;
-	return oneLine.slice(0, maxLen - 1) + "…";
+	return `${oneLine.slice(0, maxLen - 1)}…`;
 }
 
-export function formatBashCommandForDisplay(command: string, theme: ThemeLike): string {
+export function formatBashCommandForDisplay(command: string, _theme: ThemeLike): string {
 	return truncateOneLine(command);
 }
 

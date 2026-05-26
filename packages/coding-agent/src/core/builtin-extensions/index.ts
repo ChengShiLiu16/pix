@@ -25,9 +25,13 @@ import { builtin as gitCheckpoint } from "./git-checkpoint.ts";
 import { builtin as grepMany } from "./grep-many.ts";
 import { builtin as lsMany } from "./ls-many.ts";
 import { builtin as piHealth } from "./pi-health.ts";
+import { builtin as promptUrlWidget } from "./prompt-url-widget.ts";
 import { builtin as readMany } from "./read-many.ts";
+import { builtin as subagentLite } from "./subagent-lite/index.ts";
 import { builtin as themeColor } from "./theme-color.ts";
 import { builtin as todoTracker } from "./todo-tracker.ts";
+import { builtin as tps } from "./tps.ts";
+import { builtin as webTools } from "./web-tools/index.ts";
 
 /**
  * All built-in extension factories, in load order.
@@ -45,6 +49,10 @@ export const builtinExtensionFactories: ExtensionFactory[] = [
 	grepMany,
 	lsMany,
 	piHealth,
+	promptUrlWidget,
 	readMany,
+	subagentLite,
 	themeColor,
+	tps,
+	webTools,
 ];

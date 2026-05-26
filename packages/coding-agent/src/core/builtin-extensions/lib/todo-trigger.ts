@@ -49,7 +49,7 @@ const MULTI_TASK_PHRASES: Array<{ pattern: RegExp; label: string; weight: number
 ];
 
 function countMatches(text: string, pattern: RegExp): number {
-	const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
+	const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
 	return [...text.matchAll(re)].length;
 }
 

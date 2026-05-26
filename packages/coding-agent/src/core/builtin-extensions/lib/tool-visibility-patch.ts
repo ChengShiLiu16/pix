@@ -160,10 +160,10 @@ function setPatchState(state: PatchState | undefined): void {
 	getPatchStateRoot()[PATCH_STATE_KEY] = state;
 }
 
-function truncateOneLine(text: string, maxLen = 120): string {
+function _truncateOneLine(text: string, maxLen = 120): string {
 	const oneLine = text.split(/\r?\n/)[0] || text;
 	if (oneLine.length <= maxLen) return oneLine;
-	return oneLine.slice(0, maxLen - 1) + "…";
+	return `${oneLine.slice(0, maxLen - 1)}…`;
 }
 
 /** Args carry enough detail to render (includes historical reload before setArgsComplete). */
@@ -304,7 +304,11 @@ export function shouldHideUntilBatchReady(
 	return false;
 }
 
-export function shouldHidePreBatchShell(toolName: string, toolCallId: string | undefined, argsComplete: boolean): boolean {
+export function shouldHidePreBatchShell(
+	toolName: string,
+	toolCallId: string | undefined,
+	argsComplete: boolean,
+): boolean {
 	if (!toolCallId || argsComplete) return false;
 	if (toolName === "bash") return !isInBashBatch(toolCallId);
 	if (toolName === "read" || toolName === "read_many") return !isInReadBatch(toolCallId);

@@ -1,14 +1,14 @@
 import type { AssistantMessage, ThinkingContent } from "@earendil-works/pi-ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
-import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import {
 	isAssistantMessagePartial,
 	renderNarrativeMarkdown,
 	syncAssistantMarkdownStreamingState,
 } from "../../../core/builtin-extensions/lib/markdown-render.ts";
 import { ThinkingStepsComponent } from "../../../core/builtin-extensions/thinking-steps/render.ts";
-import { getActiveThinkingState, getCurrentThinkingScopeKey, getThinkingStepsMode } from "../../../core/builtin-extensions/thinking-steps/state.ts";
+import { getCurrentThinkingScopeKey } from "../../../core/builtin-extensions/thinking-steps/state.ts";
 import type { ThinkingSourceBlock, ThinkingThemeLike } from "../../../core/builtin-extensions/thinking-steps/types.ts";
+import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
@@ -115,9 +115,7 @@ export class AssistantMessageComponent extends Container {
 		const firstThinkingIndex = thinkingBlocks[0]?.contentIndex;
 		const hasVisibleTextAfterThinking =
 			firstThinkingIndex !== undefined &&
-			message.content
-				.slice(firstThinkingIndex + 1)
-				.some((c) => c.type === "text" && /\S/u.test(c.text));
+			message.content.slice(firstThinkingIndex + 1).some((c) => c.type === "text" && /\S/u.test(c.text));
 
 		// Markdown-assistant: track streaming vs finalized state
 		syncAssistantMarkdownStreamingState(message);
@@ -210,6 +208,6 @@ export class AssistantMessageComponent extends Container {
  * Resolve the thinking message scope key for the given message.
  * Uses the same logic as the thinking-steps state module.
  */
-function resolveThinkingMessageScope(message: AssistantMessage): string | undefined {
+function resolveThinkingMessageScope(_message: AssistantMessage): string | undefined {
 	return getCurrentThinkingScopeKey() || undefined;
 }

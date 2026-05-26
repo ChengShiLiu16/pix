@@ -116,10 +116,10 @@ function formatLsCall(args: { path?: string; limit?: number }, theme: ThemeLike,
 	return formatTreeCall(theme, "List", [detail]);
 }
 
-function truncateOneLine(text: string, maxLen = 80): string {
+function _truncateOneLine(text: string, maxLen = 80): string {
 	const oneLine = text.split(/\r?\n/)[0] || text;
 	if (oneLine.length <= maxLen) return oneLine;
-	return oneLine.slice(0, maxLen - 1) + "…";
+	return `${oneLine.slice(0, maxLen - 1)}…`;
 }
 
 function formatBashCall(
