@@ -1,13 +1,12 @@
 /**
  * subagent-lite — minimal Cursor-style multitask for Pi.
- * Toggle: /multitask | View worker: Ctrl+1..9 (macOS) or Alt+1..9, /view-worker <id>
- * Full-screen worker view opens in less/more (q to exit). Reload: /reload
+ * Toggle: /multitask | Reload: /reload
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Key, Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../../index.ts";
 import { findAgent, loadAgents } from "./lib/agents.ts";
@@ -17,7 +16,6 @@ import {
 	buildTaskDisabledReason,
 	buildToggleMessage,
 	buildWorkerCompleteFollowUp,
-	buildWorkerViewDisabledReason,
 	COORDINATOR_BLOCKED_TOOLS,
 	MAX_BACKGROUND,
 	TASK_DESCRIPTION,
@@ -35,40 +33,18 @@ import {
 	type WorkerRunMetrics,
 } from "./lib/spawn.ts";
 import {
-	clearWorkerExpandState,
-	isWorkerExpanded,
-	listWorkerIds,
-	registerWorkerToolCall,
-	resolveWorkerToolCallId,
-	toggleWorkerExpand,
-} from "./lib/task-expand.ts";
-import {
 	buildMissingPromptError,
 	normalizeTaskItem,
 	type RawTaskParams,
 	resolveTaskPrompt,
 } from "./lib/task-params.ts";
 import {
-	formatParallelTaskResultCollapsed,
-	formatParallelTaskResultExpanded,
-	formatWorkerResultCollapsed,
-	formatWorkerResultExpanded,
 	isParallelTaskDetails,
 	type ParallelTaskDetails,
 	resolveTaskDetails,
 	type TaskDetails,
 } from "./lib/task-render.ts";
-import {
-	formatWorkerShortcutKey,
-	IS_DARWIN,
-	MAX_WORKER_SHORTCUTS,
-	orderWorkerIdsMostRecentFirst,
-	resolveWorkerShortcutIndex,
-	selectWorkerIdByShortcutIndex,
-	workerViewShortcutKey,
-} from "./lib/worker-shortcuts.ts";
 import { createWorkerStreamParser, getFinalOutput } from "./lib/worker-stream.ts";
-import { clearWorkerViewState, isWorkerViewOpen, openWorkerViewById } from "./lib/worker-view.ts";
 
 const WIDGET_ID = "subagent-lite";
 const STATE_TYPE = "subagent-lite-state";
@@ -98,8 +74,6 @@ interface SubprocessResult {
 	metrics: WorkerRunMetrics;
 	subResults: TaskDetails["subResults"];
 }
-
-export type { TaskDetails } from "./lib/task-render.ts";
 
 const TaskItem = Type.Object({
 	prompt: Type.Optional(
@@ -257,12 +231,6 @@ function hydrateTaskDetails(details: TaskDetails): TaskDetails {
 	return { ...details, subResults };
 }
 
-function _hydrateWorkerRecord(rec: WorkerRecord): WorkerRecord {
-	if (!rec.subResults?.length) return rec;
-	const hydrated = hydrateTaskDetails(buildTaskDetails(rec));
-	return { ...rec, subResults: hydrated.subResults };
-}
-
 function buildTaskDetails(rec: WorkerRecord): TaskDetails {
 	return {
 		workerId: rec.id,
@@ -284,7 +252,6 @@ export function builtin(pi: ExtensionAPI) {
 	const completedWorkers = new Map<string, TaskDetails>();
 	const toolCallInvalidators = new Map<string, () => void>();
 	let widgetCtx: ExtensionContext | null = null;
-	let terminalInputUnsub: (() => void) | undefined;
 	let multitaskEnabled = true;
 	let backgroundRunning = 0;
 
@@ -303,38 +270,6 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	};
 
-	const getWorkerDetails = (workerId: string): TaskDetails | undefined => {
-		const live = workers.get(workerId);
-		if (live) return hydrateTaskDetails(buildTaskDetails(live));
-		const completed = completedWorkers.get(workerId);
-		return completed ? hydrateTaskDetails(completed) : undefined;
-	};
-
-	const listAllWorkerIds = (): string[] => {
-		const ids: string[] = [];
-		const seen = new Set<string>();
-		for (const id of listWorkerIds()) {
-			if (!seen.has(id)) {
-				seen.add(id);
-				ids.push(id);
-			}
-		}
-		for (const id of completedWorkers.keys()) {
-			if (!seen.has(id)) {
-				seen.add(id);
-				ids.push(id);
-			}
-		}
-		return ids;
-	};
-
-	const listWorkersMostRecentFirst = (): string[] => orderWorkerIdsMostRecentFirst(listAllWorkerIds());
-
-	const getWorkerShortcutIndex = (workerId: string): number | undefined =>
-		resolveWorkerShortcutIndex(listWorkersMostRecentFirst(), workerId);
-
-	const hasExistingWorkers = (): boolean => listAllWorkerIds().length > 0;
-
 	/** Keep coordinator prompts/tool schema out of the model when Multitask is OFF. */
 	const syncTaskToolAvailability = () => {
 		const active = pi.getActiveTools();
@@ -346,37 +281,10 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	};
 
-	const canOpenWorkerView = (): boolean => multitaskEnabled || hasExistingWorkers();
-
-	const notifyWorkerViewBlocked = (ctx: ExtensionContext) => {
-		const msg = buildWorkerViewDisabledReason();
-		if (ctx.hasUI) ctx.ui.notify(msg, "warning");
-		else console.warn(msg);
-	};
-
-	const openWorkerView = async (ctx: ExtensionContext, workerId?: string) => {
-		if (!canOpenWorkerView()) {
-			notifyWorkerViewBlocked(ctx);
-			return;
-		}
-		await openWorkerViewById(ctx, workerId, getWorkerDetails, listAllWorkerIds);
-	};
-
-	const setupTerminalInput = (ctx: ExtensionContext) => {
-		terminalInputUnsub?.();
-		terminalInputUnsub = undefined;
-		if (!ctx.hasUI) return;
-		terminalInputUnsub = ctx.ui.onTerminalInput((_data) => {
-			if (isWorkerViewOpen()) return { consume: true };
-			return undefined;
-		});
-	};
-
 	const updateWidget = () => {
 		if (!widgetCtx) return;
 		const list = [...workers.values()].slice(-5);
 		const running = list.filter((w) => w.status === "running").length;
-		const shortcutIds = listWorkersMostRecentFirst();
 		if (!list.length) {
 			widgetCtx.ui.setWidget(WIDGET_ID, multitaskEnabled ? [`⚡ 0 running · Multitask ON`] : []);
 			return;
@@ -386,8 +294,6 @@ export function builtin(pi: ExtensionAPI) {
 		for (const w of list) {
 			const icon = w.status === "running" ? "●" : w.status === "done" ? "✓" : "✗";
 			let line = `┃ ${icon} ${(w.description || w.agent).slice(0, 48)}`;
-			const shortcutIndex = resolveWorkerShortcutIndex(shortcutIds, w.id);
-			if (shortcutIndex != null) line += ` · ${formatWorkerShortcutKey(shortcutIndex)}`;
 			if (w.status !== "running" && w.durationMs != null) {
 				const timing =
 					w.status === "failed" ? `failed in ${formatDuration(w.durationMs)}` : formatDuration(w.durationMs);
@@ -428,7 +334,6 @@ export function builtin(pi: ExtensionAPI) {
 			toolCallId,
 		};
 		workers.set(id, rec);
-		if (toolCallId) registerWorkerToolCall(id, toolCallId);
 		updateWidget();
 		const promptFile = await writePromptFile(agent.name, agent.systemPrompt);
 		const args = buildSpawnArgs(agent, prompt, { systemPromptFile: promptFile, sessionModel });
@@ -529,11 +434,8 @@ export function builtin(pi: ExtensionAPI) {
 		workers = new Map();
 		completedWorkers.clear();
 		toolCallInvalidators.clear();
-		clearWorkerExpandState();
-		clearWorkerViewState();
 		backgroundRunning = 0;
 		widgetCtx = ctx;
-		setupTerminalInput(ctx);
 		multitaskEnabled = false;
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type === "custom" && entry.customType === STATE_TYPE && (entry.data as any)?.multitaskEnabled) {
@@ -543,12 +445,6 @@ export function builtin(pi: ExtensionAPI) {
 				const details = hydrateTaskDetails(entry.data as TaskDetails);
 				if (details?.workerId) completedWorkers.set(details.workerId, details);
 			}
-			if (entry.type === "message" && entry.message?.role === "toolResult" && entry.message?.toolName === "task") {
-				const details = (entry.message as { details?: TaskDetails }).details;
-				if (details?.workerId) {
-					registerWorkerToolCall(details.workerId, entry.message.toolCallId ?? details.workerId);
-				}
-			}
 		}
 		syncTaskToolAvailability();
 		updateWidget();
@@ -557,8 +453,6 @@ export function builtin(pi: ExtensionAPI) {
 	pi.on("session_shutdown", async (_e, ctx) => {
 		for (const w of workers.values()) w.proc?.kill("SIGTERM");
 		workers.clear();
-		terminalInputUnsub?.();
-		terminalInputUnsub = undefined;
 		ctx.ui.setWidget(WIDGET_ID, []);
 		widgetCtx = null;
 	});
@@ -575,72 +469,6 @@ export function builtin(pi: ExtensionAPI) {
 		if (!multitaskEnabled || event.toolName === "task" || !COORDINATOR_BLOCKED_TOOLS.has(event.toolName)) return;
 		return { block: true, reason: buildBlockedToolReason(event.toolName) };
 	});
-
-	pi.registerCommand("view-worker", {
-		description: "Open worker output full-screen in pager (/view-worker abc123)",
-		getArgumentCompletions: (prefix) =>
-			listAllWorkerIds()
-				.filter((id) => id.startsWith(prefix))
-				.map((id) => ({ value: id, label: `#${id}` })),
-		handler: async (args, ctx) => {
-			await openWorkerView(ctx, args.trim() || undefined);
-		},
-	});
-
-	pi.registerCommand("expand-worker", {
-		description: "Toggle expand for one worker task result (/expand-worker abc123)",
-		getArgumentCompletions: (prefix) =>
-			listAllWorkerIds()
-				.filter((id) => id.startsWith(prefix))
-				.map((id) => ({ value: id, label: `#${id}` })),
-		handler: async (args, ctx) => {
-			const workerId = args.trim();
-			const toolCallId = resolveWorkerToolCallId(workerId || undefined);
-			if (!toolCallId) {
-				const msg = workerId ? `Unknown worker #${workerId}` : "No worker task results yet";
-				if (ctx.hasUI) ctx.ui.notify(msg, "warning");
-				else console.warn(msg);
-				return;
-			}
-			const expanded = toggleWorkerExpand(toolCallId);
-			invalidateToolCall(toolCallId);
-			const resolvedId = workerId || listWorkerIds().find((id) => resolveWorkerToolCallId(id) === toolCallId) || "?";
-			const msg = `Worker #${resolvedId} ${expanded ? "expanded" : "collapsed"}`;
-			if (ctx.hasUI) ctx.ui.notify(msg, "info");
-			else console.info(msg);
-		},
-	});
-
-	if (!IS_DARWIN) {
-		pi.registerShortcut(Key.alt("o"), {
-			description: `Open full-screen pager for the most recent worker (same as ${formatWorkerShortcutKey(1)})`,
-			handler: async (ctx) => {
-				if (!canOpenWorkerView()) {
-					notifyWorkerViewBlocked(ctx);
-					return;
-				}
-				await openWorkerView(ctx);
-			},
-		});
-	}
-
-	for (let index = 1; index <= MAX_WORKER_SHORTCUTS; index++) {
-		pi.registerShortcut(workerViewShortcutKey(String(index)), {
-			description: `Open worker #${index} by recency (${formatWorkerShortcutKey(1)} = most recent)`,
-			handler: async (ctx) => {
-				if (!canOpenWorkerView()) {
-					notifyWorkerViewBlocked(ctx);
-					return;
-				}
-				const targetId = selectWorkerIdByShortcutIndex(listWorkersMostRecentFirst(), index);
-				if (!targetId) {
-					if (ctx.hasUI) ctx.ui.notify(`No worker at ${formatWorkerShortcutKey(index)}`, "warning");
-					return;
-				}
-				await openWorkerView(ctx, targetId);
-			},
-		});
-	}
 
 	pi.registerCommand("multitask", {
 		description: "Toggle multitask coordinator mode",
