@@ -1,8 +1,114 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import { getAgentDir } from "../../../config.ts";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.ts";
+import { formatEditorInputRenderLines, type EditorInputThemeLike } from "../../../core/builtin-extensions/lib/editor-input-style.ts";
+import {
+	createInputHistoryFile,
+	INPUT_HISTORY_LIMIT,
+	mergeInputHistoryEntries,
+	parseInputHistoryFile,
+	recordInputHistoryEntry,
+} from "../../../core/builtin-extensions/lib/persistent-input-history.ts";
+import { theme } from "../theme/theme.ts";
+
+// ---------------------------------------------------------------------------
+// Persistent input history store
+// ---------------------------------------------------------------------------
+
+type HistoryStore = {
+	load(): string[];
+	record(text: string, fallbackEntries: readonly unknown[]): string[];
+};
+
+function hasErrorCode(error: unknown, code: string): boolean {
+	return typeof error === "object" && error !== null && "code" in error && (error as Record<string, unknown>).code === code;
+}
+
+function createHistoryStore(historyPath: string): HistoryStore {
+	let loaded = false;
+	let entries: string[] = [];
+
+	function load(): string[] {
+		if (loaded) return entries;
+		loaded = true;
+
+		try {
+			entries = parseInputHistoryFile(JSON.parse(readFileSync(historyPath, "utf8")));
+		} catch (error) {
+			if (hasErrorCode(error, "ENOENT")) {
+				entries = [];
+				return entries;
+			}
+			console.warn(
+				"[persistent-input-history] failed to load history:",
+				error instanceof Error ? error.message : error,
+			);
+			entries = [];
+		}
+
+		return entries;
+	}
+
+	function save(nextEntries: readonly string[]): void {
+		entries = [...nextEntries];
+		loaded = true;
+		try {
+			writeFileSync(historyPath, `${JSON.stringify(createInputHistoryFile(entries), null, "\t")}\n`, "utf8");
+		} catch (error) {
+			console.warn(
+				"[persistent-input-history] failed to save history:",
+				error instanceof Error ? error.message : error,
+			);
+		}
+	}
+
+	return {
+		load,
+		record(text, fallbackEntries) {
+			const mergedEntries = mergeInputHistoryEntries(load(), fallbackEntries, INPUT_HISTORY_LIMIT);
+			const nextEntries = recordInputHistoryEntry(mergedEntries, text, INPUT_HISTORY_LIMIT);
+			save(nextEntries);
+			return nextEntries;
+		},
+	};
+}
+
+function getEditorHistory(editor: { history?: unknown }): string[] {
+	return Array.isArray((editor as Record<string, unknown>).history) ? ((editor as Record<string, unknown>).history as string[]) : [];
+}
+
+function setEditorHistory(editor: { history?: unknown; historyIndex?: unknown }, entries: readonly string[]): void {
+	(editor as Record<string, unknown>).history = [...entries];
+	if (!Number.isInteger((editor as Record<string, unknown>).historyIndex)) {
+		(editor as Record<string, unknown>).historyIndex = -1;
+	}
+}
+
+function syncEditorHistory(editor: { history?: unknown; historyIndex?: unknown }, store: HistoryStore): void {
+	const nextEntries = mergeInputHistoryEntries(store.load(), getEditorHistory(editor), INPUT_HISTORY_LIMIT);
+	setEditorHistory(editor, nextEntries);
+}
+
+// Shared history store singleton (lazy-initialized)
+let sharedHistoryStore: HistoryStore | undefined;
+
+function getHistoryStore(): HistoryStore {
+	if (!sharedHistoryStore) {
+		const historyPath = join(getAgentDir(), "input-history.json");
+		sharedHistoryStore = createHistoryStore(historyPath);
+	}
+	return sharedHistoryStore;
+}
+
+// ---------------------------------------------------------------------------
+// CustomEditor
+// ---------------------------------------------------------------------------
 
 /**
  * Custom editor that handles app-level keybindings for coding-agent.
+ * Includes built-in editor-input-style and persistent-input-history behavior.
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
@@ -15,9 +121,22 @@ export class CustomEditor extends Editor {
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
 
-	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
-		super(tui, theme, options);
+	constructor(tui: TUI, editorTheme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
+		super(tui, editorTheme, options);
 		this.keybindings = keybindings;
+
+		// Set up persistent history: override navigateHistory at the instance level
+		// so that before each navigation the in-memory history is synced from the
+		// persistent store (picks up entries from other sessions/processes).
+		const store = getHistoryStore();
+		const originalNavigateHistory = (Editor.prototype as unknown as Record<string, unknown>).navigateHistory as (
+			this: Editor,
+			direction: number,
+		) => void;
+		(this as unknown as Record<string, unknown>).navigateHistory = (direction: number): void => {
+			syncEditorHistory(this as unknown as Record<string, unknown>, store);
+			originalNavigateHistory.call(this, direction);
+		};
 	}
 
 	/**
@@ -76,5 +195,31 @@ export class CustomEditor extends Editor {
 
 		// Pass to parent for editor handling
 		super.handleInput(data);
+	}
+
+	// -----------------------------------------------------------------------
+	// Built-in editor-input-style: apply user accent colouring to render output
+	// -----------------------------------------------------------------------
+
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		return formatEditorInputRenderLines(lines, theme as EditorInputThemeLike);
+	}
+
+	// -----------------------------------------------------------------------
+	// Built-in persistent-input-history: persist addToHistory to file
+	// -----------------------------------------------------------------------
+
+	override addToHistory(text: string): void {
+		const trimmed = text.trim();
+		if (!trimmed) {
+			super.addToHistory(text);
+			return;
+		}
+
+		super.addToHistory(trimmed);
+		const store = getHistoryStore();
+		const nextEntries = store.record(text, getEditorHistory(this as unknown as Record<string, unknown>));
+		setEditorHistory(this as unknown as Record<string, unknown>, nextEntries);
 	}
 }

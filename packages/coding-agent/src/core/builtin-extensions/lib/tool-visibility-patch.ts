@@ -88,7 +88,7 @@ type ToolExecutionInstance = ToolExecutionPrototype & {
 };
 
 /** Tools that must never be hidden by empty-content heuristics (except batch dedup). */
-const NEVER_HIDE = new Set([
+export const NEVER_HIDE = new Set([
 	"bash",
 	"read",
 	"read_many",
@@ -102,7 +102,7 @@ const NEVER_HIDE = new Set([
 ]);
 
 /** Tools fully suppressed in chat — state shown in aboveEditor widget. */
-const HIDE_ENTIRELY = new Set(["todo_manage"]);
+export const HIDE_ENTIRELY = new Set(["todo_manage"]);
 
 const TOOL_HEADERS: Record<string, string> = {
 	bash: BASH_HEADER,
@@ -117,7 +117,7 @@ const TOOL_HEADERS: Record<string, string> = {
 	edit: "Edit",
 };
 
-const COMPACT_RENDER_EMPTY_TOOLS = new Set(["bash", "read", "read_many"]);
+export const COMPACT_RENDER_EMPTY_TOOLS = new Set(["bash", "read", "read_many"]);
 
 export type UpdateDisplayDecision =
 	| "hide-entirely"
@@ -278,7 +278,7 @@ function shouldHideCompactToolUntilArgsComplete(toolName: string, argsComplete: 
 	return toolName === "ls" || toolName === "ls_many" || toolName === "grep" || toolName === "grep_many";
 }
 
-function shouldHideUntilBatchReady(
+export function shouldHideUntilBatchReady(
 	toolName: string,
 	toolCallId: string | undefined,
 	args: ToolArgs,
@@ -304,7 +304,7 @@ function shouldHideUntilBatchReady(
 	return false;
 }
 
-function shouldHidePreBatchShell(toolName: string, toolCallId: string | undefined, argsComplete: boolean): boolean {
+export function shouldHidePreBatchShell(toolName: string, toolCallId: string | undefined, argsComplete: boolean): boolean {
 	if (!toolCallId || argsComplete) return false;
 	if (toolName === "bash") return !isInBashBatch(toolCallId);
 	if (toolName === "read" || toolName === "read_many") return !isInReadBatch(toolCallId);
@@ -341,7 +341,7 @@ function compactToolBlockSpacing(instance: ToolExecutionInstance): void {
 	lead?.setLines?.(1);
 }
 
-function ensureCompactSpacing(instance: ToolExecutionInstance): void {
+export function ensureCompactSpacing(instance: ToolExecutionInstance): void {
 	if (SPACED_INSTANCES.has(instance)) return;
 	SPACED_INSTANCES.add(instance);
 	compactToolBlockSpacing(instance);
@@ -422,7 +422,7 @@ function renderBatchFallback(self: ToolExecutionPrototype, theme: ThemeLike): bo
 	return false;
 }
 
-function shouldRenderNeverHideFallback(
+export function shouldRenderNeverHideFallback(
 	toolName: string,
 	argsComplete: boolean,
 	args: ToolArgs,

@@ -1,13 +1,39 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ThinkingContent } from "@earendil-works/pi-ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
+import {
+	isAssistantMessagePartial,
+	renderNarrativeMarkdown,
+	syncAssistantMarkdownStreamingState,
+} from "../../../core/builtin-extensions/lib/markdown-render.ts";
+import { ThinkingStepsComponent } from "../../../core/builtin-extensions/thinking-steps/render.ts";
+import { getActiveThinkingState, getCurrentThinkingScopeKey, getThinkingStepsMode } from "../../../core/builtin-extensions/thinking-steps/state.ts";
+import type { ThinkingSourceBlock, ThinkingThemeLike } from "../../../core/builtin-extensions/thinking-steps/types.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
+function hasVisibleThinking(content: ThinkingContent): boolean {
+	return content.redacted === true || /\S/u.test(content.thinking);
+}
+
+function collectThinkingBlocks(message: AssistantMessage): ThinkingSourceBlock[] {
+	const blocks: ThinkingSourceBlock[] = [];
+	message.content.forEach((content, index) => {
+		if (content.type !== "thinking") return;
+		if (!hasVisibleThinking(content)) return;
+		blocks.push({ contentIndex: index, text: content.thinking, redacted: content.redacted });
+	});
+	return blocks;
+}
+
 /**
- * Component that renders a complete assistant message
+ * Component that renders a complete assistant message.
+ *
+ * Integrates thinking-steps rendering (collapsed/summary/expanded modes)
+ * and markdown-assistant streaming behavior directly in source code
+ * instead of via runtime monkey-patching.
  */
 export class AssistantMessageComponent extends Container {
 	private contentContainer: Container;
@@ -74,56 +100,93 @@ export class AssistantMessageComponent extends Container {
 		this.lastMessage = message;
 		if (!this.contentContainer) return;
 
-		// Clear content container
 		this.contentContainer.clear();
 
-		const hasVisibleContent = message.content.some(
-			(c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()),
-		);
+		// Collect thinking blocks for thinking-steps rendering
+		const thinkingBlocks = collectThinkingBlocks(message);
+		const hasVisibleContent =
+			message.content.some((c) => c.type === "text" && c.text.trim()) || thinkingBlocks.length > 0;
 
 		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
 		}
 
+		// Determine if there is visible text after the first thinking block
+		const firstThinkingIndex = thinkingBlocks[0]?.contentIndex;
+		const hasVisibleTextAfterThinking =
+			firstThinkingIndex !== undefined &&
+			message.content
+				.slice(firstThinkingIndex + 1)
+				.some((c) => c.type === "text" && /\S/u.test(c.text));
+
+		// Markdown-assistant: track streaming vs finalized state
+		syncAssistantMarkdownStreamingState(message);
+		const isPartial = isAssistantMessagePartial(message);
+
+		let renderedThinking = false;
+
 		// Render content in order
 		for (let i = 0; i < message.content.length; i++) {
 			const content = message.content[i];
+
 			if (content.type === "text" && content.text.trim()) {
-				// Assistant text messages with no background - trim the text
-				// Set paddingY=0 to avoid extra spacing before tool executions
-				this.contentContainer.addChild(new Markdown(content.text.trim(), 1, 0, this.markdownTheme));
-			} else if (content.type === "thinking" && content.thinking.trim()) {
-				// Add spacing only when another visible assistant content block follows.
-				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
+				// Use narrative markdown rendering (streaming=plain text, finalized=formatted markdown)
+				this.contentContainer.addChild(
+					renderNarrativeMarkdown(content.text, {
+						message,
+						isPartial,
+						markdownTheme: this.markdownTheme,
+						terminalTheme: theme as any,
+						paddingX: 1,
+						paddingY: 0,
+					}),
+				);
+				continue;
+			}
+
+			if (content.type === "thinking" && thinkingBlocks.length > 0 && !renderedThinking) {
+				// Thinking-steps: use ThinkingStepsComponent for structured rendering
+				const scopeKey = resolveThinkingMessageScope(message);
+				this.contentContainer.addChild(
+					new ThinkingStepsComponent(
+						theme as unknown as ThinkingThemeLike,
+						message.timestamp,
+						thinkingBlocks,
+						scopeKey,
+					),
+				);
+				renderedThinking = true;
+				if (hasVisibleTextAfterThinking) {
+					this.contentContainer.addChild(new Spacer(1));
+				}
+				continue;
+			}
+
+			// Fallback: non-visible thinking blocks when thinking-steps already rendered
+			if (content.type === "thinking" && content.thinking.trim() && !renderedThinking) {
 				const hasVisibleContentAfter = message.content
 					.slice(i + 1)
 					.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
 
 				if (this.hideThinkingBlock) {
-					// Show static thinking label when hidden
 					this.contentContainer.addChild(
 						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), 1, 0),
 					);
-					if (hasVisibleContentAfter) {
-						this.contentContainer.addChild(new Spacer(1));
-					}
 				} else {
-					// Thinking traces in thinkingText color, italic
 					this.contentContainer.addChild(
 						new Markdown(content.thinking.trim(), 1, 0, this.markdownTheme, {
 							color: (text: string) => theme.fg("thinkingText", text),
 							italic: true,
 						}),
 					);
-					if (hasVisibleContentAfter) {
-						this.contentContainer.addChild(new Spacer(1));
-					}
+				}
+				if (hasVisibleContentAfter) {
+					this.contentContainer.addChild(new Spacer(1));
 				}
 			}
 		}
 
 		// Check if aborted - show after partial content
-		// But only if there are no tool calls (tool execution components will show the error)
 		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
 		this.hasToolCalls = hasToolCalls;
 		if (!hasToolCalls) {
@@ -132,11 +195,7 @@ export class AssistantMessageComponent extends Container {
 					message.errorMessage && message.errorMessage !== "Request was aborted"
 						? message.errorMessage
 						: "Operation aborted";
-				if (hasVisibleContent) {
-					this.contentContainer.addChild(new Spacer(1));
-				} else {
-					this.contentContainer.addChild(new Spacer(1));
-				}
+				this.contentContainer.addChild(new Spacer(1));
 				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), 1, 0));
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
@@ -145,4 +204,12 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 	}
+}
+
+/**
+ * Resolve the thinking message scope key for the given message.
+ * Uses the same logic as the thinking-steps state module.
+ */
+function resolveThinkingMessageScope(message: AssistantMessage): string | undefined {
+	return getCurrentThinkingScopeKey() || undefined;
 }
