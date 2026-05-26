@@ -9,10 +9,10 @@ const PREFERENCE_FILE_NAME = "thinking-steps.json";
 function getPreferencePath(scope: PersistedThinkingStepsPreferenceScope, cwd: string): string {
 	if (scope === "global") {
 		const homePath = process.env.HOME?.trim() || homedir();
-		return join(homePath, ".pi", "agent", "state", PREFERENCE_FILE_NAME);
+		return join(homePath, ".pix", "agent", "state", PREFERENCE_FILE_NAME);
 	}
 
-	return join(cwd, ".pi", PREFERENCE_FILE_NAME);
+	return join(cwd, ".pix", PREFERENCE_FILE_NAME);
 }
 
 function errorMessage(error: unknown): string {

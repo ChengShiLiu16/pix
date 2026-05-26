@@ -47,7 +47,7 @@ const schema = Type.Object({
 
 function statePath(): string {
 	const home = process.env.HOME?.trim() || homedir();
-	return join(home, ".pi", "agent", "state", ASK_USER_QUESTION_STATE_FILE);
+	return join(home, ".pix", "agent", "state", ASK_USER_QUESTION_STATE_FILE);
 }
 
 function errorMessage(error: unknown): string {
