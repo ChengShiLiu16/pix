@@ -164,6 +164,7 @@ export function builtin(pi: ExtensionAPI) {
 			label: "read many",
 			description:
 				"Read multiple files in one tool call. Use files[] with per-file offset/limit when batching files of different sizes or paginating one large file alongside others.",
+			renderShell: "self",
 			promptSnippet: "Read multiple files in one call",
 			promptGuidelines: [
 				"Always batch ALL files you need to read into a single read_many call (up to 10 files). NEVER make multiple read_many or read calls when you can combine them into one.",

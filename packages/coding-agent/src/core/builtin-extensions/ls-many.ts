@@ -1,9 +1,9 @@
-import { Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@earendil-works/pix-tui";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import { createLsToolDefinition, type LsToolDetails } from "../../index.ts";
 import { isLsManyArgsRenderable, LS_MANY_MAX_PATHS } from "./lib/batch-limits.ts";
-import { displayPath, formatToolPath, formatTreeCall, type ThemeLike } from "./lib/format-tree-call.ts";
+import { displayFullPath, formatToolPath, formatTreeCall, type ThemeLike } from "./lib/format-tree-call.ts";
 import {
 	buildResultText,
 	contentHasMarkedErrors,
@@ -52,12 +52,12 @@ function renderTextWithMarkedErrors(text: string, theme: { fg(name: string, text
 	return new Text(colored, 0, 0);
 }
 
-function displayListPath(p: string, maxLen = 120): string {
+function displayListPath(p: string): string {
 	if (!p || p === ".") return ".";
-	return displayPath(p, maxLen);
+	return displayFullPath(p);
 }
 
-function formatLsManyCall(args: LsManyInput, theme: ThemeLike, failed = 0, argsComplete = false): Text {
+function formatLsManyCall(args: LsManyInput, theme: ThemeLike, failed = 0, argsComplete = false): Container | Text {
 	if (!argsComplete || !isLsManyArgsRenderable(args)) return new Text("", 0, 0);
 	const paths = args.paths ?? [];
 	const count = paths.length;
@@ -100,6 +100,7 @@ export function builtin(pi: ExtensionAPI) {
 			label: "list many",
 			description:
 				"List multiple directories in one tool call. Use this instead of several ls calls when you need to inspect two or more directories together.",
+			renderShell: "self",
 			promptSnippet: "List multiple directories in one call",
 			promptGuidelines: [
 				`Always batch ALL directories you need to list into a single ls_many call (up to ${LS_MANY_MAX_PATHS} paths). NEVER make multiple ls_many or ls calls when you can combine them into one.`,

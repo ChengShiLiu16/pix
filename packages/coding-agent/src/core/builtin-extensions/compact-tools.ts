@@ -82,7 +82,7 @@ function formatReadCall(
 	invalidate?: () => void,
 	truncation?: { outputLines?: number; totalLines?: number },
 	argsComplete = false,
-): Text {
+): Container | Text {
 	return formatReadCallWithBatch(args, theme, toolCallId, invalidate, truncation, argsComplete);
 }
 
@@ -90,7 +90,7 @@ function formatGrepCall(
 	args: { pattern?: string; path?: string; glob?: string; limit?: number },
 	theme: ThemeLike,
 	argsComplete = false,
-): Text {
+): Container | Text {
 	if (!argsComplete) return EMPTY;
 	const pattern = args?.pattern ?? "";
 	const path = shortenPath(args?.path || ".");
@@ -100,7 +100,7 @@ function formatGrepCall(
 	return formatTreeCall(theme, "Grep", [detail]);
 }
 
-function formatFindCall(args: { pattern?: string; path?: string; limit?: number }, theme: ThemeLike): Text {
+function formatFindCall(args: { pattern?: string; path?: string; limit?: number }, theme: ThemeLike): Container | Text {
 	const pattern = args?.pattern ?? "";
 	const path = shortenPath(args?.path || ".");
 	let detail = theme.fg("accent", pattern) + theme.fg("toolOutput", " in ") + formatToolPath(path);
@@ -108,7 +108,11 @@ function formatFindCall(args: { pattern?: string; path?: string; limit?: number 
 	return formatTreeCall(theme, "Find", [detail]);
 }
 
-function formatLsCall(args: { path?: string; limit?: number }, theme: ThemeLike, argsComplete = false): Text {
+function formatLsCall(
+	args: { path?: string; limit?: number },
+	theme: ThemeLike,
+	argsComplete = false,
+): Container | Text {
 	if (!argsComplete) return EMPTY;
 	const path = shortenPath(args?.path || ".");
 	let detail = formatToolPath(path);
@@ -128,7 +132,7 @@ function formatBashCall(
 	toolCallId?: string,
 	invalidate?: () => void,
 	argsComplete = false,
-): Text {
+): Container | Text {
 	return formatBashCallWithBatch(args, theme, toolCallId, invalidate, argsComplete);
 }
 
@@ -187,6 +191,7 @@ export function builtin(pi: ExtensionAPI) {
 			description: readDef.description,
 			parameters: readDef.parameters,
 			promptSnippet: readDef.promptSnippet,
+			renderShell: "self",
 			promptGuidelines: [
 				...(readDef.promptGuidelines ?? []),
 				"Use read_many instead of multiple read calls when reading two or more files.",
@@ -262,6 +267,7 @@ export function builtin(pi: ExtensionAPI) {
 			description: bashDef.description,
 			parameters: bashDef.parameters,
 			promptSnippet: bashDef.promptSnippet,
+			renderShell: "self",
 			promptGuidelines: [
 				...(bashDef.promptGuidelines ?? []),
 				"Do not use bash for routine listing, reading, or searching; use ls/ls_many, read/read_many, or grep/grep_many instead.",
@@ -312,6 +318,7 @@ export function builtin(pi: ExtensionAPI) {
 			description: grepDef.description,
 			parameters: grepDef.parameters,
 			promptSnippet: grepDef.promptSnippet,
+			renderShell: "self",
 			promptGuidelines: grepDef.promptGuidelines,
 			execute: grepDef.execute,
 			renderCall(args: any, theme: any, context: any) {
@@ -341,6 +348,7 @@ export function builtin(pi: ExtensionAPI) {
 			description: findDef.description,
 			parameters: findDef.parameters,
 			promptSnippet: findDef.promptSnippet,
+			renderShell: "self",
 			promptGuidelines: findDef.promptGuidelines,
 			execute: findDef.execute,
 			renderCall(args: any, theme: any) {
@@ -374,6 +382,7 @@ export function builtin(pi: ExtensionAPI) {
 			description: lsDef.description,
 			parameters: lsDef.parameters,
 			promptSnippet: lsDef.promptSnippet,
+			renderShell: "self",
 			promptGuidelines: [
 				...(lsDef.promptGuidelines ?? []),
 				"Use ls_many instead of multiple ls calls when listing two or more directories.",

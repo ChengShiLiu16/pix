@@ -7,7 +7,7 @@
  */
 import { homedir } from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@earendil-works/pix-tui";
 import {
 	bindCategoryContentBreak,
 	registerBatchInvalidator,
@@ -461,7 +461,7 @@ function formatReadDetailLine(entry: ReadBatchEntry, theme: ThemeLike): string {
 	return line;
 }
 
-export function formatAggregatedReadCall(theme: ThemeLike, toolCallId: string, failed?: number): Text {
+export function formatAggregatedReadCall(theme: ThemeLike, toolCallId: string, failed?: number): Container | Text {
 	const entries = getReadBatch(toolCallId);
 	if (entries.length === 0) return EMPTY_READ_TEXT;
 	const n = entries.length;
@@ -479,7 +479,7 @@ export function formatReadCallWithBatch(
 	invalidate?: () => void,
 	truncation?: { outputLines?: number; totalLines?: number },
 	argsComplete = false,
-): Text {
+): Container | Text {
 	if (toolCallId && invalidate) {
 		registerReadInvalidator(toolCallId, invalidate);
 	}
@@ -545,7 +545,7 @@ export function formatReadManyCallWithBatch(
 	fileTruncations?: ReadManyFileResult[],
 	argsComplete = false,
 	aggregateTruncated?: boolean,
-): Text {
+): Container | Text {
 	if (toolCallId && invalidate) {
 		registerReadInvalidator(toolCallId, invalidate);
 	}

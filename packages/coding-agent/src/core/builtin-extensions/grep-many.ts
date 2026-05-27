@@ -1,4 +1,4 @@
-import { Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@earendil-works/pix-tui";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import { createGrepToolDefinition, type GrepToolDetails } from "../../index.ts";
@@ -82,9 +82,9 @@ function renderTextWithMarkedErrors(text: string, theme: { fg(name: string, text
 	return new Text(colored, 0, 0);
 }
 
-function displaySearchPath(p: string, maxLen = 120): string {
+function displaySearchPath(p: string): string {
 	if (!p || p === ".") return ".";
-	return displayPath(p, maxLen);
+	return displayPath(p);
 }
 
 function shortPattern(p: string): string {
@@ -97,7 +97,12 @@ function formatSearchLabel(search: SearchItem): string {
 	return search.path ? `/${pattern}/ in ${formatToolPath(path)}` : `/${pattern}/`;
 }
 
-function formatGrepManyCall(searches: SearchItem[], theme: ThemeLike, failed = 0, argsComplete = false): Text {
+function formatGrepManyCall(
+	searches: SearchItem[],
+	theme: ThemeLike,
+	failed = 0,
+	argsComplete = false,
+): Container | Text {
 	if (!argsComplete) return new Text("", 0, 0);
 	const count = searches.length;
 	let header = `Grep (${count})`;
@@ -137,6 +142,7 @@ export function builtin(pi: ExtensionAPI) {
 			label: "search many",
 			description:
 				"Run multiple grep searches in one tool call. Pass a `searches` array of {pattern, path?, ...} objects (preferred), or a single top-level `pattern` (+ optional path/glob) for one search.",
+			renderShell: "self",
 			promptSnippet: "Run multiple searches in one call (searches: [...])",
 			promptGuidelines: [
 				"Always batch ALL searches into a single grep_many call (up to 10 searches). NEVER make multiple grep_many or grep calls when you can combine them into one.",

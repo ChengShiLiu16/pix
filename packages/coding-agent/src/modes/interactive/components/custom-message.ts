@@ -42,18 +42,6 @@ export class CustomMessageComponent extends Container {
 		}
 	}
 
-	public isExpanded(): boolean {
-		return this._expanded;
-	}
-
-	/** Callback invoked when this component is clicked. */
-	public onClick?: () => void;
-
-	handleClick(_col: number, _row: number, _width: number): boolean {
-		this.onClick?.();
-		return true;
-	}
-
 	override invalidate(): void {
 		super.invalidate();
 		this.rebuild();

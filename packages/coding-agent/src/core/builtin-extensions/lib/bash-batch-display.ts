@@ -4,7 +4,7 @@
  * Group assignment happens ONLY via recordBashToolCall (activity-widget tool_call).
  * renderCall is read-only for grouping; updateDisplay patch renders aggregated batches.
  */
-import { Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@earendil-works/pix-tui";
 import {
 	bindCategoryContentBreak,
 	registerBatchInvalidator,
@@ -239,7 +239,7 @@ export function bashCallShouldHideUntilReady(toolCallId: string, context: BashVi
 	return !hasContent;
 }
 
-export function formatAggregatedBashCall(theme: ThemeLike, toolCallId: string): Text {
+export function formatAggregatedBashCall(theme: ThemeLike, toolCallId: string): Container | Text {
 	const batch = getGroupEntries(toolCallId);
 	const items = batch.filter((e) => Boolean(e.command)).map((e) => formatBashDetailLine(e.command, theme));
 	if (items.length === 0) return EMPTY_BASH_TEXT;
@@ -252,7 +252,7 @@ export function formatBashCallWithBatch(
 	toolCallId?: string,
 	invalidate?: () => void,
 	argsComplete = false,
-): Text {
+): Container | Text {
 	if (toolCallId && invalidate) {
 		registerBashInvalidator(toolCallId, invalidate);
 	}

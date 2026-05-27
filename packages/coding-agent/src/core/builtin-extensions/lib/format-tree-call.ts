@@ -1,10 +1,11 @@
 /**
- * Shared tree-style tool call header: emoji + name + todo-style detail lines.
+ * Shared tree-style tool call header: name + detail lines with tree connectors.
+ * Each item is always a single line (truncated with … if too long).
  */
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { Text } from "@earendil-works/pix-tui";
+import { type Component, Container, truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
 
 export type ThemeLike = {
 	fg(name: string, text: string): string;
@@ -18,7 +19,7 @@ const OSC_PATTERN = /\u001b\][^\u0007]*\u0007/g;
 
 let sessionCwd = "";
 
-/** Session cwd for relative display paths (P3). */
+/** Session cwd for relative display paths. */
 export function setDisplayCwd(cwd: string): void {
 	sessionCwd = cwd;
 }
@@ -27,18 +28,45 @@ export function formatToolPath(path: string): string {
 	return path ? `${TOOL_PATH_COLOR}${path}${ANSI_RESET}` : path;
 }
 
+/** Truncate a string (which may contain ANSI codes) to a maximum visible width, appending … if needed. */
+function truncateVisible(text: string, maxWidth: number): string {
+	if (maxWidth <= 0) return text;
+	if (visibleWidth(text) <= maxWidth) return text;
+	return `${truncateToWidth(text, maxWidth - 1, "")}${TOOL_PATH_COLOR}…${ANSI_RESET}`;
+}
+
 function formatToolDetail(item: string): string {
 	const plain = item.replace(OSC_PATTERN, "").replace(ANSI_PATTERN, "");
 	return plain ? formatToolPath(plain) : plain;
 }
 
-export function formatTreeCall(theme: ThemeLike, header: string, items: string[]): Text {
-	let line = theme.fg("toolTitle", theme.bold(header));
+/** Single-line component that truncates at render time instead of wrapping. */
+class SingleLineText implements Component {
+	private text: string;
+	constructor(text: string) {
+		this.text = text;
+	}
+	render(width: number): string[] {
+		if (!this.text || this.text.trim() === "") return [""];
+		const truncated = truncateVisible(this.text, width);
+		const visible = visibleWidth(truncated);
+		const padding = Math.max(0, width - visible);
+		return [truncated + " ".repeat(padding)];
+	}
+	invalidate(): void {}
+	handleInput?(_data: string): void {}
+}
+
+export function formatTreeCall(theme: ThemeLike, header: string, items: string[]): Container {
+	const container = new Container();
+	container.addChild(new SingleLineText(theme.fg("toolTitle", theme.bold(header))));
 	for (let index = 0; index < items.length; index++) {
 		const connector = index === items.length - 1 ? "└─" : "├─";
-		line += `\n${theme.fg("dim", ` ${connector} `)}${formatToolDetail(items[index] ?? "")}`;
+		const prefix = theme.fg("dim", ` ${connector} `);
+		const detail = formatToolDetail(items[index] ?? "");
+		container.addChild(new SingleLineText(`${prefix}${detail}`));
 	}
-	return new Text(line, 0, 0);
+	return container;
 }
 
 export function shortenPath(p: string): string {
@@ -61,23 +89,18 @@ function pathForDisplay(p: string): string {
 	return shortenPath(abs);
 }
 
-/** Absolute path for read/bash batch lines — home shorthand only, never cwd-relative. */
-export function displayFullPath(p: string, maxLen = 120): string {
+/** Absolute path for read/bash batch lines — home shorthand only, never cwd-relative.
+ *  No length truncation here; SingleLineText.render() handles truncation at display time. */
+export function displayFullPath(p: string): string {
 	if (!p) return p;
 	const expanded = p === "~" ? homedir() : p.startsWith("~/") ? resolvePath(homedir(), p.slice(2)) : p;
 	const abs = isAbsolute(expanded) ? resolvePath(expanded) : sessionCwd ? resolvePath(sessionCwd, expanded) : expanded;
-	const shortened = shortenPath(abs);
-	if (shortened.length <= maxLen) return shortened;
-	const parts = shortened.split("/");
-	if (parts.length <= 3) return `${shortened.slice(0, maxLen - 1)}…`;
-	return `.../${parts.slice(-3).join("/")}`;
+	return shortenPath(abs);
 }
 
-export function displayPath(p: string, maxLen = 120): string {
+/** Display path relative to cwd, with ~ shorthand.
+ *  No length truncation here; SingleLineText.render() handles truncation at display time. */
+export function displayPath(p: string): string {
 	if (!p) return p;
-	const shortened = pathForDisplay(p);
-	if (shortened.length <= maxLen) return shortened;
-	const parts = shortened.split("/");
-	if (parts.length <= 3) return `${shortened.slice(0, maxLen - 1)}…`;
-	return `.../${parts.slice(-3).join("/")}`;
+	return pathForDisplay(p);
 }

@@ -51,12 +51,13 @@ export interface LsToolOptions {
 function formatLsCall(
 	args: { path?: string; limit?: number } | undefined,
 	theme: typeof import("../../modes/interactive/theme/theme.ts").theme,
+	cwd: string,
 ): string {
 	const rawPath = str(args?.path);
-	const path = rawPath !== null ? shortenPath(rawPath || ".") : null;
+	const resolvedPath = rawPath !== null ? shortenPath(resolveToCwd(rawPath || ".", cwd)) : null;
 	const limit = args?.limit;
 	const invalidArg = invalidArgText(theme);
-	let text = `${theme.fg("toolTitle", theme.bold("ls"))} ${path === null ? invalidArg : theme.fg("accent", path)}`;
+	let text = `${theme.fg("toolTitle", theme.bold("ls"))} ${resolvedPath === null ? invalidArg : theme.fg("accent", resolvedPath)}`;
 	if (limit !== undefined) {
 		text += theme.fg("toolOutput", ` (limit ${limit})`);
 	}
@@ -171,7 +172,7 @@ export function createLsToolDefinition(
 								// Skip entries we cannot stat.
 								continue;
 							}
-							results.push(entry + suffix);
+							results.push(shortenPath(fullPath) + suffix);
 						}
 
 						signal?.removeEventListener("abort", onAbort);
@@ -213,7 +214,7 @@ export function createLsToolDefinition(
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-			text.setText(formatLsCall(args, theme));
+			text.setText(formatLsCall(args, theme, context.cwd));
 			return text;
 		},
 		renderResult(result, options, theme, context) {
