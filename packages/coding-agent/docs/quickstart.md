@@ -7,7 +7,7 @@ This page gets you from install to a useful first pix session.
 Pix is distributed as an npm package:
 
 ```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+npm install -g --ignore-scripts @earendil-works/pix-coding-agent
 ```
 
 `--ignore-scripts` disables dependency lifecycle scripts during install. Pix does not require install scripts for normal npm installs.
@@ -18,16 +18,16 @@ Use the package manager that installed pix. The curl installer uses npm globally
 
 ```bash
 # curl installer or npm install -g
-npm uninstall -g @earendil-works/pi-coding-agent
+npm uninstall -g @earendil-works/pix-coding-agent
 
 # pnpm
-pnpm remove -g @earendil-works/pi-coding-agent
+pnpm remove -g @earendil-works/pix-coding-agent
 
 # Yarn
-yarn global remove @earendil-works/pi-coding-agent
+yarn global remove @earendil-works/pix-coding-agent
 
 # Bun
-bun uninstall -g @earendil-works/pi-coding-agent
+bun uninstall -g @earendil-works/pix-coding-agent
 ```
 
 Uninstalling pix leaves settings, credentials, sessions, and installed pix packages in `~/.pix/agent/`.

@@ -4,7 +4,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pix-tui";
 
 export type ThemeLike = {
 	fg(name: string, text: string): string;

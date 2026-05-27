@@ -1,4 +1,4 @@
-import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, type MarkdownTheme } from "@earendil-works/pix-tui";
 import chalk from "chalk";
 import { selectConfig } from "./cli/config-selector.ts";
 import {
@@ -87,7 +87,7 @@ function printPackageCommandHelp(command: PackageCommand): void {
 Install a package and add it to settings.
 
 Options:
-  -l, --local    Install project-locally (.pi/settings.json)
+  -l, --local    Install project-locally (.pix/settings.json)
 
 Examples:
   ${APP_NAME} install npm:@foo/bar
@@ -107,7 +107,7 @@ Remove a package and its source from settings.
 Alias: ${APP_NAME} uninstall <source> [-l]
 
 Options:
-  -l, --local    Remove from project settings (.pi/settings.json)
+  -l, --local    Remove from project settings (.pix/settings.json)
 
 Examples:
   ${APP_NAME} remove npm:@foo/bar

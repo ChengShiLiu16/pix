@@ -13,9 +13,9 @@
  *   pix --extension examples/extensions/custom-compaction.ts
  */
 
-import { complete } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { complete } from "@earendil-works/pix-ai";
+import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import { convertToLlm, serializeConversation } from "@earendil-works/pix-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {

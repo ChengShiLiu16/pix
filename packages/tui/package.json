@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-tui",
+	"name": "@earendil-works/pix-tui",
 	"version": "0.75.5",
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"type": "module",

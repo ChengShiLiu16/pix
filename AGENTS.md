@@ -122,18 +122,18 @@ Attribution:
 
 2. **Local smoke test**: build an unpublished release and smoke test from outside the repo:
    ```bash
-   npm run release:local -- --out /tmp/pi-local-release --force
+   npm run release:local -- --out /tmp/pix-local-release --force
    cd /tmp
-   /tmp/pi-local-release/node/pi --help
-   /tmp/pi-local-release/node/pi --version
-   /tmp/pi-local-release/node/pi --list-models
-   /tmp/pi-local-release/node/pi -p "Say exactly: ok"
-   /tmp/pi-local-release/node/pi
-   /tmp/pi-local-release/bun/pi --help
-   /tmp/pi-local-release/bun/pi --version
-   /tmp/pi-local-release/bun/pi --list-models
-   /tmp/pi-local-release/bun/pi -p "Say exactly: ok"
-   /tmp/pi-local-release/bun/pi
+   /tmp/pix-local-release/node/pix --help
+   /tmp/pix-local-release/node/pix --version
+   /tmp/pix-local-release/node/pix --list-models
+   /tmp/pix-local-release/node/pix -p "Say exactly: ok"
+   /tmp/pix-local-release/node/pix
+   /tmp/pix-local-release/bun-install/pix --help
+   /tmp/pix-local-release/bun-install/pix --version
+   /tmp/pix-local-release/bun-install/pix --list-models
+   /tmp/pix-local-release/bun-install/pix -p "Say exactly: ok"
+   /tmp/pix-local-release/bun-install/pix
    ```
 
 3. **Verify npm authentication**: run `npm whoami` before starting the release script. If it fails, stop and tell the user to run `npm login` manually first

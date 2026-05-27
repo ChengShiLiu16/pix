@@ -1,17 +1,17 @@
 {
-	"name": "@earendil-works/pi-coding-agent",
+	"name": "@earendil-works/pix-coding-agent",
 	"version": "0.75.5-pix.3",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
-			"name": "@earendil-works/pi-coding-agent",
+			"name": "@earendil-works/pix-coding-agent",
 			"version": "0.75.5-pix.3",
 			"license": "MIT",
 			"dependencies": {
-				"@earendil-works/pi-agent-core": "^0.75.5",
-				"@earendil-works/pi-ai": "^0.75.5",
-				"@earendil-works/pi-tui": "^0.75.5",
+				"@earendil-works/pix-agent-core": "^0.75.5",
+				"@earendil-works/pix-ai": "^0.75.5",
+				"@earendil-works/pix-tui": "^0.75.5",
 				"@mozilla/readability": "0.6.0",
 				"@silvia-odwyer/photon-node": "0.3.4",
 				"chalk": "5.6.2",
@@ -642,12 +642,12 @@
 				}
 			]
 		},
-		"node_modules/@earendil-works/pi-agent-core": {
+		"node_modules/@earendil-works/pix-agent-core": {
 			"version": "0.75.5",
-			"resolved": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.75.5.tgz",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pix-agent-core/-/pix-agent-core-0.75.5.tgz",
 			"license": "MIT",
 			"dependencies": {
-				"@earendil-works/pi-ai": "^0.75.5",
+				"@earendil-works/pix-ai": "^0.75.5",
 				"ignore": "7.0.5",
 				"typebox": "1.1.38",
 				"yaml": "2.9.0"
@@ -656,9 +656,9 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/pi-ai": {
+		"node_modules/@earendil-works/pix-ai": {
 			"version": "0.75.5",
-			"resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.75.5.tgz",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pix-ai/-/pix-ai-0.75.5.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"@anthropic-ai/sdk": "0.91.1",
@@ -679,9 +679,9 @@
 				"node": ">=22.19.0"
 			}
 		},
-		"node_modules/@earendil-works/pi-tui": {
+		"node_modules/@earendil-works/pix-tui": {
 			"version": "0.75.5",
-			"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.75.5.tgz",
+			"resolved": "https://registry.npmjs.org/@earendil-works/pix-tui/-/pix-tui-0.75.5.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"get-east-asian-width": "1.6.0",

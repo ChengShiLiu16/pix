@@ -1,7 +1,7 @@
 /**
  * Built-in extensions for Pix.
  *
- * These were previously loaded as external extensions from ~/.pi/agent/extensions/.
+ * These were previously loaded as external extensions from ~/.pix/agent/extensions/.
  * Now they are compiled directly into the source for tighter integration and
  * faster startup.
  *

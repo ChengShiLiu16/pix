@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
+import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@earendil-works/pix-tui";
 import { getAgentDir } from "../../../config.ts";
 import {
 	type EditorInputThemeLike,

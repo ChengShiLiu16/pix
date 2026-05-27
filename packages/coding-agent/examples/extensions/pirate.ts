@@ -5,12 +5,12 @@
  * change agent behavior based on extension state.
  *
  * Usage:
- * 1. Copy this file to ~/.pix/agent/extensions/ or your project's .pi/extensions/
+ * 1. Copy this file to ~/.pix/agent/extensions/ or your project's .pix/extensions/
  * 2. Use /pirate to toggle pirate mode
  * 3. When enabled, the agent will respond like a pirate
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
 
 export default function pirateExtension(pi: ExtensionAPI) {
 	let pirateMode = false;

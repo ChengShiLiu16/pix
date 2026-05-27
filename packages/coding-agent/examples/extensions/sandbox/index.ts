@@ -11,9 +11,9 @@
  *
  * Config files (merged, project takes precedence):
  * - ~/.pix/agent/extensions/sandbox.json (global)
- * - <cwd>/.pi/sandbox.json (project-local)
+ * - <cwd>/.pix/sandbox.json (project-local)
  *
- * Example .pi/sandbox.json:
+ * Example .pix/sandbox.json:
  * ```json
  * {
  *   "enabled": true,
@@ -45,8 +45,8 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type BashOperations, createBashTool, getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import { type BashOperations, createBashTool, getAgentDir } from "@earendil-works/pix-coding-agent";
 
 interface SandboxConfig extends SandboxRuntimeConfig {
 	enabled?: boolean;
@@ -77,7 +77,7 @@ const DEFAULT_CONFIG: SandboxConfig = {
 };
 
 function loadConfig(cwd: string): SandboxConfig {
-	const projectConfigPath = join(cwd, ".pi", "sandbox.json");
+	const projectConfigPath = join(cwd, ".pix", "sandbox.json");
 	const globalConfigPath = join(getAgentDir(), "extensions", "sandbox.json");
 
 	let globalConfig: Partial<SandboxConfig> = {};

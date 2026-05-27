@@ -1,5 +1,5 @@
-import type { AssistantMessage, ThinkingContent } from "@earendil-works/pi-ai";
-import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pi-tui";
+import type { AssistantMessage, ThinkingContent } from "@earendil-works/pix-ai";
+import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pix-tui";
 import {
 	isAssistantMessagePartial,
 	renderNarrativeMarkdown,

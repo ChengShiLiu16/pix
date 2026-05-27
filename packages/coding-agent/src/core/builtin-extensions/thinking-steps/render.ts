@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pix-tui";
 import { deriveThinkingSteps } from "./parse.ts";
 import { getActiveThinkingState, getCurrentThinkingScopeKey, getThinkingStepsMode } from "./state.ts";
 import type { DerivedThinkingStep, ThinkingSemanticRole, ThinkingSourceBlock, ThinkingThemeLike } from "./types.ts";

@@ -1709,7 +1709,7 @@ export class DefaultPackageManager implements PackageManager {
 		// Extension packages run inside pi and resolve pi APIs through loader aliases/virtual modules.
 		// Disable peer dependency resolution for managed installs (npm's --legacy-peer-deps, and
 		// equivalent bun/pnpm settings) so package managers do not install or solve host-provided
-		// @earendil-works/pi-* peers. Stale auto-installed pi peers can otherwise block updates.
+		// @earendil-works/pix-* peers. Stale auto-installed pi peers can otherwise block updates.
 		if (packageManagerName === "bun") {
 			return ["install", ...specs, "--cwd", installRoot, "--omit=peer"];
 		}
@@ -2257,7 +2257,7 @@ export class DefaultPackageManager implements PackageManager {
 			}
 		};
 
-		// Project extensions from .pi/
+		// Project extensions from .pix/
 		addResources(
 			"extensions",
 			collectAutoExtensionEntries(projectDirs.extensions),
@@ -2266,7 +2266,7 @@ export class DefaultPackageManager implements PackageManager {
 			projectBaseDir,
 		);
 
-		// Project skills from .pi/
+		// Project skills from .pix/
 		addResources(
 			"skills",
 			collectAutoSkillEntries(projectDirs.skills, "pi"),
@@ -2306,7 +2306,7 @@ export class DefaultPackageManager implements PackageManager {
 			projectBaseDir,
 		);
 
-		// User extensions from ~/.pi/agent/
+		// User extensions from ~/.pix/agent/
 		addResources(
 			"extensions",
 			collectAutoExtensionEntries(userDirs.extensions),
@@ -2315,7 +2315,7 @@ export class DefaultPackageManager implements PackageManager {
 			globalBaseDir,
 		);
 
-		// User skills from ~/.pi/agent/
+		// User skills from ~/.pix/agent/
 		addResources(
 			"skills",
 			collectAutoSkillEntries(userDirs.skills, "pi"),

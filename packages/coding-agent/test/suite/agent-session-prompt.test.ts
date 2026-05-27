@@ -1,8 +1,8 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pi-ai";
+import type { AgentTool } from "@earendil-works/pix-agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pix-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PromptTemplate } from "../../src/core/prompt-templates.ts";

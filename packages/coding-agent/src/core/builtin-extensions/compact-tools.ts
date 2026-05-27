@@ -13,7 +13,7 @@
  *   - result 折叠为空, 展开显示完整内容/diff
  */
 
-import { Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, Spacer, Text } from "@earendil-works/pix-tui";
 import type { ExtensionAPI } from "../../index.ts";
 import {
 	type BashToolDetails,

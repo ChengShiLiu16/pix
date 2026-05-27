@@ -7,7 +7,7 @@
  *
  * Config files (merged, project takes precedence):
  * - ~/.pix/agent/presets.json (global)
- * - <cwd>/.pi/presets.json (project-local)
+ * - <cwd>/.pix/presets.json (project-local)
  *
  * Example presets.json:
  * ```json
@@ -40,10 +40,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text } from "@earendil-works/pi-tui";
+import type { Api, Model } from "@earendil-works/pix-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
+import { DynamicBorder, getAgentDir } from "@earendil-works/pix-coding-agent";
+import { Container, Key, type SelectItem, SelectList, Text } from "@earendil-works/pix-tui";
 
 // Preset configuration
 interface Preset {
@@ -69,7 +69,7 @@ interface PresetsConfig {
  */
 function loadPresets(cwd: string): PresetsConfig {
 	const globalPath = join(getAgentDir(), "presets.json");
-	const projectPath = join(cwd, ".pi", "presets.json");
+	const projectPath = join(cwd, ".pix", "presets.json");
 
 	let globalPresets: PresetsConfig = {};
 	let projectPresets: PresetsConfig = {};
@@ -200,7 +200,7 @@ export default function presetExtension(pi: ExtensionAPI) {
 		const presetNames = Object.keys(presets);
 
 		if (presetNames.length === 0) {
-			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pi/presets.json", "warning");
+			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pix/presets.json", "warning");
 			return;
 		}
 
@@ -308,7 +308,7 @@ export default function presetExtension(pi: ExtensionAPI) {
 	async function cyclePreset(ctx: ExtensionContext): Promise<void> {
 		const presetNames = getPresetOrder();
 		if (presetNames.length === 0) {
-			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pi/presets.json", "warning");
+			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pix/presets.json", "warning");
 			return;
 		}
 

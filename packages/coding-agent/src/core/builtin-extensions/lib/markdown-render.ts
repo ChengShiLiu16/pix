@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { Text, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { AssistantMessage } from "@earendil-works/pix-ai";
+import { Text, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pix-tui";
 
 export type MarkdownTheme = unknown;
 

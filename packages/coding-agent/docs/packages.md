@@ -166,7 +166,7 @@ If no `pix` manifest is present, pix auto-discovers resources from these directo
 
 Third party runtime dependencies belong in `dependencies` in `package.json`. Dependencies that do not register extensions, skills, prompt templates, or themes also belong in `dependencies`. When pix installs a package from npm or git, it runs `npm install`, so those dependencies are installed automatically.
 
-Pix bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui`, `typebox`.
+Pix bundles core packages for extensions and skills. If you import any of these, list them in `peerDependencies` with a `"*"` range and do not bundle them: `@earendil-works/pix-ai`, `@earendil-works/pix-agent-core`, `@earendil-works/pix-coding-agent`, `@earendil-works/pix-tui`, `typebox`.
 
 Other pix packages must be bundled in your tarball. Add them to `dependencies` and `bundledDependencies`, then reference their resources through `node_modules/` paths. Pix loads packages with separate module roots, so separate installs do not collide or share modules.
 

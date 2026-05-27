@@ -1,4 +1,4 @@
-import { Text } from "@earendil-works/pi-tui";
+import { Text } from "@earendil-works/pix-tui";
 import { type Static, Type } from "typebox";
 import type { ExtensionAPI } from "../../../index.ts";
 import { errorMessage } from "./lib/errors.ts";
