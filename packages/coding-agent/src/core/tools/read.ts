@@ -145,7 +145,7 @@ function formatCompactReadCall(
 	args: ReadRenderArgs | undefined,
 	theme: Theme,
 ): string {
-	const expandHint = theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`);
+	const expandHint = theme.fg("dim", ` (click or ${keyText("app.tools.expand")} to expand)`);
 	if (classification.kind === "skill") {
 		return (
 			theme.fg("customMessageLabel", `\x1b[1m[skill]\x1b[22m `) +
@@ -187,7 +187,7 @@ function formatReadResult(
 	const remaining = lines.length - maxLines;
 	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
 	if (remaining > 0) {
-		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")})`;
+		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} click or ${keyHint("app.tools.expand", "to expand")})`;
 	}
 
 	const truncation = result.details?.truncation;

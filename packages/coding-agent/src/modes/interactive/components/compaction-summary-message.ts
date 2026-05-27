@@ -24,6 +24,18 @@ export class CompactionSummaryMessageComponent extends Box {
 		this.updateDisplay();
 	}
 
+	public isExpanded(): boolean {
+		return this.expanded;
+	}
+
+	/** Callback invoked when this component is clicked. */
+	public onClick?: () => void;
+
+	handleClick(_col: number, _row: number, _width: number): boolean {
+		this.onClick?.();
+		return true;
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.updateDisplay();
@@ -48,7 +60,7 @@ export class CompactionSummaryMessageComponent extends Box {
 			this.addChild(
 				new Text(
 					theme.fg("customMessageText", `Compacted from ${tokenStr} tokens (`) +
-						theme.fg("dim", keyText("app.tools.expand")) +
+						theme.fg("dim", `click or ${keyText("app.tools.expand")}`) +
 						theme.fg("customMessageText", " to expand)"),
 					0,
 					0,

@@ -141,6 +141,7 @@ import {
 /** Interface for components that can be expanded/collapsed */
 interface Expandable {
 	setExpanded(expanded: boolean): void;
+	isExpanded(): boolean;
 }
 
 function isExpandable(obj: unknown): obj is Expandable {
@@ -150,6 +151,7 @@ function isExpandable(obj: unknown): obj is Expandable {
 class ExpandableText extends Text implements Expandable {
 	private readonly getCollapsedText: () => string;
 	private readonly getExpandedText: () => string;
+	private _isExpanded: boolean;
 
 	constructor(
 		getCollapsedText: () => string,
@@ -161,10 +163,16 @@ class ExpandableText extends Text implements Expandable {
 		super(expanded ? getExpandedText() : getCollapsedText(), paddingX, paddingY);
 		this.getCollapsedText = getCollapsedText;
 		this.getExpandedText = getExpandedText;
+		this._isExpanded = expanded;
 	}
 
 	setExpanded(expanded: boolean): void {
 		this.setText(expanded ? this.getExpandedText() : this.getCollapsedText());
+		this._isExpanded = expanded;
+	}
+
+	isExpanded(): boolean {
+		return this._isExpanded;
 	}
 }
 
@@ -613,7 +621,7 @@ export class InteractiveMode {
 				hint("app.thinking.cycle", "to cycle thinking level"),
 				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
 				hint("app.model.select", "to select model"),
-				hint("app.tools.expand", "to expand tools"),
+				hint("app.tools.expand", "click or toggle to expand tools"),
 				hint("app.thinking.toggle", "to expand thinking"),
 				hint("app.editor.external", "for external editor"),
 				rawKeyHint("/", "for commands"),
@@ -633,7 +641,7 @@ export class InteractiveMode {
 			].join(theme.fg("muted", " · "));
 			const compactOnboarding = theme.fg(
 				"dim",
-				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
+				`Click or press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
 			);
 			const onboarding = theme.fg(
 				"dim",
@@ -2746,6 +2754,7 @@ export class InteractiveMode {
 									this.sessionManager.getCwd(),
 								);
 								component.setExpanded(this.toolOutputExpanded);
+								this.registerExpandableClick(component);
 								this.chatContainer.addChild(component);
 								this.pendingTools.set(content.id, component);
 							} else {
@@ -2815,6 +2824,7 @@ export class InteractiveMode {
 						this.sessionManager.getCwd(),
 					);
 					component.setExpanded(this.toolOutputExpanded);
+					this.registerExpandableClick(component);
 					this.chatContainer.addChild(component);
 					this.pendingTools.set(event.toolCallId, component);
 				}
@@ -3039,6 +3049,7 @@ export class InteractiveMode {
 					message.truncated ? ({ truncated: true } as TruncationResult) : undefined,
 					message.fullOutputPath,
 				);
+				this.registerExpandableClick(component);
 				this.chatContainer.addChild(component);
 				break;
 			}
@@ -3047,6 +3058,7 @@ export class InteractiveMode {
 					const renderer = this.session.extensionRunner.getMessageRenderer(message.customType);
 					const component = new CustomMessageComponent(message, renderer, this.getMarkdownThemeWithSettings());
 					component.setExpanded(this.toolOutputExpanded);
+					this.registerExpandableClick(component);
 					this.chatContainer.addChild(component);
 				}
 				break;
@@ -3055,14 +3067,16 @@ export class InteractiveMode {
 				this.chatContainer.addChild(new Spacer(1));
 				const component = new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
+				this.registerExpandableClick(component);
 				this.chatContainer.addChild(component);
 				break;
 			}
 			case "branchSummary": {
 				this.chatContainer.addChild(new Spacer(1));
-				const component = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
-				component.setExpanded(this.toolOutputExpanded);
-				this.chatContainer.addChild(component);
+				const branchComponent = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
+				branchComponent.setExpanded(this.toolOutputExpanded);
+				this.registerExpandableClick(branchComponent);
+				this.chatContainer.addChild(branchComponent);
 				break;
 			}
 			case "user": {
@@ -3079,6 +3093,7 @@ export class InteractiveMode {
 							this.getMarkdownThemeWithSettings(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
+						this.registerExpandableClick(component);
 						this.chatContainer.addChild(component);
 						// Render user message separately if present
 						if (skillBlock.userMessage) {
@@ -3156,6 +3171,7 @@ export class InteractiveMode {
 							this.sessionManager.getCwd(),
 						);
 						component.setExpanded(this.toolOutputExpanded);
+						this.registerExpandableClick(component);
 						this.chatContainer.addChild(component);
 
 						if (message.stopReason === "aborted" || message.stopReason === "error") {
@@ -3493,6 +3509,19 @@ export class InteractiveMode {
 			}
 		}
 		this.ui.requestRender();
+	}
+
+	/** Register click-to-toggle on an expandable component that supports click handling. */
+	private registerExpandableClick(
+		component: Component &
+			Expandable & { onClick?: () => void; handleClick?(col: number, row: number, width: number): boolean },
+	): void {
+		if (component.handleClick) {
+			component.onClick = () => {
+				component.setExpanded(!component.isExpanded());
+				this.ui.requestRender();
+			};
+		}
 	}
 
 	private toggleThinkingBlockVisibility(): void {
@@ -5453,6 +5482,7 @@ export class InteractiveMode {
 
 			// Create UI component for display
 			this.bashComponent = new BashExecutionComponent(command, this.ui, excludeFromContext);
+			this.registerExpandableClick(this.bashComponent);
 			if (this.session.isStreaming) {
 				this.pendingMessagesContainer.addChild(this.bashComponent);
 				this.pendingBashComponents.push(this.bashComponent);
@@ -5481,6 +5511,7 @@ export class InteractiveMode {
 		// Normal execution path (possibly with custom operations)
 		const isDeferred = this.session.isStreaming;
 		this.bashComponent = new BashExecutionComponent(command, this.ui, excludeFromContext);
+		this.registerExpandableClick(this.bashComponent);
 
 		if (isDeferred) {
 			// Show in pending area when agent is streaming

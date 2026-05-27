@@ -673,7 +673,7 @@
 				"typebox": "1.1.38"
 			},
 			"bin": {
-				"pi-ai": "./dist/cli.js"
+				"pix-ai": "./dist/cli.js"
 			},
 			"engines": {
 				"node": ">=22.19.0"

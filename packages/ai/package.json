@@ -52,7 +52,7 @@
 		}
 	},
 	"bin": {
-		"pi-ai": "./dist/cli.js"
+		"pix-ai": "./dist/cli.js"
 	},
 	"files": [
 		"dist",

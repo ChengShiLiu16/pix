@@ -25,6 +25,18 @@ export class SkillInvocationMessageComponent extends Box {
 		this.updateDisplay();
 	}
 
+	public isExpanded(): boolean {
+		return this.expanded;
+	}
+
+	/** Callback invoked when this component is clicked. */
+	public onClick?: () => void;
+
+	handleClick(_col: number, _row: number, _width: number): boolean {
+		this.onClick?.();
+		return true;
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.updateDisplay();
@@ -48,7 +60,7 @@ export class SkillInvocationMessageComponent extends Box {
 			const line =
 				theme.fg("customMessageLabel", `\x1b[1m[skill]\x1b[22m `) +
 				theme.fg("customMessageText", this.skillBlock.name) +
-				theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`);
+				theme.fg("dim", ` (click or ${keyText("app.tools.expand")} to expand)`);
 			this.addChild(new Text(line, 0, 0));
 		}
 	}

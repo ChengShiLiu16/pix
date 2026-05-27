@@ -45,6 +45,18 @@ export class ToolExecutionComponent extends Container {
 	private toolCallId: string;
 	private args: any;
 	private expanded = false;
+	public isExpanded(): boolean {
+		return this.expanded;
+	}
+
+	/** Callback invoked when this component is clicked (before toggle). */
+	public onClick?: () => void;
+
+	/** Toggle expanded state on click. */
+	handleClick(_col: number, _row: number, _width: number): boolean {
+		this.onClick?.();
+		return true;
+	}
 	private showImages: boolean;
 	private imageWidthCells: number;
 	private isPartial = true;

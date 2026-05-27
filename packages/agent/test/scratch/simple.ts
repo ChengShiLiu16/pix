@@ -25,7 +25,7 @@ const { skills: sourcedSkills } = await loadSourcedSkills<Source, SourcedSkill>(
 	[
 		source("project", join(env.cwd, ".pix/skills")),
 		source("user", join(homedir(), ".pix/agent/skills")),
-		source("path", join(env.cwd, "../../../pi-skills")),
+		source("path", join(env.cwd, "../../../pix-skills")),
 	],
 	(skill, source) => ({ ...skill, source }),
 );

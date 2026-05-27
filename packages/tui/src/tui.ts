@@ -50,6 +50,15 @@ export interface Component {
 	handleInput?(data: string): void;
 
 	/**
+	 * Optional handler for mouse click events on this component.
+	 * @param col - Column offset within the component (0-based)
+	 * @param row - Row offset within the component (0-based)
+	 * @param width - Viewport width
+	 * @returns true if the click was handled, false to propagate
+	 */
+	handleClick?(col: number, row: number, width: number): boolean;
+
+	/**
 	 * If true, component receives key release events (Kitty protocol).
 	 * Default is false - release events are filtered out.
 	 */
@@ -64,6 +73,14 @@ export interface Component {
 
 type InputListenerResult = { consume?: boolean; data?: string } | undefined;
 type InputListener = (data: string) => InputListenerResult;
+
+/** Parsed SGR mouse event */
+interface MouseEvent {
+	button: number;
+	col: number; // 0-based column
+	row: number; // 0-based row (terminal position)
+	isRelease: boolean;
+}
 
 /**
  * Interface for components that can receive focus and display a hardware cursor.
@@ -231,6 +248,42 @@ export class Container implements Component {
 		}
 		return lines;
 	}
+
+	/**
+	 * Render all children and record each child's line range in the bounds map.
+	 * Recurses into Container children to track nested component positions.
+	 * @param width - Viewport width
+	 * @param bounds - Map to populate with component → line range entries
+	 * @param offset - Starting line offset (for nested containers)
+	 * @returns Array of rendered lines
+	 */
+	renderWithBounds(
+		width: number,
+		bounds: Map<Component, { start: number; end: number }>,
+		offset: number = 0,
+	): string[] {
+		const lines: string[] = [];
+		for (const child of this.children) {
+			const startLine = offset + lines.length;
+			let childLines: string[];
+
+			if (child instanceof Container) {
+				childLines = child.renderWithBounds(width, bounds, startLine);
+			} else {
+				childLines = child.render(width);
+			}
+
+			for (const line of childLines) {
+				lines.push(line);
+			}
+
+			const endLine = offset + lines.length;
+			if (endLine > startLine) {
+				bounds.set(child, { start: startLine, end: endLine });
+			}
+		}
+		return lines;
+	}
 }
 
 /**
@@ -244,6 +297,9 @@ export class TUI extends Container {
 	private previousHeight = 0;
 	private focusedComponent: Component | null = null;
 	private inputListeners = new Set<InputListener>();
+
+	/** Track component line ranges from last render for click dispatching */
+	private componentBounds = new Map<Component, { start: number; end: number }>();
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
@@ -564,6 +620,13 @@ export class TUI extends Container {
 			return;
 		}
 
+		// Parse SGR mouse events and dispatch clicks
+		const mouseEvent = this.parseMouseSGR(data);
+		if (mouseEvent) {
+			this.dispatchMouseClick(mouseEvent);
+			return;
+		}
+
 		// Global debug key handler (Shift+Ctrl+D)
 		if (matchesKey(data, "shift+ctrl+d") && this.onDebug) {
 			this.onDebug();
@@ -614,6 +677,93 @@ export class TUI extends Container {
 		this.invalidate();
 		this.requestRender();
 		return true;
+	}
+
+	/**
+	 * Parse SGR mouse sequence.
+	 * Format: ESC[<B;X;YM (press) or ESC[<B;X;Ym (release)
+	 * B = button + modifiers: bits 0-1 = button (0=left,1=middle,2=right),
+	 *   bit 2 = shift, bit 3 = meta, bit 4 = ctrl, bit 5 = motion, bit 6 = scroll
+	 * X = column (1-based), Y = row (1-based)
+	 */
+	private parseMouseSGR(data: string): MouseEvent | null {
+		const match = data.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/);
+		if (!match) return null;
+		const button = parseInt(match[1]!, 10);
+		const col = parseInt(match[2]!, 10) - 1; // Convert to 0-based
+		const row = parseInt(match[3]!, 10) - 1; // Convert to 0-based
+		const isRelease = match[4] === "m";
+		return { button, col, row, isRelease };
+	}
+
+	/**
+	 * Dispatch a mouse click event to the appropriate component.
+	 * Only handles left button release (click) events.
+	 */
+	private dispatchMouseClick(event: MouseEvent): void {
+		// Only handle left button release (click)
+		// In SGR mode, button field can include shift/meta/ctrl/motion flags
+		// Bit 0-1: button (0=left, 1=middle, 2=right)
+		// Bit 2: shift, Bit 3: meta, Bit 4: ctrl, Bit 5: motion
+		const buttonOnly = event.button & 3; // Extract just the button bits
+		const isMotion = (event.button & 32) !== 0; // Drag/motion event
+		if (buttonOnly !== 0 || !event.isRelease || isMotion) return;
+
+		// Convert terminal row to content line index
+		const viewportTop = this.previousViewportTop;
+		const contentLine = viewportTop + event.row;
+
+		if (process.env.PIX_DEBUG_MOUSE) {
+			process.stderr.write(
+				`[click] col=${event.col} row=${event.row} contentLine=${contentLine} viewportTop=${viewportTop} bounds=${this.componentBounds.size}\n`,
+			);
+		}
+
+		// Check overlays first (from top to bottom)
+		for (let i = this.overlayStack.length - 1; i >= 0; i--) {
+			const entry = this.overlayStack[i];
+			if (!this.isOverlayVisible(entry)) continue;
+			// Overlay click handling could be added here in the future
+		}
+
+		// Find the deepest component at this line that has handleClick
+		const width = this.terminal.columns;
+		const clicked = this.findClickableAt(contentLine, event.col, width);
+		if (process.env.PIX_DEBUG_MOUSE) {
+			if (clicked) {
+				process.stderr.write(
+					`[click] found component: ${clicked.component.constructor.name} at localRow=${clicked.localRow}\n`,
+				);
+			} else {
+				process.stderr.write(`[click] no clickable component found at line ${contentLine}\n`);
+			}
+		}
+		if (clicked) {
+			const { component, localRow } = clicked;
+			if (component.handleClick?.(event.col, localRow, width)) {
+				this.requestRender();
+			}
+		}
+	}
+
+	/**
+	 * Find the deepest component at a content line that has handleClick.
+	 * Walks the bounds map from deep to shallow (later entries win = deeper).
+	 */
+	private findClickableAt(
+		contentLine: number,
+		_col: number,
+		_width: number,
+	): { component: Component; localRow: number } | null {
+		// Iterate in reverse order so deeper (more specific) components are found first
+		const entries = [...this.componentBounds.entries()];
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const [component, bounds] = entries[i]!;
+			if (contentLine >= bounds.start && contentLine < bounds.end && component.handleClick) {
+				return { component, localRow: contentLine - bounds.start };
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -966,8 +1116,9 @@ export class TUI extends Container {
 			return targetScreenRow - currentScreenRow;
 		};
 
-		// Render all components to get new lines
-		let newLines = this.render(width);
+		// Render all components to get new lines and track click targets
+		this.componentBounds.clear();
+		let newLines = this.renderWithBounds(width, this.componentBounds);
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.overlayStack.length > 0) {
@@ -1013,7 +1164,7 @@ export class TUI extends Container {
 		const debugRedraw = process.env.PIX_DEBUG_REDRAW === "1";
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
-			const logPath = path.join(os.homedir(), ".pix", "agent", "pi-debug.log");
+			const logPath = path.join(os.homedir(), ".pix", "agent", "pix-debug.log");
 			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
 			fs.appendFileSync(logPath, msg);
 		};
@@ -1179,7 +1330,7 @@ export class TUI extends Container {
 			const isImage = isImageLine(line);
 			if (!isImage && visibleWidth(line) > width) {
 				// Log all lines to crash file for debugging
-				const crashLogPath = path.join(os.homedir(), ".pix", "agent", "pi-crash.log");
+				const crashLogPath = path.join(os.homedir(), ".pix", "agent", "pix-crash.log");
 				const crashData = [
 					`Crash at ${new Date().toISOString()}`,
 					`Terminal width: ${width}`,

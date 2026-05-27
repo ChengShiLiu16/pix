@@ -99,7 +99,7 @@ function isInsidePath(child, parent) {
 
 function prepareOutputDirectory(options, repoRoot) {
 	if (!options.outDir) {
-		return mkdtempSync(join(tmpdir(), "pi-local-release-"));
+		return mkdtempSync(join(tmpdir(), "pix-local-release-"));
 	}
 
 	const outDir = resolve(options.outDir);
@@ -186,7 +186,7 @@ const options = parseArgs();
 const repoRoot = process.cwd();
 const rootPackageJson = readPackageJson(repoRoot);
 
-if (rootPackageJson.name !== "pi-monorepo") {
+if (rootPackageJson.name !== "pix-monorepo") {
 	throw new Error("Run this script from the repository root");
 }
 

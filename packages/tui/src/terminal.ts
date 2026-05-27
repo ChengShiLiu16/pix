@@ -115,6 +115,10 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
+		// Enable SGR extended mouse mode for click support
+		process.stdout.write("\x1b[?1006h"); // SGR mouse mode
+		process.stdout.write("\x1b[?1002h"); // Button event tracking (press/release/drag)
+
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
 
@@ -300,6 +304,10 @@ export class ProcessTerminal implements Terminal {
 
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
+
+		// Disable mouse tracking
+		process.stdout.write("\x1b[?1002l"); // Disable button event tracking
+		process.stdout.write("\x1b[?1006l"); // Disable SGR mouse mode
 
 		// Disable Kitty keyboard protocol if not already done by drainInput()
 		if (this._kittyProtocolActive) {

@@ -72,6 +72,19 @@ export class BashExecutionComponent extends Container {
 		this.updateDisplay();
 	}
 
+	public isExpanded(): boolean {
+		return this.expanded;
+	}
+
+	/** Callback invoked when this component is clicked (before toggle). */
+	public onClick?: () => void;
+
+	/** Toggle expanded state on click. */
+	handleClick(_col: number, _row: number, _width: number): boolean {
+		this.onClick?.();
+		return true;
+	}
+
 	override invalidate(): void {
 		super.invalidate();
 		this.updateDisplay();
@@ -176,10 +189,10 @@ export class BashExecutionComponent extends Container {
 			// Show how many lines are hidden (collapsed preview)
 			if (hiddenLineCount > 0) {
 				if (this.expanded) {
-					statusParts.push(`(${keyHint("app.tools.expand", "to collapse")})`);
+					statusParts.push(`(click or ${keyHint("app.tools.expand", "to collapse")})`);
 				} else {
 					statusParts.push(
-						`${theme.fg("muted", `... ${hiddenLineCount} more lines`)} (${keyHint("app.tools.expand", "to expand")})`,
+						`${theme.fg("muted", `... ${hiddenLineCount} more lines`)} (click or ${keyHint("app.tools.expand", "to expand")})`,
 					);
 				}
 			}
