@@ -111,4 +111,42 @@ describe("buildSystemPrompt", () => {
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 	});
+
+	describe("context file truncation", () => {
+		test("truncates oversized context files", () => {
+			const longContent = "a".repeat(5000);
+			const prompt = buildSystemPrompt({
+				contextFiles: [{ path: "/project/AGENTS.md", content: longContent }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("[...truncated: use the read tool to view the full file...]");
+			expect(prompt).not.toContain("a".repeat(4000));
+		});
+
+		test("does not truncate small context files", () => {
+			const shortContent = "# Project Guidelines\n\nBe helpful.";
+			const prompt = buildSystemPrompt({
+				contextFiles: [{ path: "/project/AGENTS.md", content: shortContent }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).not.toContain("[...truncated: use the read tool to view the full file...]");
+			expect(prompt).toContain(shortContent);
+		});
+
+		test("truncates custom prompt context files too", () => {
+			const longContent = "b".repeat(5000);
+			const prompt = buildSystemPrompt({
+				customPrompt: "Custom system prompt.",
+				contextFiles: [{ path: "/project/CLAUDE.md", content: longContent }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("[...truncated: use the read tool to view the full file...]");
+		});
+	});
 });

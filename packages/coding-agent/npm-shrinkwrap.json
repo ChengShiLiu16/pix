@@ -1,12 +1,12 @@
 {
 	"name": "@earendil-works/pi-coding-agent",
-	"version": "0.75.5",
+	"version": "0.75.5-pix.3",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
 			"name": "@earendil-works/pi-coding-agent",
-			"version": "0.75.5",
+			"version": "0.75.5-pix.3",
 			"license": "MIT",
 			"dependencies": {
 				"@earendil-works/pi-agent-core": "^0.75.5",
@@ -1123,7 +1123,7 @@
 		},
 		"node_modules/@types/node": {
 			"version": "22.19.19",
-			"resolved": "https://registry.npmjs.org/@types/node/-/node-22.19.19.tgz",
+			"resolved": "https://registry.npmmirror.com/@types/node/-/node-22.19.19.tgz",
 			"integrity": "sha512-dyh/xO2Fh5bYrfWaaqGrRQQGkNdmYw6AmaAUvYeUMNTWQtvb796ikLdmTchRmOlOiIJ1TDXfWgVx1QkUlQ6Hew==",
 			"license": "MIT",
 			"dependencies": {
@@ -2152,7 +2152,7 @@
 		},
 		"node_modules/undici-types": {
 			"version": "6.21.0",
-			"resolved": "https://registry.npmjs.org/undici-types/-/undici-types-6.21.0.tgz",
+			"resolved": "https://registry.npmmirror.com/undici-types/-/undici-types-6.21.0.tgz",
 			"integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==",
 			"license": "MIT"
 		},
