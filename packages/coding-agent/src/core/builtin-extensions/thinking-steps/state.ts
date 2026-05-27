@@ -1,6 +1,6 @@
 import type { ActiveThinkingState, ThinkingStepsMode } from "./types.ts";
 
-const STATE_KEY = Symbol.for("pi-extensions.thinking-steps.state");
+const STATE_KEY = Symbol.for("pix-extensions.thinking-steps.state");
 const DEFAULT_SCOPE_KEY = "__default__";
 const LABEL_REFRESH_SUFFIX = "\u2060";
 

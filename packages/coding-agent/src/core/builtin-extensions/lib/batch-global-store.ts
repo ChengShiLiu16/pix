@@ -6,7 +6,7 @@
  */
 import type { BatchInvalidatorEntry } from "./batch-display-core.ts";
 
-const STORE_KEY = Symbol.for("pi.extensions.batch-display.v1");
+const STORE_KEY = Symbol.for("pix.extensions.batch-display.v1");
 
 export type ToolCategory = "bash" | "read" | "other";
 

@@ -26,7 +26,7 @@ Configure via `package.json`:
 ```json
 {
   "piConfig": {
-    "name": "pi",
+    "name": "pix",
     "configDir": ".pix"
   }
 }

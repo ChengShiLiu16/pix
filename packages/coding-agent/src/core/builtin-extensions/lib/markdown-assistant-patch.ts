@@ -1,6 +1,6 @@
 /**
  * Fallback assistant-message patch: stream plain Text, render Markdown when complete.
- * Skips install when pi-thinking-steps already owns AssistantMessageComponent.updateContent.
+ * Skips install when pix-thinking-steps already owns AssistantMessageComponent.updateContent.
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,8 +18,8 @@ const PI_INTERNAL_MODULES = {
 	theme: "dist/modes/interactive/theme/theme.js",
 } as const;
 
-const PATCH_STATE_KEY = Symbol.for("pi.extensions.markdown-assistant-patch.v1");
-const TRUE_ORIGINAL_KEY = Symbol.for("pi.extensions.assistant-message.true-original.v1");
+const PATCH_STATE_KEY = Symbol.for("pix.extensions.markdown-assistant-patch.v1");
+const TRUE_ORIGINAL_KEY = Symbol.for("pix.extensions.assistant-message.true-original.v1");
 
 type PatchState = {
 	prototype: AssistantMessagePrototype;

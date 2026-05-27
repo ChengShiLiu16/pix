@@ -24,7 +24,7 @@ import { builtin as generationWatchdog } from "./generation-watchdog.ts";
 import { builtin as gitCheckpoint } from "./git-checkpoint.ts";
 import { builtin as grepMany } from "./grep-many.ts";
 import { builtin as lsMany } from "./ls-many.ts";
-import { builtin as piHealth } from "./pi-health.ts";
+import { builtin as piHealth } from "./pix-health.ts";
 import { builtin as promptUrlWidget } from "./prompt-url-widget.ts";
 import { builtin as readMany } from "./read-many.ts";
 
@@ -49,7 +49,7 @@ export const builtinExtensionFactories: (ExtensionFactory & { extensionName?: st
 	Object.assign(gitCheckpoint, { extensionName: "git-checkpoint" }),
 	Object.assign(grepMany, { extensionName: "grep-many" }),
 	Object.assign(lsMany, { extensionName: "ls-many" }),
-	Object.assign(piHealth, { extensionName: "pi-health" }),
+	Object.assign(piHealth, { extensionName: "pix-health" }),
 	Object.assign(promptUrlWidget, { extensionName: "prompt-url-widget" }),
 	Object.assign(readMany, { extensionName: "read-many" }),
 

@@ -39,7 +39,7 @@ export const PI_INTERNAL_MODULES = {
 	theme: "dist/modes/interactive/theme/theme.js",
 } as const;
 
-const PATCH_STATE_KEY = Symbol.for("pi.extensions.tool-visibility-patch.v1");
+const PATCH_STATE_KEY = Symbol.for("pix.extensions.tool-visibility-patch.v1");
 const SPACED_INSTANCES = new WeakSet<object>();
 
 type PatchState = {

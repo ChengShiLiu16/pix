@@ -455,7 +455,7 @@ If output was truncated, includes `fullOutputPath`:
     "exitCode": 0,
     "cancelled": false,
     "truncated": true,
-    "fullOutputPath": "/tmp/pi-bash-abc123.log"
+    "fullOutputPath": "/tmp/pix-bash-abc123.log"
   }
 }
 ```

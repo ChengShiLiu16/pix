@@ -382,7 +382,7 @@ Place in `~/.pix/agent/themes/`, `.pix/themes/`, or a [pix package](#pix-package
 
 ### Pix Packages
 
-Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Api-package) or [Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
+Bundle and share extensions, skills, prompts, and themes via npm or git. Find packages on [npmjs.com](https://www.npmjs.com/search?q=keywords%3Apix-package) or [Discord](https://discord.com/channels/1456806362351669492/1457744485428629628).
 
 > **Security:** Pix packages run with full system access. Extensions execute arbitrary code, and skills can instruct the model to perform any action including running executables. Review source code before installing third-party packages.
 
@@ -410,13 +410,13 @@ pix config                               # enable/disable extensions, skills, pr
 
 Packages install to `~/.pix/agent/git/` (git) or `~/.pix/agent/npm/` (npm). Use `-l` for project-local installs (`.pix/git/`, `.pix/npm/`). Git `@ref` values are pinned tags or commits; pinned packages are skipped by `pix update`, so use `pix install git:host/user/repo@new-ref` to move an existing package to a new ref. Git packages install dependencies with `npm install --omit=dev` by default, so runtime deps must be listed under `dependencies`; when `npmCommand` is configured, git packages use plain `install` for compatibility with wrappers. If you use a Node version manager and want package installs to reuse a stable npm context, set `npmCommand` in `settings.json`, for example `["mise", "exec", "node@20", "--", "npm"]`.
 
-Create a package by adding a `pi` key to `package.json`:
+Create a package by adding a `pix` key to `package.json`:
 
 ```json
 {
-  "name": "my-pi-package",
-  "keywords": ["pi-package"],
-  "pi": {
+  "name": "my-pix-package",
+  "keywords": ["pix-package"],
+  "pix": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
@@ -425,7 +425,7 @@ Create a package by adding a `pi` key to `package.json`:
 }
 ```
 
-Without a `pi` manifest, pix auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
+Without a `pix` manifest, pix auto-discovers from conventional directories (`extensions/`, `skills/`, `prompts/`, `themes/`).
 
 See [docs/packages.md](docs/packages.md).
 

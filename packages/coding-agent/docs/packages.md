@@ -113,13 +113,13 @@ Local paths point to files or directories on disk and are added to settings with
 
 ## Creating a Pix Package
 
-Add a `pix` manifest to `package.json` or use conventional directories. Include the `pi-package` keyword for discoverability.
+Add a `pix` manifest to `package.json` or use conventional directories. Include the `pix-package` keyword for discoverability.
 
 ```json
 {
   "name": "my-package",
-  "keywords": ["pi-package"],
-  "pi": {
+  "keywords": ["pix-package"],
+  "pix": {
     "extensions": ["./extensions"],
     "skills": ["./skills"],
     "prompts": ["./prompts"],
@@ -132,13 +132,13 @@ Paths are relative to the package root. Arrays support glob patterns and `!exclu
 
 ### Gallery Metadata
 
-The [package gallery](https://pi.dev/packages) displays packages tagged with `pi-package`. Add `video` or `image` fields to show a preview:
+The [package gallery](https://pi.dev/packages) displays packages tagged with `pix-package`. Add `video` or `image` fields to show a preview:
 
 ```json
 {
   "name": "my-package",
-  "keywords": ["pi-package"],
-  "pi": {
+  "keywords": ["pix-package"],
+  "pix": {
     "extensions": ["./extensions"],
     "video": "https://example.com/demo.mp4",
     "image": "https://example.com/screenshot.png"
@@ -178,7 +178,7 @@ Example:
     "shitty-extensions": "^1.0.1"
   },
   "bundledDependencies": ["shitty-extensions"],
-  "pi": {
+  "pix": {
     "extensions": ["extensions", "node_modules/shitty-extensions/extensions"],
     "skills": ["skills", "node_modules/shitty-extensions/skills"]
   }

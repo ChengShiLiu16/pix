@@ -255,7 +255,7 @@ This pattern makes the fetched models available during normal startup and to `pi
     "zod": "^3.0.0",
     "chalk": "^5.0.0"
   },
-  "pi": {
+  "pix": {
     "extensions": ["./src/index.ts"]
   }
 }

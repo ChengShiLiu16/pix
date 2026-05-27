@@ -379,14 +379,14 @@ describe("DefaultPackageManager git update", () => {
 			const gitHost = "github.com";
 			const gitPath = "test/extension";
 			const hash = createHash("sha256").update(`git-${gitHost}-${gitPath}`).digest("hex").slice(0, 8);
-			const cachedDir = join(tmpdir(), "pi-extensions", `git-${gitHost}`, hash, gitPath);
-			const extensionFile = join(cachedDir, "pi-extensions", "session-breakdown.ts");
+			const cachedDir = join(tmpdir(), "pix-extensions", `git-${gitHost}`, hash, gitPath);
+			const extensionFile = join(cachedDir, "pix-extensions", "session-breakdown.ts");
 
 			rmSync(cachedDir, { recursive: true, force: true });
-			mkdirSync(join(cachedDir, "pi-extensions"), { recursive: true });
+			mkdirSync(join(cachedDir, "pix-extensions"), { recursive: true });
 			writeFileSync(
 				join(cachedDir, "package.json"),
-				JSON.stringify({ pi: { extensions: ["./pi-extensions"] } }, null, 2),
+				JSON.stringify({ pix: { extensions: ["./pix-extensions"] } }, null, 2),
 			);
 			writeFileSync(extensionFile, "// stale");
 
@@ -419,21 +419,21 @@ describe("DefaultPackageManager git update", () => {
 			expect(executedCommands).toContain(
 				"git fetch --prune --no-tags origin +refs/heads/main:refs/remotes/origin/main",
 			);
-			expect(getFileContent(cachedDir, "pi-extensions/session-breakdown.ts")).toBe("// fresh");
+			expect(getFileContent(cachedDir, "pix-extensions/session-breakdown.ts")).toBe("// fresh");
 		});
 
 		it("should not refresh pinned temporary git sources", async () => {
 			const gitHost = "github.com";
 			const gitPath = "test/extension";
 			const hash = createHash("sha256").update(`git-${gitHost}-${gitPath}`).digest("hex").slice(0, 8);
-			const cachedDir = join(tmpdir(), "pi-extensions", `git-${gitHost}`, hash, gitPath);
-			const extensionFile = join(cachedDir, "pi-extensions", "session-breakdown.ts");
+			const cachedDir = join(tmpdir(), "pix-extensions", `git-${gitHost}`, hash, gitPath);
+			const extensionFile = join(cachedDir, "pix-extensions", "session-breakdown.ts");
 
 			rmSync(cachedDir, { recursive: true, force: true });
-			mkdirSync(join(cachedDir, "pi-extensions"), { recursive: true });
+			mkdirSync(join(cachedDir, "pix-extensions"), { recursive: true });
 			writeFileSync(
 				join(cachedDir, "package.json"),
-				JSON.stringify({ pi: { extensions: ["./pi-extensions"] } }, null, 2),
+				JSON.stringify({ pix: { extensions: ["./pix-extensions"] } }, null, 2),
 			);
 			writeFileSync(extensionFile, "// pinned");
 
@@ -448,7 +448,7 @@ describe("DefaultPackageManager git update", () => {
 			await packageManager.resolveExtensionSources([`${gitSource}@main`], { temporary: true });
 
 			expect(executedCommands).toEqual([]);
-			expect(getFileContent(cachedDir, "pi-extensions/session-breakdown.ts")).toBe("// pinned");
+			expect(getFileContent(cachedDir, "pix-extensions/session-breakdown.ts")).toBe("// pinned");
 		});
 	});
 

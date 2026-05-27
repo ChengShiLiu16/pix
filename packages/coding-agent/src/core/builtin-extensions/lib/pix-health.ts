@@ -68,10 +68,10 @@ function pushExists(items: HealthItem[], filePath: string, label: string): void 
 	});
 }
 
-export function collectPiHealth(agentRoot: string): HealthReport {
+export function collectPixHealth(agentRoot: string): HealthReport {
 	const items: HealthItem[] = [];
 	const extensionsDir = path.join(agentRoot, "extensions");
-	const thinkingDir = path.join(extensionsDir, "pi-thinking-steps");
+	const thinkingDir = path.join(extensionsDir, "pix-thinking-steps");
 	const thinkingPackagePath = path.join(thinkingDir, "package.json");
 
 	pushExists(items, path.join(agentRoot, "settings.json"), "agent settings");
@@ -129,9 +129,9 @@ export function collectPiHealth(agentRoot: string): HealthReport {
 	return { agentRoot, items };
 }
 
-export function formatPiHealth(report: HealthReport): string {
+export function formatPixHealth(report: HealthReport): string {
 	const icon: Record<HealthLevel, string> = { ok: "✓", warn: "!", error: "✗" };
-	const lines = [`Pi health · ${report.agentRoot}`];
+	const lines = [`Pix health · ${report.agentRoot}`];
 	for (const item of report.items) {
 		lines.push(`${icon[item.level]} ${item.label}: ${item.detail}`);
 	}
