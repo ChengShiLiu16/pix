@@ -112,41 +112,30 @@ describe("buildSystemPrompt", () => {
 		});
 	});
 
-	describe("context file truncation", () => {
-		test("truncates oversized context files", () => {
-			const longContent = "a".repeat(5000);
+	describe("context files", () => {
+		test("includes context files verbatim in default prompt", () => {
+			const content = "# Project Guidelines\n\nBe helpful.";
 			const prompt = buildSystemPrompt({
-				contextFiles: [{ path: "/project/AGENTS.md", content: longContent }],
+				contextFiles: [{ path: "/project/AGENTS.md", content }],
 				skills: [],
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("[...truncated: use the read tool to view the full file...]");
-			expect(prompt).not.toContain("a".repeat(4000));
+			expect(prompt).toContain(content);
+			expect(prompt).toContain('path="/project/AGENTS.md"');
 		});
 
-		test("does not truncate small context files", () => {
-			const shortContent = "# Project Guidelines\n\nBe helpful.";
-			const prompt = buildSystemPrompt({
-				contextFiles: [{ path: "/project/AGENTS.md", content: shortContent }],
-				skills: [],
-				cwd: process.cwd(),
-			});
-
-			expect(prompt).not.toContain("[...truncated: use the read tool to view the full file...]");
-			expect(prompt).toContain(shortContent);
-		});
-
-		test("truncates custom prompt context files too", () => {
-			const longContent = "b".repeat(5000);
+		test("includes context files verbatim in custom prompt", () => {
+			const content = "# Custom Guidelines\n\nBe precise.";
 			const prompt = buildSystemPrompt({
 				customPrompt: "Custom system prompt.",
-				contextFiles: [{ path: "/project/CLAUDE.md", content: longContent }],
+				contextFiles: [{ path: "/project/CLAUDE.md", content }],
 				skills: [],
 				cwd: process.cwd(),
 			});
 
-			expect(prompt).toContain("[...truncated: use the read tool to view the full file...]");
+			expect(prompt).toContain(content);
+			expect(prompt).toContain('path="/project/CLAUDE.md"');
 		});
 	});
 });

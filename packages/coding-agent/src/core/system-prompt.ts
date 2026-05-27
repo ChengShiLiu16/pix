@@ -24,22 +24,6 @@ export interface BuildSystemPromptOptions {
 	skills?: Skill[];
 }
 
-/** Max characters to inline per context file in the system prompt. */
-const MAX_CONTEXT_FILE_CHARS = 3000;
-
-function truncateContextFileContent(content: string): string {
-	if (content.length <= MAX_CONTEXT_FILE_CHARS) {
-		return content;
-	}
-	// Try to cut at a line boundary so we don't split mid-line.
-	let cut = MAX_CONTEXT_FILE_CHARS;
-	const lastNewline = content.lastIndexOf("\n", MAX_CONTEXT_FILE_CHARS);
-	if (lastNewline > MAX_CONTEXT_FILE_CHARS * 0.8) {
-		cut = lastNewline;
-	}
-	return `${content.slice(0, cut)}\n[...truncated: use the read tool to view the full file...]`;
-}
-
 /** Build the system prompt with tools, guidelines, and context */
 export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -63,10 +47,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
-	const contextFiles = (providedContextFiles ?? []).map(({ path: filePath, content }) => ({
-		path: filePath,
-		content: truncateContextFileContent(content),
-	}));
+	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
 
 	if (customPrompt) {
