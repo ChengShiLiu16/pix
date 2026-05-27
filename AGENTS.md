@@ -149,10 +149,10 @@ Attribution:
 Run the TUI in a controlled terminal (from the repo root):
 
 ```bash
-tmux new-session -d -s pi-test -x 80 -y 24
-tmux send-keys -t pi-test "./pi-test.sh" Enter
-sleep 3 && tmux capture-pane -t pi-test -p
-tmux send-keys -t pi-test "your prompt here" Enter
-tmux send-keys -t pi-test Escape
-tmux kill-session -t pi-test
+tmux new-session -d -s pix-test -x 80 -y 24
+tmux send-keys -t pix-test "./pix-test.sh" Enter
+sleep 3 && tmux capture-pane -t pix-test -p
+tmux send-keys -t pix-test "your prompt here" Enter
+tmux send-keys -t pix-test Escape
+tmux kill-session -t pix-test
 ```

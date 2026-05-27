@@ -14,7 +14,7 @@ npm run build
 Run from source:
 
 ```bash
-/path/to/pi-mono/pi-test.sh
+/path/to/pi-mono/pix-test.sh
 ```
 
 The script can be run from any directory. Pix keeps the caller's current working directory.

@@ -67,7 +67,7 @@ npm install --ignore-scripts  # Install all dependencies without running lifecyc
 npm run build        # Build all packages
 npm run check        # Lint, format, and type check
 ./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+./pix-test.sh        # Run pix from sources (can be run from any directory)
 ```
 
 ## Supply-chain hardening
