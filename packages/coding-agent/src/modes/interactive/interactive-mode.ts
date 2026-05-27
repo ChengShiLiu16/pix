@@ -342,6 +342,10 @@ export class InteractiveMode {
 
 	private options: InteractiveModeOptions;
 
+	// Pending image attachments: marker name (e.g. "[image1]") -> file path
+	private pendingImageAttachments: Map<string, string> = new Map();
+	private imageCounter = 0;
+
 	// Convenience accessors
 	private get session(): AgentSession {
 		return this.runtimeHost.session;
@@ -779,8 +783,9 @@ export class InteractiveMode {
 		// Main interactive loop
 		while (true) {
 			const userInput = await this.getUserInput();
+			const images = this.consumePendingImageAttachments(userInput);
 			try {
-				await this.session.prompt(userInput);
+				await this.session.prompt(userInput, images.length > 0 ? { images } : undefined);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -2453,16 +2458,55 @@ export class InteractiveMode {
 			// Write to temp file
 			const tmpDir = os.tmpdir();
 			const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-			const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
+			const fileName = `pix-clipboard-${crypto.randomUUID()}.${ext}`;
 			const filePath = path.join(tmpDir, fileName);
 			fs.writeFileSync(filePath, Buffer.from(image.bytes));
 
-			// Insert file path directly
-			this.editor.insertTextAtCursor?.(filePath);
+			// Track as pending attachment and insert compact marker
+			this.imageCounter++;
+			const id = this.imageCounter;
+			const marker = `[image${id}]`;
+			this.pendingImageAttachments.set(marker, filePath);
+
+			// Register as atomic segment in editor
+			this.editor.addImageMarkerId?.(id);
+
+			// Insert marker instead of full file path
+			this.editor.insertTextAtCursor?.(marker);
 			this.ui.requestRender();
 		} catch {
 			// Silently ignore clipboard errors (may not have permission, etc.)
 		}
+	}
+
+	/** Read pending image attachments and return as ImageContent[]. Resets state. */
+	private consumePendingImageAttachments(text: string): ImageContent[] {
+		const images: ImageContent[] = [];
+		for (const [marker, filePath] of this.pendingImageAttachments) {
+			if (!text.includes(marker)) continue;
+			try {
+				const data = fs.readFileSync(filePath);
+				const ext = path.extname(filePath).toLowerCase().slice(1);
+				const mimeType =
+					ext === "jpg" || ext === "jpeg"
+						? "image/jpeg"
+						: ext === "gif"
+							? "image/gif"
+							: ext === "webp"
+								? "image/webp"
+								: "image/png";
+				images.push({
+					type: "image",
+					data: data.toString("base64"),
+					mimeType,
+				});
+			} catch {
+				// Skip unreadable files
+			}
+		}
+		// Reset state
+		this.pendingImageAttachments.clear();
+		return images;
 	}
 
 	private setupEditorSubmitHandler(): void {
@@ -2615,9 +2659,10 @@ export class InteractiveMode {
 			// Queue input during compaction (extension commands execute immediately)
 			if (this.session.isCompacting) {
 				if (this.isExtensionCommand(text)) {
+					const images = this.consumePendingImageAttachments(text);
 					this.editor.addToHistory?.(text);
 					this.editor.setText("");
-					await this.session.prompt(text);
+					await this.session.prompt(text, images.length > 0 ? { images } : undefined);
 				} else {
 					this.queueCompactionMessage(text, "steer");
 				}
@@ -2627,9 +2672,13 @@ export class InteractiveMode {
 			// If streaming, use prompt() with steer behavior
 			// This handles extension commands (execute immediately), prompt template expansion, and queueing
 			if (this.session.isStreaming) {
+				const images = this.consumePendingImageAttachments(text);
 				this.editor.addToHistory?.(text);
 				this.editor.setText("");
-				await this.session.prompt(text, { streamingBehavior: "steer" });
+				await this.session.prompt(text, {
+					streamingBehavior: "steer",
+					...(images.length > 0 ? { images } : {}),
+				});
 				this.updatePendingMessagesDisplay();
 				this.ui.requestRender();
 				return;
@@ -3415,9 +3464,13 @@ export class InteractiveMode {
 		// Alt+Enter queues a follow-up message (waits until agent finishes)
 		// This handles extension commands (execute immediately), prompt template expansion, and queueing
 		if (this.session.isStreaming) {
+			const images = this.consumePendingImageAttachments(text);
 			this.editor.addToHistory?.(text);
 			this.editor.setText("");
-			await this.session.prompt(text, { streamingBehavior: "followUp" });
+			await this.session.prompt(text, {
+				streamingBehavior: "followUp",
+				...(images.length > 0 ? { images } : {}),
+			});
 			this.updatePendingMessagesDisplay();
 			this.ui.requestRender();
 		}

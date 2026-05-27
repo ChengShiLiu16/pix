@@ -52,6 +52,9 @@ export interface EditorComponent extends Component {
 	 */
 	getExpandedText?(): string;
 
+	/** Register an image marker ID so it is treated as an atomic segment. */
+	addImageMarkerId?(id: number): void;
+
 	// =========================================================================
 	// Autocomplete support (optional)
 	// =========================================================================
