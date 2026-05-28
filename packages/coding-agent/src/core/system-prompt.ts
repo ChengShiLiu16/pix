@@ -5,6 +5,43 @@
 import { getDocsPath, getExamplesPath, getReadmePath } from "../config.ts";
 import { formatSkillsForPrompt, type Skill } from "./skills.ts";
 
+/** Token budget for context files (AGENTS.md, CLAUDE.md, etc.) in the system prompt.
+ * Estimated at ~4 chars per token. When the total content exceeds this budget,
+ * files are truncated from the end with a notice to re-read them. */
+const CONTEXT_FILES_TOKEN_BUDGET = 4000;
+const CHARS_PER_TOKEN = 4;
+
+/** Minimum tokens guaranteed for each context file, even when budget is tight. */
+const MIN_FILE_TOKENS = 500;
+
+/** Truncate context files to fit within a token budget.
+ * Each file is guaranteed at least MIN_FILE_TOKENS, with remaining
+ * budget allocated in order. */
+function truncateContextFiles(
+	files: Array<{ path: string; content: string }>,
+	budget: number,
+): Array<{ path: string; content: string }> {
+	let remaining = budget;
+	return files.map((file, i) => {
+		const filesLeft = files.length - i;
+		// Reserve minimum for remaining files so none gets 0 chars
+		const maxForThis = Math.max(remaining - (filesLeft - 1) * MIN_FILE_TOKENS, MIN_FILE_TOKENS);
+		const tokens = Math.ceil(file.content.length / CHARS_PER_TOKEN);
+		if (tokens <= maxForThis) {
+			remaining -= tokens;
+			return file;
+		}
+		// Truncate to maxForThis budget
+		const maxChars = maxForThis * CHARS_PER_TOKEN;
+		const truncated = file.content.slice(0, maxChars);
+		remaining -= maxForThis;
+		return {
+			path: file.path,
+			content: `${truncated}\n\n[... file truncated to fit context budget. Read ${file.path} for full content.]`,
+		};
+	});
+}
+
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
@@ -47,7 +84,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 
-	const contextFiles = providedContextFiles ?? [];
+	const contextFiles = providedContextFiles
+		? truncateContextFiles(providedContextFiles, CONTEXT_FILES_TOKEN_BUDGET)
+		: [];
 	const skills = providedSkills ?? [];
 
 	if (customPrompt) {

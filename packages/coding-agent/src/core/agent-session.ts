@@ -49,6 +49,7 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
+import { ageToolResults } from "./context-aging.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -1840,6 +1841,20 @@ export class AgentSession {
 			contextTokens = calculateContextTokens(assistantMessage.usage);
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
+			// Pre-compaction aging: try aging on the current messages before
+			// resorting to full compaction. Use the actual context ratio so
+			// the aging level matches what transformContext will apply on the
+			// next LLM call. If aging reduces context below the threshold,
+			// compaction can be avoided entirely.
+			const messages = this.agent.state.messages;
+			const actualRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
+			const aged = ageToolResults(messages, actualRatio);
+			if (aged !== messages) {
+				const agedEstimate = estimateContextTokens(aged);
+				if (!shouldCompact(agedEstimate.tokens, contextWindow, settings)) {
+					return false; // Aging alone is sufficient, skip compaction
+				}
+			}
 			return await this._runAutoCompaction("threshold", false);
 		}
 		return false;

@@ -137,5 +137,74 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain(content);
 			expect(prompt).toContain('path="/project/CLAUDE.md"');
 		});
+
+		test("truncates context files exceeding token budget", () => {
+			// CONTEXT_FILES_TOKEN_BUDGET = 4000 tokens ≈ 16000 chars
+			const bigContent = "x".repeat(20000); // ~5000 tokens, exceeds budget
+			const prompt = buildSystemPrompt({
+				contextFiles: [{ path: "/project/AGENTS.md", content: bigContent }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain("file truncated to fit context budget");
+			expect(prompt).toContain("Read /project/AGENTS.md for full content");
+			// Should not contain the full content
+			expect(prompt.length).toBeLessThan(bigContent.length);
+		});
+
+		test("does not truncate context files within token budget", () => {
+			const smallContent = "# Guidelines\n\nBe helpful."; // well under budget
+			const prompt = buildSystemPrompt({
+				contextFiles: [{ path: "/project/AGENTS.md", content: smallContent }],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			expect(prompt).toContain(smallContent);
+			expect(prompt).not.toContain("file truncated");
+		});
+
+		test("truncates later files first when multiple files exceed budget", () => {
+			// Two files together exceed budget, first file fits, second gets truncated
+			const firstContent = "x".repeat(12000); // ~3000 tokens
+			const secondContent = "y".repeat(12000); // ~3000 tokens, total ~6000 > 4000
+			const prompt = buildSystemPrompt({
+				contextFiles: [
+					{ path: "/project/AGENTS.md", content: firstContent },
+					{ path: "/project/CLAUDE.md", content: secondContent },
+				],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			// First file should be intact
+			expect(prompt).toContain("x".repeat(100));
+			// Second file should be truncated
+			expect(prompt).toContain("file truncated to fit context budget");
+			expect(prompt).toContain("Read /project/CLAUDE.md for full content");
+		});
+
+		test("guarantees minimum content for each file even when budget is tight", () => {
+			// Three large files, budget = 4000 tokens, min per file = 500 tokens
+			// Each file is ~5000 tokens, total ~15000 >> 4000
+			const content = "z".repeat(20000);
+			const prompt = buildSystemPrompt({
+				contextFiles: [
+					{ path: "/project/A.md", content },
+					{ path: "/project/B.md", content },
+					{ path: "/project/C.md", content },
+				],
+				skills: [],
+				cwd: process.cwd(),
+			});
+
+			// All three files should appear (not 0 chars for later files)
+			expect(prompt).toContain('path="/project/A.md"');
+			expect(prompt).toContain('path="/project/B.md"');
+			expect(prompt).toContain('path="/project/C.md"');
+			// At least the last file should be truncated
+			expect(prompt).toContain("file truncated to fit context budget");
+		});
 	});
 });

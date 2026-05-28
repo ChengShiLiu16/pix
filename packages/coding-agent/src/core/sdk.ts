@@ -6,7 +6,8 @@ import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
-import { pruneStaleReads } from "./context-prune.ts";
+import { ageToolResults, compactEditArguments } from "./context-aging.ts";
+import { pruneStaleReads, pruneThinkingForNonAnthropic } from "./context-prune.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
@@ -377,15 +378,35 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
-			// Stale-read pruning rewrites mid-history messages, which invalidates the
-			// Anthropic prefix cache from that point. Only do it once context usage is
-			// high enough that the token savings (delaying compaction / fitting the
-			// window) outweigh the one-time cache miss.
+			// Progressive aging reduces old tool results before the more
+			// destructive stale-read pruning. Aging is less invasive
+			// (preserves structure) and triggers at a lower threshold.
 			const contextWindow = agent.state.model?.contextWindow ?? 0;
-			const next =
-				contextWindow > 0 && estimateContextTokens(messages).tokens > contextWindow * STALE_READ_PRUNE_THRESHOLD
-					? pruneStaleReads(messages)
-					: messages;
+			const contextTokens = contextWindow > 0 ? estimateContextTokens(messages).tokens : 0;
+			const contextRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
+
+			// Step 1: Age old tool results (triggers at 50% context usage)
+			let next = contextRatio >= 0.5 ? ageToolResults(messages, contextRatio) : messages;
+
+			// Step 2: Stale-read pruning rewrites mid-history messages, which
+			// invalidates the Anthropic prefix cache from that point. Only do it
+			// once context usage is high enough that the token savings (delaying
+			// compaction / fitting the window) outweigh the one-time cache miss.
+			const nextTokens = contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
+			if (contextWindow > 0 && nextTokens > contextWindow * STALE_READ_PRUNE_THRESHOLD) {
+				next = pruneStaleReads(next, cwd);
+			}
+
+			// Step 3: For non-Anthropic providers, strip thinking blocks from
+			// prior turns. Anthropic filters these server-side at no token cost;
+			// other providers bill for the full thinking text.
+			const provider = agent.state.model?.provider ?? "";
+			next = pruneThinkingForNonAnthropic(next, provider);
+
+			// Step 4: Compact edit tool-call arguments (old_string truncation)
+			// when context is high. Only triggers at >= 70% context usage.
+			next = compactEditArguments(next, contextRatio);
+
 			const runner = extensionRunnerRef.current;
 			if (!runner) return next;
 			return runner.emitContext(next);
