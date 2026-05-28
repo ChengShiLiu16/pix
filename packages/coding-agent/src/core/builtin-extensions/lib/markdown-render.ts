@@ -1,5 +1,12 @@
 import type { AssistantMessage } from "@earendil-works/pix-ai";
-import { Text, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pix-tui";
+import {
+	type AnsiStyleSegment,
+	probeAnsiStyle,
+	Text,
+	visibleWidth,
+	wrapTextWithAnsi,
+	wrapWithScopedStyle,
+} from "@earendil-works/pix-tui";
 
 export type MarkdownTheme = unknown;
 
@@ -134,8 +141,31 @@ export function prepareMarkdownForRender(text: string): string {
 }
 
 function createTerminalMarkdownStyler(theme?: NarrativeThemeLike) {
-	const fg = (name: string, text: string): string => theme?.fg(name, text) ?? text;
-	const bold = (text: string): string => theme?.bold(text) ?? text;
+	// Wrap theme.fg / theme.bold so a styled span sustains its color across any
+	// inner ANSI reset emitted by nested inline spans (code, link, bold). Without
+	// this, an inner `\e[39m` would drop the outer fg color mid-line — the visible
+	// symptom was H1/H2 text after an inline code segment falling back to default fg.
+	//
+	// Segments are probed once per styler instance and cached because the theme
+	// reference is stable for the lifetime of a single render.
+	const fgSegments = new Map<string, AnsiStyleSegment>();
+	const fgSegmentOf = (name: string): AnsiStyleSegment => {
+		let seg = fgSegments.get(name);
+		if (seg === undefined) {
+			seg = probeAnsiStyle((t) => theme?.fg(name, t) ?? t);
+			fgSegments.set(name, seg);
+		}
+		return seg;
+	};
+	let boldSegment: AnsiStyleSegment | undefined;
+	const boldSegmentOf = (): AnsiStyleSegment => {
+		if (boldSegment === undefined) {
+			boldSegment = probeAnsiStyle((t) => theme?.bold(t) ?? t);
+		}
+		return boldSegment;
+	};
+	const fg = (name: string, text: string): string => wrapWithScopedStyle(fgSegmentOf(name), text);
+	const bold = (text: string): string => wrapWithScopedStyle(boldSegmentOf(), text);
 	return {
 		plain: (text: string): string => text,
 		text: (text: string): string => fg("text", text),
@@ -177,9 +207,7 @@ function styleInlineMarkdown(text: string, styler: TerminalMarkdownStyler): stri
 			/\[([^\]]+)\]\(([^)]+)\)/g,
 			(_match, label: string, url: string) => `${styler.mdLink(label)} ${styler.mdLinkUrl(`(${url})`)}`,
 		)
-		.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, (_match, _marker: string, body: string) =>
-			styler.bold(styler.text(body)),
-		)
+		.replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, (_match, _marker: string, body: string) => styler.bold(body))
 		.replace(/~~(?=\S)([\s\S]*?\S)~~/g, (_match, body: string) => styler.dim(body))
 		.replace(/`([^`]+)`/g, (_match, body: string) => styler.bold(styler.mdCode(body)))
 		.replace(/(?<![\w/.-])\*(?!\*)(?=\S)([\s\S]*?\S)(?<!\*)\*(?![\w/.-])/g, (_match, body: string) => body)

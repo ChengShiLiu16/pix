@@ -198,6 +198,43 @@ describe("edit tool TUI rendering", () => {
 		expect(rendered).toContain("line 150 changed");
 	});
 
+	it("renders a preview when args use filePath", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "pi-edit-filepath-"));
+		tempDirs.push(dir);
+		const filePath = join(dir, "alias-edit.txt");
+		await writeFile(filePath, "before\n", "utf8");
+
+		const terminal = new FakeTerminal();
+		const tui = new TUI(terminal);
+		const component = new ToolExecutionComponent(
+			"edit",
+			"tool-call-filepath",
+			{ filePath, edits: [{ oldText: "before", newText: "after" }] },
+			{},
+			createEditToolDefinition(process.cwd()),
+			tui,
+			process.cwd(),
+		);
+		tui.addChild(component);
+		tui.start();
+		await waitForRender();
+
+		component.setArgsComplete();
+		tui.requestRender();
+		await waitForRender();
+		await waitForRender();
+
+		const rendered = await waitForRenderedText(
+			() => component.render(80).join("\n"),
+			"after",
+			() => tui.requestRender(true),
+		);
+		expect(rendered).toContain("alias");
+		expect(rendered).toContain("-edit.txt");
+		expect(rendered).toContain("-1 before");
+		expect(rendered).toContain("+1 after");
+	});
+
 	it("shows a preflight error without rendering a diff when the edits do not apply", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "pi-edit-preflight-"));
 		tempDirs.push(dir);

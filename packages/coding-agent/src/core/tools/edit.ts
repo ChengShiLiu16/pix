@@ -97,6 +97,15 @@ function prepareEditArguments(input: unknown): EditToolInput {
 
 	const args = input as Record<string, unknown>;
 
+	// Some models send filePath instead of path — normalize to path.
+	// Always remove the alias so strict schema validation does not reject it.
+	if (args.filePath !== undefined) {
+		if (args.path === undefined) {
+			args.path = args.filePath;
+		}
+		delete args.filePath;
+	}
+
 	// Some models (Opus 4.6, GLM-5.1) send edits as a JSON string instead of an array
 	if (typeof args.edits === "string") {
 		try {
@@ -126,6 +135,7 @@ function validateEditInput(input: EditToolInput): { path: string; edits: Edit[] 
 type RenderableEditArgs = {
 	path?: string;
 	file_path?: string;
+	filePath?: string;
 	edits?: Edit[];
 	oldText?: string;
 	newText?: string;
@@ -166,12 +176,17 @@ function getEditCallRenderComponent(state: EditRenderState, lastComponent: unkno
 	return component;
 }
 
+function getRawEditPath(args: RenderableEditArgs | undefined): string | null {
+	const value = args?.file_path ?? args?.path ?? args?.filePath;
+	return str(value);
+}
+
 function getRenderablePreviewInput(args: RenderableEditArgs | undefined): { path: string; edits: Edit[] } | null {
 	if (!args) {
 		return null;
 	}
 
-	const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : null;
+	const path = getRawEditPath(args);
 	if (!path) {
 		return null;
 	}
@@ -196,7 +211,7 @@ function formatEditCall(
 	theme: typeof import("../../modes/interactive/theme/theme.ts").theme,
 ): string {
 	const invalidArg = invalidArgText(theme);
-	const rawPath = str(args?.file_path ?? args?.path);
+	const rawPath = getRawEditPath(args);
 	const path = rawPath !== null ? shortenPath(rawPath) : null;
 	const pathDisplay = path === null ? invalidArg : path ? theme.fg("accent", path) : theme.fg("toolOutput", "...");
 	return `${theme.fg("toolTitle", theme.bold("edit"))} ${pathDisplay}`;
@@ -209,7 +224,7 @@ function formatEditResult(
 	theme: typeof import("../../modes/interactive/theme/theme.ts").theme,
 	isError: boolean,
 ): string | undefined {
-	const rawPath = str(args?.file_path ?? args?.path);
+	const rawPath = getRawEditPath(args);
 	const previewDiff = preview && !("error" in preview) ? preview.diff : undefined;
 	const previewError = preview && "error" in preview ? preview.error : undefined;
 	if (isError) {

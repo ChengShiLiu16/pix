@@ -1138,3 +1138,98 @@ export function extractSegments(
 
 	return { before, beforeWidth, after, afterWidth };
 }
+
+// ============================================================================
+// Scoped ANSI styling
+//
+// ANSI foreground colors (and intensity attributes like bold/dim) are not
+// stack-based. When an inner span ends with `\e[39m` it erases any outer fg
+// color even though the outer wrapper has not closed yet. The same is true for
+// `\e[22m` cancelling an outer bold/dim. These helpers let a styler maintain
+// a "scoped" style across nested resets by re-applying the outer open sequence
+// after every closing SGR that would otherwise drop it.
+// ============================================================================
+
+/** ANSI open/close pair plus the SGR codes that close this particular style. */
+export interface AnsiStyleSegment {
+	open: string;
+	close: string;
+	/**
+	 * SGR parameter codes that, when observed inside the body, terminate this
+	 * style and require a re-open. Always contains 0 (full reset).
+	 */
+	resetCodes: ReadonlySet<number>;
+}
+
+const SCOPED_STYLE_SENTINEL = "\u0000\u0001SCOPED\u0001\u0000";
+
+function parseSgrCodesFrom(sequence: string): number[] {
+	const codes: number[] = [];
+	for (const match of sequence.matchAll(/\x1b\[([\d;]*)m/g)) {
+		const params = match[1] ?? "";
+		if (params === "") {
+			codes.push(0);
+			continue;
+		}
+		for (const part of params.split(";")) {
+			const n = Number.parseInt(part, 10);
+			if (Number.isFinite(n)) codes.push(n);
+		}
+	}
+	return codes;
+}
+
+/**
+ * Probe a styler function (e.g. `chalk.red`, `theme.fg("mdHeading", ...)`) to
+ * extract its ANSI open/close sequences and the SGR codes that close it.
+ *
+ * The implementation is opaque: any styler producing `<open><text><close>`
+ * works regardless of which SGR codes it emits. SGR 0 (full reset) is always
+ * treated as a closing code in addition to whatever `close` contains.
+ *
+ * Returns empty open/close when the styler does not wrap text in ANSI (e.g. a
+ * no-op styler or a missing theme), so callers can safely fall through.
+ */
+export function probeAnsiStyle(apply: (text: string) => string): AnsiStyleSegment {
+	const wrapped = apply(SCOPED_STYLE_SENTINEL);
+	const idx = wrapped.indexOf(SCOPED_STYLE_SENTINEL);
+	if (idx < 0) {
+		return { open: "", close: "", resetCodes: new Set() };
+	}
+	const open = wrapped.slice(0, idx);
+	const close = wrapped.slice(idx + SCOPED_STYLE_SENTINEL.length);
+	const resetCodes = new Set<number>([0]);
+	for (const code of parseSgrCodesFrom(close)) {
+		resetCodes.add(code);
+	}
+	return { open, close, resetCodes };
+}
+
+/**
+ * Wrap `body` with `segment.open` / `segment.close`, re-applying `segment.open`
+ * after any SGR sequence inside `body` whose parameters terminate this style.
+ *
+ * Caveat: when two nested wrappers share reset codes (e.g. two fg colors that
+ * both close with `\e[39m`), the inner re-open will be immediately overwritten
+ * by the outer re-open. Compose only orthogonal segments — e.g. fg + bold,
+ * whose reset codes 39 and 22 are disjoint.
+ */
+export function wrapWithScopedStyle(segment: AnsiStyleSegment, body: string): string {
+	if (!segment.open) return body;
+	const rewritten = body.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, (seq) => {
+		if (!seq.endsWith("m")) return seq;
+		const codes = parseSgrCodesFrom(seq);
+		return codes.some((code) => segment.resetCodes.has(code)) ? seq + segment.open : seq;
+	});
+	return `${segment.open}${rewritten}${segment.close}`;
+}
+
+/**
+ * Convenience: probe `apply` once and wrap `body` with sustained styling.
+ *
+ * For repeated calls with the same styler, prefer caching the segment from
+ * `probeAnsiStyle` and using `wrapWithScopedStyle` directly.
+ */
+export function applyScopedStyle(apply: (text: string) => string, body: string): string {
+	return wrapWithScopedStyle(probeAnsiStyle(apply), body);
+}

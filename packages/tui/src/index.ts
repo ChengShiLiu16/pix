@@ -103,4 +103,12 @@ export {
 	TUI,
 } from "./tui.ts";
 // Utilities
-export { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.ts";
+export {
+	type AnsiStyleSegment,
+	applyScopedStyle,
+	probeAnsiStyle,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+	wrapWithScopedStyle,
+} from "./utils.ts";

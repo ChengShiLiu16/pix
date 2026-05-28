@@ -37,6 +37,31 @@ describe("edit tool prepareArguments", () => {
 		});
 	});
 
+	it("normalizes filePath to path", () => {
+		const definition = createEditToolDefinition(process.cwd());
+		const prepared = definition.prepareArguments!({
+			filePath: "file.txt",
+			edits: [{ oldText: "before", newText: "after" }],
+		});
+		expect(prepared).toEqual({
+			path: "file.txt",
+			edits: [{ oldText: "before", newText: "after" }],
+		});
+	});
+
+	it("removes filePath when path is already provided", () => {
+		const definition = createEditToolDefinition(process.cwd());
+		const prepared = definition.prepareArguments!({
+			path: "canonical.txt",
+			filePath: "alias.txt",
+			edits: [{ oldText: "before", newText: "after" }],
+		});
+		expect(prepared).toEqual({
+			path: "canonical.txt",
+			edits: [{ oldText: "before", newText: "after" }],
+		});
+	});
+
 	it("appends legacy replacement to existing edits", () => {
 		const definition = createEditToolDefinition(process.cwd());
 		const prepared = definition.prepareArguments!({

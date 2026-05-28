@@ -54,6 +54,9 @@ export function normalizeForFuzzyMatch(text: string): string {
 	);
 }
 
+// (findSimilarText removed — similarity-based auto-matching has false-positive risk.
+//  Diagnostics now use first-line anchoring instead of Levenshtein.)
+
 export interface FuzzyMatchResult {
 	/** Whether a match was found */
 	found: boolean;
@@ -111,25 +114,22 @@ export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResul
 	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
 	const fuzzyIndex = fuzzyContent.indexOf(fuzzyOldText);
 
-	if (fuzzyIndex === -1) {
+	if (fuzzyIndex !== -1) {
 		return {
-			found: false,
-			index: -1,
-			matchLength: 0,
-			usedFuzzyMatch: false,
-			contentForReplacement: content,
+			found: true,
+			index: fuzzyIndex,
+			matchLength: fuzzyOldText.length,
+			usedFuzzyMatch: true,
+			contentForReplacement: fuzzyContent,
 		};
 	}
 
-	// When fuzzy matching, we work in the normalized space for replacement.
-	// This means the output will have normalized whitespace/quotes/dashes,
-	// which is acceptable since we're fixing minor formatting differences anyway.
 	return {
-		found: true,
-		index: fuzzyIndex,
-		matchLength: fuzzyOldText.length,
-		usedFuzzyMatch: true,
-		contentForReplacement: fuzzyContent,
+		found: false,
+		index: -1,
+		matchLength: 0,
+		usedFuzzyMatch: false,
+		contentForReplacement: content,
 	};
 }
 
@@ -144,15 +144,65 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
-function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
-	if (totalEdits === 1) {
-		return new Error(
-			`Could not find the exact text in ${path}. The old text must match exactly including all whitespace and newlines.`,
-		);
+/**
+ * Find a snippet in content that may correspond to oldText, for diagnostic
+ * error messages only. Uses first-line anchoring — search for the first line
+ * of oldText in normalized content, then show context around it.
+ */
+function findDiagnosticSnippet(content: string, oldText: string): { closestMatch: string; similarity: number } | null {
+	const fuzzyContent = normalizeForFuzzyMatch(content);
+	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
+	const firstLine = fuzzyOldText.split("\n")[0];
+	if (!firstLine || firstLine.trim().length === 0) return null;
+
+	// Search for the first line of oldText in normalized content
+	const lineIndex = fuzzyContent.indexOf(firstLine);
+	if (lineIndex === -1) return null;
+
+	// Show context around the match: up to 2x the length of oldText
+	const contextLen = Math.min(fuzzyOldText.length * 2, 600);
+	const snippetStart = Math.max(0, lineIndex - 40);
+	const snippetEnd = Math.min(fuzzyContent.length, lineIndex + contextLen + 40);
+	const snippet = fuzzyContent.slice(snippetStart, snippetEnd);
+
+	// Rough similarity estimate based on substring containment
+	const overlapLen = firstLine.length;
+	const similarity = Math.min(1, overlapLen / Math.max(fuzzyOldText.length, 1));
+
+	return {
+		closestMatch: snippet,
+		similarity,
+	};
+}
+
+/**
+ * Format a snippet for error display: show the model's oldText and the closest
+ * file content side by side, with a similarity score.
+ */
+function formatDiagnostic(oldText: string, snippet: string, similarity: number): string {
+	const truncatedOld = oldText.length > 200 ? `${oldText.slice(0, 200)}...` : oldText;
+	const truncatedSnippet = snippet.length > 300 ? `${snippet.slice(0, 300)}...` : snippet;
+	const pct = (similarity * 100).toFixed(0);
+	const divider = "---";
+	return [
+		`oldText provided (${truncatedOld.length} chars, ~${pct}% first-line match):`,
+		divider,
+		truncatedOld,
+		divider,
+		`Closest content found in file:`,
+		divider,
+		truncatedSnippet,
+		divider,
+	].join("\n");
+}
+
+function getNotFoundError(path: string, editIndex: number, totalEdits: number, diagnostic?: string): Error {
+	const label = totalEdits === 1 ? "the exact text" : `edits[${editIndex}]`;
+	let message = `Could not find ${label} in ${path}. The oldText must match exactly including all whitespace and newlines.`;
+	if (diagnostic) {
+		message += `\n\n${diagnostic}`;
 	}
-	return new Error(
-		`Could not find edits[${editIndex}] in ${path}. The oldText must match exactly including all whitespace and newlines.`,
-	);
+	return new Error(message);
 }
 
 function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrences: number): Error {
@@ -204,6 +254,13 @@ export function applyEditsToNormalizedContent(
 		if (normalizedEdits[i].oldText.length === 0) {
 			throw getEmptyOldTextError(path, i, normalizedEdits.length);
 		}
+		if (normalizedEdits[i].oldText === normalizedEdits[i].newText) {
+			throw new Error(
+				normalizedEdits.length === 1
+					? `oldText and newText are identical in ${path}. The replacement would not change anything.`
+					: `edits[${i}].oldText and newText are identical in ${path}. This edit would not change anything.`,
+			);
+		}
 	}
 
 	const initialMatches = normalizedEdits.map((edit) => fuzzyFindText(normalizedContent, edit.oldText));
@@ -216,7 +273,11 @@ export function applyEditsToNormalizedContent(
 		const edit = normalizedEdits[i];
 		const matchResult = fuzzyFindText(baseContent, edit.oldText);
 		if (!matchResult.found) {
-			throw getNotFoundError(path, i, normalizedEdits.length);
+			const diagnosticSnippet = findDiagnosticSnippet(normalizedContent, edit.oldText);
+			const diagnostic = diagnosticSnippet
+				? formatDiagnostic(edit.oldText, diagnosticSnippet.closestMatch, diagnosticSnippet.similarity)
+				: undefined;
+			throw getNotFoundError(path, i, normalizedEdits.length, diagnostic);
 		}
 
 		const occurrences = countOccurrences(baseContent, edit.oldText);

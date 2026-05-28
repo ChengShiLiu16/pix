@@ -46,6 +46,24 @@ describe("createAgentSession session manager defaults", () => {
 		session.dispose();
 	});
 
+	it("enables ls in the default SDK tool set", async () => {
+		const model = getModel("anthropic", "claude-sonnet-4-5");
+		expect(model).toBeTruthy();
+
+		const sessionManager = SessionManager.inMemory(cwd);
+		const { session } = await createAgentSession({
+			cwd,
+			agentDir,
+			model: model!,
+			sessionManager,
+		});
+
+		expect(session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write", "ls"]);
+		expect(session.systemPrompt).toContain("- ls: List directory contents");
+
+		session.dispose();
+	});
+
 	it("keeps an explicit sessionManager override", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5");
 		expect(model).toBeTruthy();

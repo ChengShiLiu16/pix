@@ -261,6 +261,30 @@ describe("Coding Agent Tools", () => {
 			).rejects.toThrow(/Could not find the exact text/);
 		});
 
+		it("should include first-line anchored diagnostics when text is not found", async () => {
+			const testFile = join(testDir, "edit-diagnostic.txt");
+			writeFileSync(testFile, "function demo() {\n\treturn 1;\n}\n");
+
+			await expect(
+				editTool.execute("test-call-6a", {
+					path: testFile,
+					edits: [{ oldText: "function demo() {\n\treturn 2;\n}", newText: "function demo() {\n\treturn 3;\n}" }],
+				}),
+			).rejects.toThrow(/oldText provided[\s\S]*Closest content found in file:[\s\S]*return 1/);
+		});
+
+		it("should fail when oldText and newText are identical", async () => {
+			const testFile = join(testDir, "edit-identical.txt");
+			writeFileSync(testFile, "hello\n");
+
+			await expect(
+				editTool.execute("test-call-6aa", {
+					path: testFile,
+					edits: [{ oldText: "hello", newText: "hello" }],
+				}),
+			).rejects.toThrow(/oldText and newText are identical/);
+		});
+
 		it("should include ENOENT when the edit target does not exist", async () => {
 			const missingFile = join(testDir, "missing.txt");
 
