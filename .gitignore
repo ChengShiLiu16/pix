@@ -26,6 +26,7 @@ packages/*/dist-firefox/
 coverage/
 .nyc_output/
 .pi_config/
+.pix/
 tui-debug.log
 compaction-results/
 .opencode/
