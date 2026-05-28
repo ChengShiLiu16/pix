@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type ThinkingLevel } from "@earendil-works/pix-agent-core";
+import { Agent, type AgentMessage, estimateContextTokens, type ThinkingLevel } from "@earendil-works/pix-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pix-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -200,6 +200,9 @@ function getAttributionHeaders(
  * });
  * ```
  */
+/** Fraction of the context window above which stale `read` results are pruned. */
+const STALE_READ_PRUNE_THRESHOLD = 0.7;
+
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
@@ -374,10 +377,18 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
-			const pruned = pruneStaleReads(messages);
+			// Stale-read pruning rewrites mid-history messages, which invalidates the
+			// Anthropic prefix cache from that point. Only do it once context usage is
+			// high enough that the token savings (delaying compaction / fitting the
+			// window) outweigh the one-time cache miss.
+			const contextWindow = agent.state.model?.contextWindow ?? 0;
+			const next =
+				contextWindow > 0 && estimateContextTokens(messages).tokens > contextWindow * STALE_READ_PRUNE_THRESHOLD
+					? pruneStaleReads(messages)
+					: messages;
 			const runner = extensionRunnerRef.current;
-			if (!runner) return pruned;
-			return runner.emitContext(pruned);
+			if (!runner) return next;
+			return runner.emitContext(next);
 		},
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),

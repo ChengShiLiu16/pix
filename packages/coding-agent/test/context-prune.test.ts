@@ -124,4 +124,37 @@ describe("pruneStaleReads", () => {
 		const messages: AgentMessage[] = [assistantCall("c1", "read", { path: "/a.ts" }), readResult("c1")];
 		expect(pruneStaleReads(messages)).toBe(messages);
 	});
+
+	it("recognizes the filePath alias when matching a later edit", () => {
+		const messages: AgentMessage[] = [
+			assistantCall("c1", "read", { path: "/a.ts" }),
+			readResult("c1"),
+			assistantCall("c2", "edit", { filePath: "/a.ts" }),
+			mutationResult("c2", "edit"),
+		];
+		const result = pruneStaleReads(messages);
+		expect(resultText(result[1])).toContain("Stale read omitted");
+	});
+
+	it("does not treat a failed edit as superseding an earlier read", () => {
+		const failedEdit: ToolResultMessage = { ...mutationResult("c2", "edit"), isError: true };
+		const messages: AgentMessage[] = [
+			assistantCall("c1", "read", { path: "/a.ts" }),
+			readResult("c1"),
+			assistantCall("c2", "edit", { path: "/a.ts" }),
+			failedEdit,
+		];
+		expect(pruneStaleReads(messages)).toBe(messages);
+	});
+
+	it("does not treat a failed duplicate read as superseding an earlier read", () => {
+		const messages: AgentMessage[] = [
+			assistantCall("c1", "read", { path: "/a.ts" }),
+			readResult("c1"),
+			assistantCall("c2", "read", { path: "/a.ts" }),
+			readResult("c2", BIG, true),
+		];
+		const result = pruneStaleReads(messages);
+		expect(resultText(result[1])).toBe(BIG);
+	});
 });

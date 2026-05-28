@@ -16,6 +16,11 @@
  *
  * Reads with different offset/limit windows are preserved (they show different
  * parts of the file), and error results are left untouched.
+ *
+ * Note: we deliberately do NOT strip historical `thinking` blocks. The Anthropic
+ * API already filters thinking from prior turns server-side and only bills for
+ * the blocks actually shown to Claude, so client-side stripping would save no
+ * billed tokens while invalidating the prefix cache from the rewrite point.
  */
 
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
@@ -34,7 +39,9 @@ interface ReadOpKey {
 
 function getPathArg(args: Record<string, unknown> | undefined): string | undefined {
 	if (!args) return undefined;
-	const path = args.path ?? args.file_path;
+	// Models call edit/write with `path`, `file_path`, or `filePath`; the
+	// persisted tool call keeps whichever the model emitted, so accept all three.
+	const path = args.path ?? args.file_path ?? args.filePath;
 	return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
@@ -105,6 +112,9 @@ export function pruneStaleReads(messages: AgentMessage[]): AgentMessage[] {
 		for (let j = i + 1; j < ops.length; j++) {
 			const later = ops[j];
 			if (later.key.path !== op.key.path) continue;
+			// A failed op did not change the file or return fresh content, so it
+			// cannot supersede an earlier read.
+			if (later.isError) continue;
 			const isLaterMutation = MUTATION_TOOLS.has(later.name);
 			const isDuplicateRead =
 				later.name === "read" && later.key.offset === op.key.offset && later.key.limit === op.key.limit;
