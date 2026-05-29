@@ -31,10 +31,6 @@ function formatTaskLine(task: TodoItem, theme: Theme): string {
 	return line;
 }
 
-function selectVisibleTasks(state: TodoState): TodoItem[] {
-	return state.todos.filter((t) => t.status !== "completed");
-}
-
 function buildLayout(tasks: TodoItem[], maxBodyLines: number): { visible: TodoItem[]; hidden: number } {
 	if (tasks.length <= maxBodyLines) {
 		return { visible: tasks, hidden: 0 };
@@ -50,8 +46,6 @@ export class TodoOverlay {
 	private widgetRegistered = false;
 	private tui: TUI | undefined;
 	private getState: () => TodoState;
-	private completedFlash: TodoItem[] = [];
-	private completedFlashTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(getState: () => TodoState) {
 		this.getState = getState;
@@ -68,9 +62,8 @@ export class TodoOverlay {
 	update(): void {
 		if (!this.uiCtx) return;
 		const state = this.getState();
-		const open = selectVisibleTasks(state);
 
-		if (open.length === 0 && this.completedFlash.length === 0) {
+		if (state.todos.length === 0) {
 			if (this.widgetRegistered) {
 				this.uiCtx.setWidget(WIDGET_ID, undefined);
 				this.widgetRegistered = false;
@@ -100,31 +93,16 @@ export class TodoOverlay {
 		}
 	}
 
-	flashCompleted(tasks: TodoItem[]): void {
-		if (tasks.length === 0) return;
-		this.completedFlash = tasks;
-		if (this.completedFlashTimer) clearTimeout(this.completedFlashTimer);
-		this.completedFlashTimer = setTimeout(() => {
-			this.completedFlash = [];
-			this.update();
-		}, 3000);
-		this.update();
-	}
-
 	dispose(): void {
-		if (this.completedFlashTimer) clearTimeout(this.completedFlashTimer);
 		if (this.uiCtx) this.uiCtx.setWidget(WIDGET_ID, undefined);
 		this.widgetRegistered = false;
 		this.tui = undefined;
 		this.uiCtx = undefined;
-		this.completedFlash = [];
 	}
 
 	private renderWidget(theme: Theme, width: number): string[] {
 		const state = this.getState();
-		const open = selectVisibleTasks(state);
-		const tasks = open.length > 0 ? open : this.completedFlash;
-		if (tasks.length === 0) return [];
+		if (state.todos.length === 0) return [];
 
 		const truncate = (line: string): string => truncateToWidth(line, width, "…");
 		const counts = countByStatus(state);
@@ -136,7 +114,7 @@ export class TodoOverlay {
 		);
 
 		const lines: string[] = [heading];
-		const layout = buildLayout(tasks, MAX_WIDGET_LINES - 1);
+		const layout = buildLayout(state.todos, MAX_WIDGET_LINES - 1);
 		for (const task of layout.visible) {
 			lines.push(truncate(`${theme.fg("dim", "├─")} ${formatTaskLine(task, theme)}`));
 		}

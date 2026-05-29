@@ -19,10 +19,16 @@ import type { ExtensionAPI } from "../../index.ts";
 import { TodoOverlay } from "./lib/todo-overlay.ts";
 import { applyMutation, type TodoAction } from "./lib/todo-reducer.ts";
 import { replayTodoFromBranch } from "./lib/todo-replay.ts";
-import { cloneState, countByStatus, EMPTY_TODO_STATE, hasOpenTodos, type TodoState } from "./lib/todo-state.ts";
+import {
+	cloneState,
+	countByStatus,
+	EMPTY_TODO_STATE,
+	hasOpenTodos,
+	MAX_ACTIVE_FORM_LENGTH,
+	MAX_TODO_TEXT_LENGTH,
+	type TodoState,
+} from "./lib/todo-state.ts";
 import { buildTodoTriggerHint, scoreTodoTrigger } from "./lib/todo-trigger.ts";
-
-const WIDGET_ID = "todo-list";
 
 function formatListSummary(state: TodoState): string {
 	const counts = countByStatus(state);
@@ -62,6 +68,8 @@ export function builtin(pi: ExtensionAPI) {
 	let state: TodoState = cloneState(EMPTY_TODO_STATE);
 	let widgetCtx: any = null;
 	let todoOverlay: TodoOverlay | undefined;
+	let agentAddedTodoIds = new Set<number>();
+	let agentTouchedExistingTodos = false;
 
 	function getState(): TodoState {
 		return state;
@@ -84,6 +92,29 @@ export function builtin(pi: ExtensionAPI) {
 		todoOverlay ??= new TodoOverlay(getState);
 		todoOverlay.setUICtx(widgetCtx.ui);
 		todoOverlay.update();
+	}
+
+	function clearCompletedState(): void {
+		if (state.todos.length === 0 || hasOpenTodos(state)) return;
+		replaceState(cloneState(EMPTY_TODO_STATE));
+		persistState();
+		refreshWidget();
+	}
+
+	function resetAgentTodoTracking(): void {
+		agentAddedTodoIds = new Set<number>();
+		agentTouchedExistingTodos = false;
+	}
+
+	function clearAddOnlyAgentTodos(): void {
+		if (agentAddedTodoIds.size === 0 || agentTouchedExistingTodos) return;
+		const addedIds = agentAddedTodoIds;
+		if (![...addedIds].every((id) => state.todos.find((t) => t.id === id)?.status === "pending")) return;
+
+		const todos = state.todos.filter((t) => !addedIds.has(t.id));
+		replaceState(todos.length === 0 ? EMPTY_TODO_STATE : { todos, nextId: state.nextId });
+		persistState();
+		refreshWidget();
 	}
 
 	function handleLifecycle(ctx: any): void {
@@ -111,6 +142,8 @@ export function builtin(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", async (event) => {
+		resetAgentTodoTracking();
+		clearCompletedState();
 		if (hasOpenTodos(state)) return;
 
 		const trigger = scoreTodoTrigger(event.prompt);
@@ -125,11 +158,15 @@ export function builtin(pi: ExtensionAPI) {
 		};
 	});
 
-	pi.on("session_shutdown", async (_event, ctx) => {
+	pi.on("session_shutdown", async (_event, _ctx) => {
 		todoOverlay?.dispose();
 		todoOverlay = undefined;
-		ctx.ui.setWidget(WIDGET_ID, []);
 		widgetCtx = null;
+	});
+
+	pi.on("agent_end", async () => {
+		clearAddOnlyAgentTodos();
+		resetAgentTodoTracking();
 	});
 
 	pi.on("tool_execution_end", async (event) => {
@@ -173,6 +210,8 @@ export function builtin(pi: ExtensionAPI) {
 			"任务只有1-2步且很直接——不需要 todo 跟踪",
 			"【使用原则】",
 			"todo 是跟踪工具不是计划工具，不要先创建一堆 todo 再开始工作，而是在确定需要做多步时边做边加",
+			"不要把已完成的分析、验证结果、总结清单创建成 todo；如果只是要求列出/生成 todo 清单，请直接用文本回答，不要调用 todo_manage",
+			"不要在最终总结阶段新建 todo；如果本轮只 add 而没有 start/done/remove，系统会把这些空转 todo 当作临时清单清理掉",
 			"每个 todo 应该是一个具体的、可完成的动作，不要写模糊的描述",
 			"start 会将其他进行中的任务降回 pending，确保同时只有一个任务处于 in_progress",
 		],
@@ -180,9 +219,11 @@ export function builtin(pi: ExtensionAPI) {
 			action: StringEnum(["add", "start", "done", "remove", "list"] as const, {
 				description: "操作类型：add=添加, start=标记进行中, done=标记完成, remove=删除, list=查看列表",
 			}),
-			text: Type.Optional(Type.String({ description: "任务描述（add 时必填）" })),
+			text: Type.Optional(Type.String({ description: "任务描述（add 时必填）", maxLength: MAX_TODO_TEXT_LENGTH })),
 			id: Type.Optional(Type.Number({ description: "任务 ID（start/done/remove 时必填）" })),
-			activeForm: Type.Optional(Type.String({ description: "进行中的简短描述（start 时可选）" })),
+			activeForm: Type.Optional(
+				Type.String({ description: "进行中的简短描述（start 时可选）", maxLength: MAX_ACTIVE_FORM_LENGTH }),
+			),
 		}),
 		renderCall() {
 			return EMPTY;
@@ -218,8 +259,12 @@ export function builtin(pi: ExtensionAPI) {
 				} as any;
 			}
 
-			const prevTodos = state.todos;
 			replaceState(result.state);
+			if (result.op.kind === "add") {
+				agentAddedTodoIds.add(result.op.id);
+			} else if (result.op.kind === "start" || result.op.kind === "done" || result.op.kind === "remove") {
+				agentTouchedExistingTodos = true;
+			}
 			persistState();
 
 			switch (result.op.kind) {
@@ -237,9 +282,9 @@ export function builtin(pi: ExtensionAPI) {
 					};
 				case "done": {
 					if (result.op.clearedAll) {
-						todoOverlay?.flashCompleted(prevTodos);
+						refreshWidget();
 						return {
-							content: [{ type: "text", text: `✅ ${result.op.clearedCount ?? prevTodos.length}` }],
+							content: [{ type: "text", text: `✅ ${result.state.todos.length}` }],
 							details,
 						};
 					}

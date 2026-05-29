@@ -17,6 +17,10 @@ export interface TodoDetails {
 	nextId: number;
 }
 
+export const MAX_TODOS = 50;
+export const MAX_TODO_TEXT_LENGTH = 200;
+export const MAX_ACTIVE_FORM_LENGTH = 80;
+
 /** Legacy shape before rpiv-port (done: boolean). */
 type LegacyTodoItem = {
 	id: number;
@@ -28,10 +32,32 @@ type LegacyTodoItem = {
 
 export const EMPTY_TODO_STATE: TodoState = { todos: [], nextId: 1 };
 
+function isPositiveInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isTodoStatus(value: unknown): value is TodoStatus {
+	return value === "pending" || value === "in_progress" || value === "completed";
+}
+
+function isLegacyTodoItem(value: unknown): value is LegacyTodoItem {
+	if (!value || typeof value !== "object") return false;
+	const item = value as Record<string, unknown>;
+	if (!isPositiveInteger(item.id) || typeof item.text !== "string" || item.text.trim().length === 0) return false;
+	if (item.text.length > MAX_TODO_TEXT_LENGTH) return false;
+	if (item.status !== undefined && !isTodoStatus(item.status)) return false;
+	if (item.done !== undefined && typeof item.done !== "boolean") return false;
+	if (item.activeForm !== undefined && typeof item.activeForm !== "string") return false;
+	if (typeof item.activeForm === "string" && item.activeForm.length > MAX_ACTIVE_FORM_LENGTH) return false;
+	return true;
+}
+
 export function isTodoDetails(value: unknown): value is TodoDetails {
 	if (!value || typeof value !== "object") return false;
 	const v = value as Record<string, unknown>;
-	return Array.isArray(v.todos) && typeof v.nextId === "number";
+	if (!Array.isArray(v.todos) || !isPositiveInteger(v.nextId)) return false;
+	if (v.todos.length > MAX_TODOS) return false;
+	return v.todos.every(isLegacyTodoItem);
 }
 
 export function migrateLegacyTodo(raw: LegacyTodoItem): TodoItem {
