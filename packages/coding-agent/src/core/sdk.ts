@@ -32,6 +32,7 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
+import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./tools/truncate.ts";
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -378,6 +379,40 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
+			// Step 0: Cap assistant text blocks to prevent unbounded growth.
+			// Some providers (e.g. siliconflow/DeepSeek-V4-Pro) return tool calls
+			// as raw text instead of structured tool_calls, producing assistant
+			// text blocks that can balloon to multiple megabytes. This cap is
+			// a safety net that catches all such cases.
+			const MAX_ASSISTANT_TEXT_BYTES = DEFAULT_MAX_BYTES * 2; // 100KB
+			if (messages.length > 0) {
+				messages = messages.map((msg) => {
+					if (msg.role !== "assistant") return msg;
+					const content = msg.content;
+					if (!content || !Array.isArray(content)) return msg;
+					let changed = false;
+					const newContent = content.map((block) => {
+						if (block.type !== "text") return block;
+						const bytes = Buffer.byteLength(block.text, "utf-8");
+						if (bytes <= MAX_ASSISTANT_TEXT_BYTES) return block;
+						changed = true;
+						const truncated = truncateHead(block.text, { maxBytes: MAX_ASSISTANT_TEXT_BYTES });
+						if (truncated.firstLineExceedsLimit) {
+							return {
+								type: "text" as const,
+								text: `[Assistant text block (${formatSize(bytes)}) exceeds limit. Truncated.]`,
+							};
+						}
+						const totalSize = formatSize(truncated.totalBytes);
+						return {
+							type: "text" as const,
+							text: `${truncated.content}\n\n[Truncated: ${formatSize(MAX_ASSISTANT_TEXT_BYTES)} of ${totalSize} shown.]`,
+						};
+					});
+					return changed ? { ...msg, content: newContent } : msg;
+				});
+			}
+
 			// Progressive aging reduces old tool results before the more
 			// destructive stale-read pruning. Aging is less invasive
 			// (preserves structure) and triggers at a lower threshold.

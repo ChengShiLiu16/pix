@@ -172,6 +172,7 @@ export function builtin(pi: ExtensionAPI) {
 				'Prefer files[] with per-file ranges: [{ path: "big.ts", offset: 580, limit: 260 }, { path: "config.ts" }]. Each file gets its own offset/limit — no shared global range.',
 				"Use paths[] + top-level offset/limit only when every file needs the same range (homogeneous batch).",
 				"When paginating a large file alongside smaller files, put offset/limit on that file only in files[]; omit offset on files that should be read fully.",
+				"When batching, use per-file offset/limit for large files instead of reading them in full — this avoids pulling in thousands of irrelevant lines.",
 			],
 			parameters: schema,
 			prepareArguments: prepareReadManyArguments,

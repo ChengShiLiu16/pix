@@ -363,6 +363,7 @@ export function createBashToolDefinition(
 					} else {
 						text += `\n\n[Showing lines ${startLine}-${endLine} of ${truncation.totalLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Full output: ${snapshot.fullOutputPath}]`;
 					}
+					text += `\n[Tip: use 'read ${snapshot.fullOutputPath} offset=1 limit=100' to inspect specific sections without re-running the command.]`;
 				}
 				return { text, details };
 			};

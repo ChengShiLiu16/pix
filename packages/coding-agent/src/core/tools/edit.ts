@@ -22,6 +22,7 @@ import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { invalidArgText, shortenPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
+import { formatSize, truncateHead } from "./truncate.ts";
 
 type EditPreview = EditDiffResult | EditDiffError;
 
@@ -303,6 +304,26 @@ function setEditPreview(
 	return changed;
 }
 
+/**
+ * Format a diff string for inclusion in the model-visible tool result.
+ * Returns a bounded diff (head-only, ~100 lines / ~5KB) so large patches
+ * don't blow the context window. Returns null when the diff is too large
+ * even for the bounded view, directing the model to use `read` instead.
+ */
+function formatDiffForModel(diff: string, maxLines = 100, maxBytes = 5 * 1024): string | null {
+	if (!diff) return null;
+	const truncated = truncateHead(diff, { maxLines, maxBytes });
+	if (truncated.firstLineExceedsLimit) {
+		return null;
+	}
+	if (truncated.truncated) {
+		const totalLines = truncated.totalLines;
+		const totalSize = formatSize(truncated.totalBytes);
+		return `${truncated.content}\n[Diff truncated: ${totalLines} lines (${totalSize}) total. Use 'read' to inspect full changes.]`;
+	}
+	return diff;
+}
+
 export function createEditToolDefinition(
 	cwd: string,
 	options?: EditToolOptions,
@@ -368,11 +389,14 @@ export function createEditToolDefinition(
 
 				const diffResult = generateDiffString(baseContent, newContent);
 				const patch = generateUnifiedPatch(path, baseContent, newContent);
+				const diffText = formatDiffForModel(diffResult.diff);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
+							text: diffText
+								? `Successfully replaced ${edits.length} block(s) in ${path}.\n\nChanged area (${path}:${diffResult.firstChangedLine ?? "?"}):\n${diffText}`
+								: `Successfully replaced ${edits.length} block(s) in ${path}.`,
 						},
 					],
 					details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
