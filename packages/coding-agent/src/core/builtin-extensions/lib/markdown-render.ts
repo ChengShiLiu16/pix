@@ -117,7 +117,7 @@ export function prepareMarkdownForRender(text: string): string {
 		/^([-*+]\s+\S)/,
 		/^(\d+\.\s+\S)/,
 		/^([-*+]\s+\[[ xX]\]\s+\S)/,
-		/^(```)/,
+		/^[ \t]*(```)/,
 		/^(>{1,}\s+\S)/,
 		/^(-{3,}|\*{3,}|_{3,})\s*$/,
 	];
@@ -515,7 +515,7 @@ export function formatMarkdownForTerminalText(text: string, theme?: NarrativeThe
 
 	for (let index = 0; index < lines.length; index++) {
 		const line = lines[index] ?? "";
-		const fence = line.match(/^```\s*([^`]*)\s*$/);
+		const fence = line.match(/^[ \t]*```[ \t]*([^`]*)[ \t]*$/);
 		if (fence) {
 			if (inCodeFence) {
 				output.push(styler.mdCodeBlockBorder("╰─"));

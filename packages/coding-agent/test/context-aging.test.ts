@@ -78,7 +78,7 @@ describe("ageToolResults", () => {
 	it("starts aging at 50% context ratio", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 20);
 		const result = ageToolResults(messages, 0.5);
-		expect(resultText(result[1])).toContain("lines omitted");
+		expect(resultText(result[1])).toContain("lines not shown");
 	});
 
 	it("returns original array when nothing needs aging", () => {
@@ -99,7 +99,7 @@ describe("ageToolResults", () => {
 		// Light aging requires age >= 10; 12 user turns after
 		const messages = buildConversation("read", FIFTY_LINES, 12);
 		const result = ageToolResults(messages, 0.6); // light aging
-		expect(resultText(result[1])).toContain("lines omitted");
+		expect(resultText(result[1])).toContain("lines not shown");
 	});
 
 	// --- size gating ---
@@ -151,7 +151,7 @@ describe("ageToolResults", () => {
 		expect(text).toContain("line 1:");
 		expect(text).toContain("line 20:");
 		expect(text).toContain("line 50:");
-		expect(text).toContain("lines omitted");
+		expect(text).toContain("lines not shown");
 		expect(text).not.toContain("line 21:");
 	});
 
@@ -161,7 +161,7 @@ describe("ageToolResults", () => {
 		const text = resultText(result[1]);
 		expect(text).toContain("line 1:");
 		expect(text).toContain("line 5:");
-		expect(text).toContain("lines omitted");
+		expect(text).toContain("lines not shown");
 		expect(text).not.toContain("line 6:");
 	});
 
@@ -169,7 +169,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Read result aged");
+		expect(text).toContain("Read result omitted to save context");
 		expect(text).toContain("50 lines total");
 		expect(text).not.toContain("line 1:");
 	});
@@ -181,14 +181,14 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.6); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("line 50:");
-		expect(text).toContain("earlier lines omitted");
+		expect(text).toContain("earlier lines not shown");
 	});
 
 	it("heavy aging: replaces bash with single-line placeholder", () => {
 		const messages = buildConversation("bash", FIFTY_LINES, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Bash output aged");
+		expect(text).toContain("Bash output omitted to save context");
 		expect(text).toContain("50 lines total");
 	});
 
@@ -201,7 +201,7 @@ describe("ageToolResults", () => {
 		const text = resultText(result[1]);
 		expect(text).toContain("/a.ts:1:");
 		expect(text).toContain("/a.ts:20:");
-		expect(text).toContain("more matches omitted");
+		expect(text).toContain("more matches not shown");
 		expect(text).not.toContain("/a.ts:21:");
 	});
 
@@ -210,7 +210,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("grep", grepOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Grep result aged");
+		expect(text).toContain("Grep result omitted to save context");
 		expect(text).toContain("matches total");
 	});
 
@@ -222,7 +222,7 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.6); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("file0.ts");
-		expect(text).toContain("more entries omitted");
+		expect(text).toContain("more entries not shown");
 	});
 
 	it("heavy aging: replaces ls with single-line placeholder", () => {
@@ -230,7 +230,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("ls", lsOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Ls result aged");
+		expect(text).toContain("Ls result omitted to save context");
 		expect(text).toContain("entries total");
 	});
 
@@ -239,7 +239,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("find", findOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Find result aged");
+		expect(text).toContain("Find result omitted to save context");
 	});
 
 	// --- batch tool aging ---
@@ -249,7 +249,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("read_many", readOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Read result aged");
+		expect(text).toContain("Read result omitted to save context");
 	});
 
 	it("heavy aging: replaces grep_many with single-line placeholder", () => {
@@ -257,7 +257,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("grep_many", grepOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Grep result aged");
+		expect(text).toContain("Grep result omitted to save context");
 		expect(text).toContain("matches total");
 	});
 
@@ -266,7 +266,7 @@ describe("ageToolResults", () => {
 		const messages = buildConversation("ls_many", lsOutput, 5);
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
-		expect(text).toContain("Ls result aged");
+		expect(text).toContain("Ls result omitted to save context");
 		expect(text).toContain("entries total");
 	});
 
@@ -296,7 +296,7 @@ describe("ageToolResults", () => {
 		];
 		const result = ageToolResults(messages, 0.6); // light aging, minAge=10
 		// Old result (index 1, age=14) should be aged
-		expect(resultText(result[1])).toContain("lines omitted");
+		expect(resultText(result[1])).toContain("lines not shown");
 		// New result (index 15, age=2) should be untouched
 		expect(resultText(result[15])).toBe(FIFTY_LINES);
 	});
@@ -324,10 +324,10 @@ describe("compactEditArguments", () => {
 		const assistant = result[0] as AssistantMessage;
 		const block = assistant.content[0] as { type: string; name: string; arguments: Record<string, unknown> };
 		const compacted = block.arguments.old_string as string;
-		expect(compacted).toContain("chars total");
+		expect(compacted).toContain("total)");
 		expect(compacted.length).toBeLessThan(oldString.length);
 		// Should preserve head and tail of old_string
-		expect(compacted).toContain("chars omitted");
+		expect(compacted).toContain("chars not shown");
 		expect(compacted.startsWith(oldString.slice(0, 50))).toBe(true);
 		expect(compacted.endsWith(oldString.slice(-50))).toBe(true);
 		// new_string should be preserved

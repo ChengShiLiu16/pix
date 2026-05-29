@@ -21,6 +21,7 @@
 
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil-works/pix-ai";
+import type { ReachabilityLevel } from "./context-reachability.ts";
 
 /** Minimum text length (chars) of a result before aging is worth it. */
 const MIN_AGING_CHARS = 800;
@@ -133,7 +134,7 @@ function ageReadResult(text: string, level: AgingLevel): string {
 	const totalLines = lines.length;
 
 	if (level.heavy) {
-		return `[Read result aged: ${totalLines} lines total. Re-read the file if you need its contents.]`;
+		return `Read result omitted to save context. ${totalLines} lines total. Re-read the file if needed.`;
 	}
 
 	const keptLines = level.readHeadLines + level.readTailLines;
@@ -141,7 +142,7 @@ function ageReadResult(text: string, level: AgingLevel): string {
 		// Result fits within budget — try character-based truncation for long lines
 		if (text.length <= 2000) return text;
 		// Single/few long lines: keep first 1500 chars
-		return `${text.slice(0, 1500)}\n... [${text.length - 1500} more characters omitted]`;
+		return `${text.slice(0, 1500)}\n... ${text.length - 1500} more characters not shown.`;
 	}
 
 	const head = lines.slice(0, level.readHeadLines);
@@ -149,9 +150,9 @@ function ageReadResult(text: string, level: AgingLevel): string {
 	const omitted = totalLines - keptLines;
 	let result = head.join("\n");
 	if (tail.length > 0) {
-		result += `\n... [${omitted} lines omitted] ...\n${tail.join("\n")}`;
+		result += `\n... ${omitted} lines not shown ...\n${tail.join("\n")}`;
 	} else {
-		result += `\n... [${omitted} lines omitted]`;
+		result += `\n... ${omitted} lines not shown.`;
 	}
 	return result;
 }
@@ -165,17 +166,17 @@ function ageBashResult(text: string, level: AgingLevel): string {
 	const totalLines = lines.length;
 
 	if (level.heavy) {
-		return `[Bash output aged: ${totalLines} lines total. Re-run the command if you need the output.]`;
+		return `Bash output omitted to save context. ${totalLines} lines total. Re-run the command if needed.`;
 	}
 
 	if (totalLines <= level.bashTailLines) {
 		if (text.length <= 2000) return text;
 		// Few long lines: keep last 1500 chars
-		return `... [earlier content omitted] ...\n${text.slice(-1500)}`;
+		return `... earlier content not shown ...\n${text.slice(-1500)}`;
 	}
 
 	const tail = lines.slice(-level.bashTailLines);
-	return `... [${totalLines - level.bashTailLines} earlier lines omitted] ...\n${tail.join("\n")}`;
+	return `... ${totalLines - level.bashTailLines} earlier lines not shown ...\n${tail.join("\n")}`;
 }
 
 /**
@@ -186,12 +187,12 @@ function ageGrepResult(text: string, level: AgingLevel): string {
 		// Count matches using ripgrep output format (file:line:content).
 		// Skip empty lines and "--" separators between files.
 		const matchCount = text.split("\n").filter((l) => l.length > 0 && !l.startsWith("--") && /:\d+:/.test(l)).length;
-		return `[Grep result aged: ${matchCount} matches total. Re-run grep if you need the matches.]`;
+		return `Grep result omitted to save context. ${matchCount} matches total. Re-run grep if needed.`;
 	}
 	const lines = text.split("\n");
 	if (lines.length <= level.grepMaxMatches) return text;
 	const kept = lines.slice(0, level.grepMaxMatches);
-	return `${kept.join("\n")}\n... [${lines.length - level.grepMaxMatches} more matches omitted]`;
+	return `${kept.join("\n")}\n... ${lines.length - level.grepMaxMatches} more matches not shown.`;
 }
 
 /**
@@ -201,12 +202,12 @@ function ageListResult(text: string, level: AgingLevel, toolName: string): strin
 	if (level.heavy) {
 		const entryCount = text.split("\n").length;
 		const label = toolName === "find" ? "Find" : "Ls";
-		return `[${label} result aged: ${entryCount} entries total. Re-run if you need the full list.]`;
+		return `${label} result omitted to save context. ${entryCount} entries total. Re-run if needed.`;
 	}
 	const lines = text.split("\n");
 	if (lines.length <= level.listMaxEntries) return text;
 	const kept = lines.slice(0, level.listMaxEntries);
-	return `${kept.join("\n")}\n... [${lines.length - level.listMaxEntries} more entries omitted]`;
+	return `${kept.join("\n")}\n... ${lines.length - level.listMaxEntries} more entries not shown.`;
 }
 
 /**
@@ -216,7 +217,50 @@ function ageListResult(text: string, level: AgingLevel, toolName: string): strin
  * @param messages - The conversation messages to process
  * @param contextRatio - Current context usage ratio (used / window), 0-1+
  */
-export function ageToolResults(messages: AgentMessage[], contextRatio: number): AgentMessage[] {
+/**
+ * Generate a concise natural-language placeholder for an unrelated tool result.
+ * The text is plain prose with no machine markers so the model never mimics it.
+ */
+function naturalLanguagePlaceholder(toolName: string, path?: string, lineCount?: number): string {
+	const p = path ?? "this file";
+	const n = lineCount !== undefined ? `${lineCount}` : "many";
+	switch (toolName) {
+		case "read":
+		case "read_many":
+			return `Earlier read of ${p} (${n} lines) omitted to save context. Re-read the file if needed.`;
+		case "grep":
+		case "grep_many":
+			return `Earlier grep results omitted to save context. Re-run grep if needed.`;
+		case "ls":
+		case "ls_many":
+			return `Earlier directory listing (${n} entries) omitted to save context. Re-run ${toolName} if needed.`;
+		case "find":
+			return `Earlier find results (${n} entries) omitted to save context. Re-run find if needed.`;
+		case "bash":
+			return `Earlier command output omitted to save context. Re-run the command if needed.`;
+		default:
+			return `Earlier tool result omitted to save context. Re-run the tool if needed.`;
+	}
+}
+
+/**
+ * Count lines in a tool result's text content.
+ */
+function countLines(content: ToolResultMessage["content"]): number {
+	let total = 0;
+	for (const block of content) {
+		if (block.type === "text") {
+			total += block.text.split("\n").length;
+		}
+	}
+	return total;
+}
+
+export function ageToolResults(
+	messages: AgentMessage[],
+	contextRatio: number,
+	reachability?: Map<number, ReachabilityLevel>,
+): AgentMessage[] {
 	const level = getAgingLevel(contextRatio);
 	if (!level) return messages;
 
@@ -232,12 +276,36 @@ export function ageToolResults(messages: AgentMessage[], contextRatio: number): 
 		if (MUTATION_TOOLS.has(toolResult.toolName)) return message;
 		if (!AGABLE_TOOLS.has(toolResult.toolName)) return message;
 
+		// Focus-context reachability decides how hard to age each result:
+		//   active   — issued in the current focus window; keep full evidence.
+		//   adjacent — touches a file/scope the current work is about; keep
+		//              full unless we are under heavy pressure and need space.
+		//   unrelated — not on the demand chain; age normally (heavy → stub).
+		// Only "unrelated" results are eligible for aggressive trimming, so the
+		// bulk of the savings come from history the model is no longer using
+		// while what it is actively working on stays intact.
+		const r = reachability?.get(index);
+		if (r === "active") return message;
+		if (r === "adjacent" && !level.heavy) return message;
+
 		// Check age threshold.
 		const age = ages.get(index) ?? 0;
 		if (age < level.minAge) return message;
 
 		// Check size threshold.
 		if (textLength(toolResult.content) < MIN_AGING_CHARS) return message;
+
+		// Unrelated results under heavy aging are replaced with a minimal
+		// natural-language placeholder instead of truncated content.
+		if (r === "unrelated" && level.heavy) {
+			changed = true;
+			const lines = countLines(toolResult.content);
+			const stub: TextContent = {
+				type: "text",
+				text: naturalLanguagePlaceholder(toolResult.toolName, undefined, lines),
+			};
+			return { ...toolResult, content: [stub] } satisfies ToolResultMessage;
+		}
 
 		const text = extractText(toolResult.content);
 		let agedText: string;
@@ -309,8 +377,8 @@ export function compactEditArguments(messages: AgentMessage[], contextRatio: num
 			const middle = oldString.length - 100;
 			const summary =
 				middle > 0
-					? `${head}... [${middle} chars omitted, ${oldString.length} chars total] ...${tail}`
-					: `${head}... [${oldString.length} chars total]`;
+					? `${head}... ${middle} chars not shown (${oldString.length} total) ...${tail}`
+					: `${head}... ${oldString.length} chars total.`;
 			return {
 				...block,
 				arguments: {

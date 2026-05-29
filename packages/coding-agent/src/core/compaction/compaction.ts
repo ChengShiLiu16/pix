@@ -130,7 +130,13 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 
 /**
  * Calculate total context tokens from usage.
- * Uses the native totalTokens field when available, falls back to computing from components.
+ *
+ * The context window holds the ENTIRE prompt regardless of caching. With prompt
+ * caching, `input` only counts the uncached suffix; the bulk of the history is
+ * reported under `cacheRead`. Excluding it would undercount the real window
+ * occupancy by ~90% on a cache hit and effectively disable threshold-based
+ * compaction/aging. So we count input + output + cacheRead + cacheWrite, using
+ * the provider-supplied `totalTokens` when available.
  */
 export function calculateContextTokens(usage: Usage): number {
 	return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
