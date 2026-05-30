@@ -30,6 +30,7 @@ const basisSchema = Type.Union([
 	Type.Literal("raw_diff"),
 	Type.Literal("source"),
 	Type.Literal("raw_diff_and_source"),
+	Type.Literal("diff"),
 ]);
 
 const evidenceSpanSchema = Type.Object({
@@ -247,7 +248,7 @@ function validateAdd(input: GitEvidenceFindingsToolInput): ValidatedFinding {
 	const title = input.title?.trim();
 	const summary = input.summary?.trim();
 	const claimKind = input.claimKind;
-	const basis = input.basis;
+	let basis = input.basis;
 	const confidence = input.confidence ?? "medium";
 	const evidenceSpans = (input.evidenceSpans ?? []).map((span) => ({
 		evidenceId: span.evidenceId.trim(),
@@ -261,6 +262,9 @@ function validateAdd(input: GitEvidenceFindingsToolInput): ValidatedFinding {
 		endLine: Math.floor(span.endLine),
 	}));
 	const limitations = input.limitations?.trim();
+	if (basis === "diff") {
+		basis = "raw_diff";
+	}
 	if (!title) throw new Error("git_evidence_findings add requires title");
 	if (!summary) throw new Error("git_evidence_findings add requires summary");
 	if (!claimKind) throw new Error("git_evidence_findings add requires claimKind");
