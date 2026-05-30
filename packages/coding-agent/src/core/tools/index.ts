@@ -27,6 +27,23 @@ export {
 	type FindToolOptions,
 } from "./find.ts";
 export {
+	createGitEvidenceFindingsTool,
+	createGitEvidenceFindingsToolDefinition,
+	type GitEvidenceFindingsOperations,
+	type GitEvidenceFindingsToolDetails,
+	type GitEvidenceFindingsToolInput,
+	type GitEvidenceFindingsToolOptions,
+	type GitEvidenceSeverity,
+} from "./git-evidence-findings.ts";
+export {
+	createGitEvidenceReadTool,
+	createGitEvidenceReadToolDefinition,
+	type GitEvidenceReadOperations,
+	type GitEvidenceReadToolDetails,
+	type GitEvidenceReadToolInput,
+	type GitEvidenceReadToolOptions,
+} from "./git-evidence-read.ts";
+export {
 	createGrepTool,
 	createGrepToolDefinition,
 	type GrepOperations,
@@ -73,6 +90,16 @@ import type { ToolDefinition } from "../extensions/types.ts";
 import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
 import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
 import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
+import {
+	createGitEvidenceFindingsTool,
+	createGitEvidenceFindingsToolDefinition,
+	type GitEvidenceFindingsToolOptions,
+} from "./git-evidence-findings.ts";
+import {
+	createGitEvidenceReadTool,
+	createGitEvidenceReadToolDefinition,
+	type GitEvidenceReadToolOptions,
+} from "./git-evidence-read.ts";
 import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
 import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
 import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
@@ -80,8 +107,27 @@ import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } fro
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName = "read" | "bash" | "edit" | "write" | "grep" | "find" | "ls";
-export const allToolNames: Set<ToolName> = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+export type ToolName =
+	| "read"
+	| "bash"
+	| "edit"
+	| "write"
+	| "grep"
+	| "find"
+	| "ls"
+	| "git_evidence_read"
+	| "git_evidence_findings";
+export const allToolNames: Set<ToolName> = new Set([
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"grep",
+	"find",
+	"ls",
+	"git_evidence_read",
+	"git_evidence_findings",
+]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
@@ -91,6 +137,8 @@ export interface ToolsOptions {
 	grep?: GrepToolOptions;
 	find?: FindToolOptions;
 	ls?: LsToolOptions;
+	gitEvidenceRead?: GitEvidenceReadToolOptions;
+	gitEvidenceFindings?: GitEvidenceFindingsToolOptions;
 }
 
 export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
@@ -109,6 +157,10 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 			return createFindToolDefinition(cwd, options?.find);
 		case "ls":
 			return createLsToolDefinition(cwd, options?.ls);
+		case "git_evidence_read":
+			return createGitEvidenceReadToolDefinition(cwd, options?.gitEvidenceRead);
+		case "git_evidence_findings":
+			return createGitEvidenceFindingsToolDefinition(cwd, options?.gitEvidenceFindings);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -130,6 +182,10 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 			return createFindTool(cwd, options?.find);
 		case "ls":
 			return createLsTool(cwd, options?.ls);
+		case "git_evidence_read":
+			return createGitEvidenceReadTool(cwd, options?.gitEvidenceRead);
+		case "git_evidence_findings":
+			return createGitEvidenceFindingsTool(cwd, options?.gitEvidenceFindings);
 		default:
 			throw new Error(`Unknown tool name: ${toolName}`);
 	}
@@ -141,6 +197,8 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd, options?.edit),
 		createWriteToolDefinition(cwd, options?.write),
+		createGitEvidenceReadToolDefinition(cwd, options?.gitEvidenceRead),
+		createGitEvidenceFindingsToolDefinition(cwd, options?.gitEvidenceFindings),
 	];
 }
 
@@ -150,6 +208,8 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 		createGrepToolDefinition(cwd, options?.grep),
 		createFindToolDefinition(cwd, options?.find),
 		createLsToolDefinition(cwd, options?.ls),
+		createGitEvidenceReadToolDefinition(cwd, options?.gitEvidenceRead),
+		createGitEvidenceFindingsToolDefinition(cwd, options?.gitEvidenceFindings),
 	];
 }
 
@@ -162,6 +222,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		grep: createGrepToolDefinition(cwd, options?.grep),
 		find: createFindToolDefinition(cwd, options?.find),
 		ls: createLsToolDefinition(cwd, options?.ls),
+		git_evidence_read: createGitEvidenceReadToolDefinition(cwd, options?.gitEvidenceRead),
+		git_evidence_findings: createGitEvidenceFindingsToolDefinition(cwd, options?.gitEvidenceFindings),
 	};
 }
 
@@ -171,6 +233,8 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd, options?.edit),
 		createWriteTool(cwd, options?.write),
+		createGitEvidenceReadTool(cwd, options?.gitEvidenceRead),
+		createGitEvidenceFindingsTool(cwd, options?.gitEvidenceFindings),
 	];
 }
 
@@ -180,6 +244,8 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 		createGrepTool(cwd, options?.grep),
 		createFindTool(cwd, options?.find),
 		createLsTool(cwd, options?.ls),
+		createGitEvidenceReadTool(cwd, options?.gitEvidenceRead),
+		createGitEvidenceFindingsTool(cwd, options?.gitEvidenceFindings),
 	];
 }
 
@@ -192,5 +258,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		grep: createGrepTool(cwd, options?.grep),
 		find: createFindTool(cwd, options?.find),
 		ls: createLsTool(cwd, options?.ls),
+		git_evidence_read: createGitEvidenceReadTool(cwd, options?.gitEvidenceRead),
+		git_evidence_findings: createGitEvidenceFindingsTool(cwd, options?.gitEvidenceFindings),
 	};
 }

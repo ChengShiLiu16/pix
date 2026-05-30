@@ -58,8 +58,23 @@ describe("createAgentSession session manager defaults", () => {
 			sessionManager,
 		});
 
-		expect(session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write", "ls"]);
+		expect(session.getActiveToolNames()).toEqual([
+			"read",
+			"bash",
+			"edit",
+			"write",
+			"ls",
+			"git_evidence_read",
+			"git_evidence_findings",
+		]);
 		expect(session.systemPrompt).toContain("- ls: List directory contents");
+		expect(session.systemPrompt).toContain(
+			"- git_evidence_read: Read/search captured raw git evidence by id or path",
+		);
+		expect(session.systemPrompt).toContain(
+			"- git_evidence_findings: Record verified git evidence conclusions before final answers",
+		);
+		expect(session.systemPrompt).toContain("Commit subjects, file names, and stats only support inventory claims");
 
 		session.dispose();
 	});

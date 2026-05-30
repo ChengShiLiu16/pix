@@ -7,7 +7,9 @@ import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { ageToolResults, compactEditArguments } from "./context-aging.ts";
+import { applyGitEvidenceTransform } from "./context-git-evidence.ts";
 import { pruneStaleReads, pruneThinkingForNonAnthropic } from "./context-prune.ts";
+import { computeReachability } from "./context-reachability.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
@@ -283,7 +285,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "ls"];
+	const defaultActiveToolNames: ToolName[] = [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"ls",
+		"git_evidence_read",
+		"git_evidence_findings",
+	];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const initialActiveToolNames: string[] = options.tools
 		? [...options.tools]
@@ -420,10 +430,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const contextTokens = contextWindow > 0 ? estimateContextTokens(messages).tokens : 0;
 			const contextRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
 
-			// Step 1: Age old tool results (triggers at 50% context usage)
-			let next = contextRatio >= 0.5 ? ageToolResults(messages, contextRatio) : messages;
+			// Step 1: Replace bulky git inspection output with structured evidence
+			// digests plus raw evidence references before generic aging.
+			let next = await applyGitEvidenceTransform(messages, cwd);
 
-			// Step 2: Stale-read pruning rewrites mid-history messages, which
+			// Step 2: Age old tool results (triggers at 50% context usage).
+			if (contextRatio >= 0.5) {
+				const reachability = computeReachability(next, 2, cwd);
+				next = ageToolResults(next, contextRatio, reachability);
+			}
+
+			// Step 3: Stale-read pruning rewrites mid-history messages, which
 			// invalidates the Anthropic prefix cache from that point. Only do it
 			// once context usage is high enough that the token savings (delaying
 			// compaction / fitting the window) outweigh the one-time cache miss.
@@ -432,13 +449,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				next = pruneStaleReads(next, cwd);
 			}
 
-			// Step 3: For non-Anthropic providers, strip thinking blocks from
+			// Step 4: For non-Anthropic providers, strip thinking blocks from
 			// prior turns. Anthropic filters these server-side at no token cost;
 			// other providers bill for the full thinking text.
 			const provider = agent.state.model?.provider ?? "";
 			next = pruneThinkingForNonAnthropic(next, provider);
 
-			// Step 4: Compact edit tool-call arguments (old_string truncation)
+			// Step 5: Compact edit tool-call arguments (old_string truncation)
 			// when context is high. Only triggers at >= 70% context usage.
 			next = compactEditArguments(next, contextRatio);
 

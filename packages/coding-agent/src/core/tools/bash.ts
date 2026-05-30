@@ -15,6 +15,12 @@ import {
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
+import {
+	gitEvidenceCache as borrowedGitEvidenceCache,
+	createGitEvidenceResult,
+	detectGitInspection,
+	type GitEvidenceDetails,
+} from "../context-git-evidence.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
@@ -31,6 +37,7 @@ export type BashToolInput = Static<typeof bashSchema>;
 export interface BashToolDetails {
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
+	gitEvidence?: GitEvidenceDetails;
 }
 
 /**
@@ -151,6 +158,7 @@ export interface BashToolOptions {
 
 const BASH_PREVIEW_LINES = 5;
 const BASH_UPDATE_THROTTLE_MS = 100;
+const BLOCKED_GIT_STASH_SUBCOMMANDS = new Set(["", "push", "pop", "apply", "drop", "clear", "save", "create", "store"]);
 
 type BashRenderState = {
 	startedAt: number | undefined;
@@ -182,6 +190,29 @@ function formatBashCall(args: { command?: string; timeout?: number } | undefined
 	const timeoutSuffix = timeout ? theme.fg("muted", ` (timeout ${timeout}s)`) : "";
 	const commandDisplay = command === null ? invalidArgText(theme) : command ? command : theme.fg("toolOutput", "...");
 	return theme.fg("toolTitle", theme.bold(`$ ${commandDisplay}`)) + timeoutSuffix;
+}
+
+export function getBlockedBashCommandReason(command: string): string | undefined {
+	const normalized = command.replace(/\\\n/gu, " ");
+	if (/\bgit\s+(?:-[^\s]+\s+|-C\s+\S+\s+|-c\s+\S+\s+)*reset\s+--hard\b/u.test(normalized)) {
+		return "Blocked dangerous git command: git reset --hard";
+	}
+	if (/\bgit\s+(?:-[^\s]+\s+|-C\s+\S+\s+|-c\s+\S+\s+)*clean\b/u.test(normalized)) {
+		return "Blocked dangerous git command: git clean";
+	}
+	if (/\bgit\s+(?:-[^\s]+\s+|-C\s+\S+\s+|-c\s+\S+\s+)*checkout\s+(?:--\s+)?\.(?:\s|$)/u.test(normalized)) {
+		return "Blocked dangerous git command: git checkout .";
+	}
+	if (/\bgit\s+(?:-[^\s]+\s+|-C\s+\S+\s+|-c\s+\S+\s+)*restore\s+(?:--\s+)?\.(?:\s|$)/u.test(normalized)) {
+		return "Blocked dangerous git command: git restore .";
+	}
+	for (const match of normalized.matchAll(/\bgit\s+(?:-[^\s]+\s+|-C\s+\S+\s+|-c\s+\S+\s+)*stash(?:\s+([a-z-]+))?/gu)) {
+		const subcommand = match[1] ?? "";
+		if (BLOCKED_GIT_STASH_SUBCOMMANDS.has(subcommand)) {
+			return `Blocked dangerous git command: git stash${subcommand ? ` ${subcommand}` : ""}`;
+		}
+	}
+	return undefined;
 }
 
 function rebuildBashResultRenderComponent(
@@ -286,6 +317,31 @@ export function createBashToolDefinition(
 			onUpdate?,
 			_ctx?,
 		) {
+			const blockedReason = getBlockedBashCommandReason(command);
+			if (blockedReason) {
+				throw new Error(
+					`${blockedReason}\nThis command can hide, delete, or overwrite user work. Ask the user to run it manually if intentional.`,
+				);
+			}
+
+			// Git command cache hit: skip execution entirely.
+			// The model often re-runs the same `git show`/`git log` commands;
+			// we short-circuit to save time and avoid polluting the evidence store.
+			if (detectGitInspection(command)) {
+				const cachedKey = `${command
+					.replace(/\s+/g, " ")
+					.replace(/\b2>&1\b/g, "")
+					.trim()}\x00${cwd}`;
+				const cached = (
+					borrowedGitEvidenceCache as Map<string, { text: string; details: { gitEvidence?: GitEvidenceDetails } }>
+				).get(cachedKey);
+				if (cached) {
+					return {
+						content: [{ type: "text", text: cached.text }],
+						details: cached.details,
+					};
+				}
+			}
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			const output = new OutputAccumulator({ tempFilePrefix: "pix-bash" });
@@ -397,6 +453,13 @@ export function createBashToolDefinition(
 				const { text: outputText, details } = formatOutput(snapshot);
 				if (exitCode !== 0 && exitCode !== null) {
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
+				}
+				const evidence = await createGitEvidenceResult(command, cwd, outputText, details?.fullOutputPath);
+				if (evidence) {
+					return {
+						content: [{ type: "text", text: evidence.text }],
+						details: { ...details, gitEvidence: evidence.details },
+					};
 				}
 				return { content: [{ type: "text", text: outputText }], details };
 			} finally {

@@ -4,7 +4,17 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.ts";
-import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
+import {
+	applyReadManyBudget,
+	READ_MANY_BATCH_MAX_PER_FILE,
+	READ_MANY_BATCH_TOTAL_LIMIT,
+} from "../src/core/builtin-extensions/read-many.ts";
+import {
+	type BashOperations,
+	createBashTool,
+	createLocalBashOperations,
+	getBlockedBashCommandReason,
+} from "../src/core/tools/bash.ts";
 import { computeEditsDiff } from "../src/core/tools/edit-diff.ts";
 import {
 	createEditTool,
@@ -60,6 +70,48 @@ describe("Coding Agent Tools", () => {
 			// No truncation message since file fits within limits
 			expect(getTextOutput(result)).not.toContain("Use offset=");
 			expect(result.details).toBeUndefined();
+		});
+
+		it("should compact raw git diff files into git evidence", async () => {
+			const localReadTool = createReadTool(testDir);
+			const testFile = join(testDir, "captured-diff.txt");
+			const content = `commit abcdef1234567890
+Author: Test <test@example.com>
+
+    fix: improve todo handling
+
+diff --git a/src/todo.ts b/src/todo.ts
+index 1111111..2222222 100644
+--- a/src/todo.ts
++++ b/src/todo.ts
+@@ -1,3 +1,4 @@
++validateTodo(nextValue);
+`;
+			writeFileSync(testFile, content);
+
+			const result = await localReadTool.execute("test-call-git-evidence", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Git evidence captured: git-show-");
+			expect(output).toContain("Files and hunks:");
+			expect(output).toContain("src/todo.ts");
+			expect(output).not.toBe(content);
+			expect(result.details?.gitEvidence?.id).toMatch(/^git-show-[0-9a-f]{12}$/u);
+		});
+
+		it("should redirect raw git evidence files to git_evidence_read", async () => {
+			const localReadTool = createReadTool(testDir);
+			const evidenceDir = join(testDir, ".pix", "session-evidence", "git");
+			mkdirSync(evidenceDir, { recursive: true });
+			const testFile = join(evidenceDir, "git-show-abcdef123456.txt");
+			writeFileSync(testFile, "const secretSourceLine = true;\n");
+
+			const result = await localReadTool.execute("test-call-git-evidence-path", { path: testFile });
+			const output = getTextOutput(result);
+
+			expect(output).toContain("Raw git evidence file not returned through read");
+			expect(output).toContain("Use git_evidence_read instead: id=git-show-abcdef123456 offset=1 limit=120");
+			expect(output).not.toContain("secretSourceLine");
 		});
 
 		it("should handle non-existent files", async () => {
@@ -199,6 +251,35 @@ describe("Coding Agent Tools", () => {
 
 			expect(output).toContain("definitely not a png");
 			expect(result.content.some((c: any) => c.type === "image")).toBe(false);
+		});
+	});
+
+	describe("read_many budgeting", () => {
+		it("adds compact limits for batched reads", () => {
+			const perFileBudget = Math.floor(READ_MANY_BATCH_TOTAL_LIMIT / 2);
+			const targets = applyReadManyBudget([{ path: "a.ts" }, { path: "b.ts", limit: 500 }]);
+
+			expect(targets).toEqual([
+				{ path: "a.ts", limit: Math.min(READ_MANY_BATCH_MAX_PER_FILE, perFileBudget) },
+				{ path: "b.ts", limit: Math.min(READ_MANY_BATCH_MAX_PER_FILE, perFileBudget) },
+			]);
+		});
+
+		it("distributes the aggregate budget across larger batches", () => {
+			const targets = applyReadManyBudget([
+				{ path: "a.ts" },
+				{ path: "b.ts" },
+				{ path: "c.ts" },
+				{ path: "d.ts" },
+				{ path: "e.ts" },
+				{ path: "f.ts" },
+			]);
+
+			expect(targets.every((target) => target.limit === 60)).toBe(true);
+		});
+
+		it("keeps single-file full reads unchanged", () => {
+			expect(applyReadManyBudget([{ path: "a.ts" }])).toEqual([{ path: "a.ts" }]);
 		});
 	});
 
@@ -478,6 +559,13 @@ describe("Coding Agent Tools", () => {
 			await expect(bashTool.execute("test-call-10", { command: "sleep 5", timeout: 1 })).rejects.toThrow(
 				/timed out/i,
 			);
+		});
+
+		it("should block dangerous git commands before execution", () => {
+			expect(getBlockedBashCommandReason("cd repo && git stash && npm test")).toContain("git stash");
+			expect(getBlockedBashCommandReason("git reset --hard HEAD")).toContain("git reset --hard");
+			expect(getBlockedBashCommandReason("git clean -fd")).toContain("git clean");
+			expect(getBlockedBashCommandReason("git stash list")).toBeUndefined();
 		});
 
 		it("should include full output path for truncated timeout and abort errors", async () => {

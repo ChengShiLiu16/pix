@@ -11,6 +11,7 @@ import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/inte
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
+import { createGitEvidenceResult, type GitEvidenceDetails, isGitEvidenceText } from "../context-git-evidence.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, replaceTabs, shortenPath, str } from "./render-utils.ts";
@@ -27,6 +28,7 @@ export type ReadToolInput = Static<typeof readSchema>;
 
 export interface ReadToolDetails {
 	truncation?: TruncationResult;
+	gitEvidence?: GitEvidenceDetails;
 }
 
 interface CompactReadClassification {
@@ -35,6 +37,7 @@ interface CompactReadClassification {
 }
 
 const COMPACT_RESOURCE_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]);
+const GIT_EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame)-[0-9a-f]{12}$/u;
 
 /**
  * Pluggable operations for the read tool.
@@ -85,6 +88,59 @@ function trimTrailingEmptyLines(lines: string[]): string[] {
 		end--;
 	}
 	return lines.slice(0, end);
+}
+
+function looksLikeRawGitEvidence(text: string): boolean {
+	if (isGitEvidenceText(text)) return false;
+	const diffCount = text.match(/^diff --git\s+/gmu)?.length ?? 0;
+	const hunkCount = text.match(/^@@\s+/gmu)?.length ?? 0;
+	if (diffCount > 0 && hunkCount > 0) return true;
+
+	const commitCount = text.match(/^commit\s+[0-9a-f]{7,40}\b/gmu)?.length ?? 0;
+	const markerCount = text.match(/^=+\s*(?:COMMIT|DIFF)\b/gmu)?.length ?? 0;
+	const statCount = text.match(/^\s*.+?\s+\|\s+(?:(?:\d+\s+[+-]+)|(?:Bin\s+\d+\s+->\s+\d+\s+bytes))/gmu)?.length ?? 0;
+	return commitCount > 0 && (diffCount > 0 || hunkCount > 0 || markerCount > 0 || statCount >= 2);
+}
+
+function countTextLines(text: string): number {
+	if (text.length === 0) return 0;
+	const lines = text.split("\n");
+	return text.endsWith("\n") ? lines.length - 1 : lines.length;
+}
+
+function getGitEvidenceRawTarget(absolutePath: string, cwd: string): { id: string; relativePath: string } | undefined {
+	const evidenceDir = resolvePath(cwd, ".pix", "session-evidence", "git");
+	const relativePath = relative(evidenceDir, absolutePath);
+	if (
+		relativePath === "" ||
+		relativePath === ".." ||
+		relativePath.startsWith(`..${sep}`) ||
+		isAbsolute(relativePath)
+	) {
+		return undefined;
+	}
+	if (!relativePath.endsWith(".txt")) return undefined;
+	const id = basename(absolutePath, ".txt");
+	if (!GIT_EVIDENCE_ID_RE.test(id)) return undefined;
+	return { id, relativePath: toPosixPath(relativePath) };
+}
+
+function formatGitEvidenceRawRedirect(
+	target: { id: string; relativePath: string },
+	textContent: string,
+	offset: number | undefined,
+	limit: number | undefined,
+): string {
+	const startLine = offset ?? 1;
+	const effectiveLimit = limit ?? 120;
+	return [
+		`Raw git evidence file not returned through read: ${target.relativePath}`,
+		`Evidence: ${target.id}`,
+		`Raw: ${countTextLines(textContent)} lines, ${Buffer.byteLength(textContent, "utf-8")} bytes`,
+		"",
+		`Use git_evidence_read instead: id=${target.id} offset=${startLine} limit=${effectiveLimit}`,
+		"For multiple spans, use git_evidence_read ranges so evidence remains compact and citable.",
+	].join("\n");
 }
 
 function getNonVisionImageNote(model: Model<Api> | undefined): string | undefined {
@@ -217,6 +273,7 @@ export function createReadToolDefinition(
 		promptGuidelines: [
 			"Use read to examine files instead of cat or sed.",
 			"When you need a specific symbol (function, class, variable), use grep FIRST to find its line number, then read with offset/limit. Avoid blind scrolling through large files.",
+			"Do not write git diff/show/log output to a temporary file and read it back; use git evidence digests and git_evidence_read ranges instead.",
 		],
 		parameters: readSchema,
 		async execute(
@@ -282,54 +339,81 @@ export function createReadToolDefinition(
 								// Read text content.
 								const buffer = await ops.readFile(absolutePath);
 								const textContent = buffer.toString("utf-8");
-								const allLines = textContent.split("\n");
-								const totalFileLines = allLines.length;
-								// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
-								const startLine = offset ? Math.max(0, offset - 1) : 0;
-								const startLineDisplay = startLine + 1;
-								// Check if offset is out of bounds.
-								if (startLine >= allLines.length) {
-									throw new Error(`Offset ${offset} is beyond end of file (${allLines.length} lines total)`);
-								}
-								let selectedContent: string;
-								let userLimitedLines: number | undefined;
-								// If limit is specified by the user, honor it first. Otherwise truncateHead decides.
-								if (limit !== undefined) {
-									const endLine = Math.min(startLine + limit, allLines.length);
-									selectedContent = allLines.slice(startLine, endLine).join("\n");
-									userLimitedLines = endLine - startLine;
+								const rawEvidenceTarget = getGitEvidenceRawTarget(absolutePath, cwd);
+								const gitEvidence = rawEvidenceTarget
+									? undefined
+									: looksLikeRawGitEvidence(textContent)
+										? await createGitEvidenceResult(
+												`git show --raw-evidence-file ${absolutePath}`,
+												cwd,
+												textContent,
+											)
+										: undefined;
+								if (rawEvidenceTarget) {
+									content = [
+										{
+											type: "text",
+											text: formatGitEvidenceRawRedirect(rawEvidenceTarget, textContent, offset, limit),
+										},
+									];
+								} else if (gitEvidence) {
+									content = [{ type: "text", text: gitEvidence.text }];
+									details = { gitEvidence: gitEvidence.details };
 								} else {
-									selectedContent = allLines.slice(startLine).join("\n");
-								}
-								// Apply truncation, respecting both line and byte limits.
-								const truncation = truncateHead(selectedContent);
-								let outputText: string;
-								if (truncation.firstLineExceedsLimit) {
-									// First line alone exceeds the byte limit. Point the model at a bash fallback.
-									const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine], "utf-8"));
-									outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${path} | head -c ${DEFAULT_MAX_BYTES}]`;
-									details = { truncation };
-								} else if (truncation.truncated) {
-									// Truncation occurred. Build an actionable continuation notice.
-									const endLineDisplay = startLineDisplay + truncation.outputLines - 1;
-									const nextOffset = endLineDisplay + 1;
-									outputText = truncation.content;
-									if (truncation.truncatedBy === "lines") {
-										outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines}. Use offset=${nextOffset} to continue.]`;
-									} else {
-										outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
+									const allLines = textContent.split("\n");
+									const totalFileLines = allLines.length;
+									// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
+									const startLine = offset ? Math.max(0, offset - 1) : 0;
+									const startLineDisplay = startLine + 1;
+									// Check if offset is out of bounds.
+									if (startLine >= allLines.length) {
+										throw new Error(
+											`Offset ${offset} is beyond end of file (${allLines.length} lines total)`,
+										);
 									}
-									details = { truncation };
-								} else if (userLimitedLines !== undefined && startLine + userLimitedLines < allLines.length) {
-									// User-specified limit stopped early, but the file still has more content.
-									const remaining = allLines.length - (startLine + userLimitedLines);
-									const nextOffset = startLine + userLimitedLines + 1;
-									outputText = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
-								} else {
-									// No truncation and no remaining user-limited content.
-									outputText = truncation.content;
+									let selectedContent: string;
+									let userLimitedLines: number | undefined;
+									// If limit is specified by the user, honor it first. Otherwise truncateHead decides.
+									if (limit !== undefined) {
+										const endLine = Math.min(startLine + limit, allLines.length);
+										selectedContent = allLines.slice(startLine, endLine).join("\n");
+										userLimitedLines = endLine - startLine;
+									} else {
+										selectedContent = allLines.slice(startLine).join("\n");
+									}
+									// Apply truncation, respecting both line and byte limits.
+									const truncation = truncateHead(selectedContent);
+									let outputText: string;
+									if (truncation.firstLineExceedsLimit) {
+										// First line alone exceeds the byte limit. Point the model at a bash fallback.
+										const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine], "utf-8"));
+										outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${path} | head -c ${DEFAULT_MAX_BYTES}]`;
+										details = { truncation };
+									} else if (truncation.truncated) {
+										// Truncation occurred. Build an actionable continuation notice.
+										const endLineDisplay = startLineDisplay + truncation.outputLines - 1;
+										const nextOffset = endLineDisplay + 1;
+										outputText = truncation.content;
+										if (truncation.truncatedBy === "lines") {
+											outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines}. Use offset=${nextOffset} to continue.]`;
+										} else {
+											outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
+										}
+										details = { truncation };
+									} else if (
+										userLimitedLines !== undefined &&
+										startLine + userLimitedLines < allLines.length
+									) {
+										// User-specified limit stopped early, but the file still has more content.
+										const remaining = allLines.length - (startLine + userLimitedLines);
+										const nextOffset = startLine + userLimitedLines + 1;
+										outputText = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
+									} else {
+										// No truncation and no remaining user-limited content.
+										outputText = truncation.content;
+									}
+									content = [{ type: "text", text: outputText }];
 								}
-								content = [{ type: "text", text: outputText }];
 							}
 
 							if (aborted) return;

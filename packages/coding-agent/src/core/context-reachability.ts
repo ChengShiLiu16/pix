@@ -225,7 +225,14 @@ function buildFocusContext(
 				}
 			}
 			if (scope.scope) {
-				targetScopes.add(normalizePath(scope.scope, cwd));
+				const normalizedScope = normalizePath(scope.scope, cwd);
+				// Skip root-level scopes (cwd = project root) — they make everything
+				// in the project adjacent, which effectively disables aging for
+				// unrelated history since every path falls within the project dir.
+				const normalizedCwd = cwd ? normalizePath(cwd, cwd) : "";
+				if (normalizedScope !== normalizedCwd) {
+					targetScopes.add(normalizedScope);
+				}
 			}
 			if (scope.allPaths) {
 				for (const p of scope.allPaths) {

@@ -147,12 +147,24 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
+	const hasGitEvidenceRead = tools.includes("git_evidence_read");
+	const hasGitEvidenceFindings = tools.includes("git_evidence_findings");
 
 	// File exploration guidelines
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
 	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
 		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+	}
+	if (hasGitEvidenceRead) {
+		addGuideline(
+			"When git output is captured as evidence, use git_evidence_read for exact spans; do not rerun broad git show/log/diff or read .pix/session-evidence/git/*.txt directly.",
+		);
+	}
+	if (hasGitEvidenceRead && hasGitEvidenceFindings) {
+		addGuideline(
+			"Before final answers with non-inventory conclusions from git evidence, record compact theme-level git_evidence_findings with confidence and limitations.",
+		);
 	}
 
 	for (const guideline of promptGuidelines ?? []) {

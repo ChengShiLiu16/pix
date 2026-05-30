@@ -43,6 +43,8 @@ const schema = Type.Object({
 // type FileItem = Static<typeof fileItemSchema>;
 type ReadManyInput = Static<typeof schema>;
 export type ReadTarget = { path: string; offset?: number; limit?: number };
+export const READ_MANY_BATCH_TOTAL_LIMIT = 360;
+export const READ_MANY_BATCH_MAX_PER_FILE = 160;
 
 export function normalizeReadTargets(params: ReadManyInput): ReadTarget[] {
 	if (params.files?.length) {
@@ -58,6 +60,21 @@ export function normalizeReadTargets(params: ReadManyInput): ReadTarget[] {
 		return params.paths.map((path) => ({ path, offset, limit }));
 	}
 	throw new Error('read_many requires either "files" (array of { path, offset?, limit? }) or "paths" (string array)');
+}
+
+export function applyReadManyBudget(targets: ReadTarget[]): ReadTarget[] {
+	const isBatch = targets.length > 1;
+	const perFileBudget = Math.max(
+		1,
+		Math.min(READ_MANY_BATCH_MAX_PER_FILE, Math.floor(READ_MANY_BATCH_TOTAL_LIMIT / targets.length)),
+	);
+	return targets.map((target) => {
+		if (!isBatch && target.limit === undefined) return target;
+		const limit = target.limit === undefined ? perFileBudget : target.limit;
+		const cappedLimit = Math.min(Math.max(Math.floor(limit), 1), perFileBudget);
+		if (target.limit === cappedLimit) return target;
+		return { ...target, limit: cappedLimit };
+	});
 }
 
 type ReadContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
@@ -173,6 +190,8 @@ export function builtin(pi: ExtensionAPI) {
 				"Use paths[] + top-level offset/limit only when every file needs the same range (homogeneous batch).",
 				"When paginating a large file alongside smaller files, put offset/limit on that file only in files[]; omit offset on files that should be read fully.",
 				"When batching, use per-file offset/limit for large files instead of reading them in full — this avoids pulling in thousands of irrelevant lines.",
+				`Batch reads share a total budget of ${READ_MANY_BATCH_TOTAL_LIMIT} lines, capped at ${READ_MANY_BATCH_MAX_PER_FILE} lines per file. Use follow-up offset/limit only for relevant sections.`,
+				"Do not batch-read temporary files containing git diff/show/log output; use git_evidence_read ranges so raw git evidence stays compact and citable.",
 			],
 			parameters: schema,
 			prepareArguments: prepareReadManyArguments,
@@ -183,7 +202,7 @@ export function builtin(pi: ExtensionAPI) {
 				_onUpdate: unknown,
 				ctx: ExtensionContext,
 			): Promise<AgentToolResult<ReadManyDetails>> {
-				const targets = normalizeReadTargets(params);
+				const targets = applyReadManyBudget(normalizeReadTargets(params));
 				const results: { path: string; offset?: number; limit?: number; result: ReadResult }[] = [];
 				for (const target of targets) {
 					if (isSensitiveReadPath(target.path)) {
