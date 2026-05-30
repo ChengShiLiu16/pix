@@ -21,6 +21,7 @@ import {
 	detectGitInspection,
 	type GitEvidenceDetails,
 } from "../context-git-evidence.ts";
+import { tryStoreBigOutput } from "../evidence-store.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
@@ -461,6 +462,16 @@ export function createBashToolDefinition(
 						details: { ...details, gitEvidence: evidence.details },
 					};
 				}
+
+				// Non-git big output: save to .pix/evidence/ and return compact summary.
+				const bigOutput = await tryStoreBigOutput(cwd, outputText, exitCode);
+				if (bigOutput) {
+					return {
+						content: [{ type: "text", text: bigOutput.summary }],
+						details: { ...details, bigOutput },
+					};
+				}
+
 				return { content: [{ type: "text", text: outputText }], details };
 			} finally {
 				clearUpdateTimer();

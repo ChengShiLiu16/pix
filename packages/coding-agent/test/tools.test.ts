@@ -706,12 +706,15 @@ index 1111111..2222222 100644
 			const result = await bash.execute("test-call-trailing-newline-line-count", { command: "many-lines" });
 			const output = getTextOutput(result);
 
-			expect(result.details?.truncation?.totalLines).toBe(4000);
-			expect(result.details?.truncation?.outputLines).toBe(2000);
-			expect(output).toContain("line-2001");
+			// Output exceeds threshold → saved as evidence, context gets summary.
+			expect(output).toContain("Big output saved as big-output-");
+			expect(output).toContain("2003 lines");
+			expect(output).toContain("last 5 lines");
+			expect(output).toContain("line-3999");
 			expect(output).toContain("line-4000");
-			expect(output).toMatch(/\[Showing lines 2001-4000 of 4000\. Full output: /);
-			expect(output).not.toContain("4001");
+			expect(result.details?.bigOutput).toBeDefined();
+			expect(result.details?.bigOutput.rawLines).toBe(2003);
+			expect(result.details?.bigOutput.exitCode).toBe(0);
 		});
 
 		it("should decode UTF-8 characters split across output chunks", async () => {
