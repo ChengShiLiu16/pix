@@ -314,7 +314,9 @@ export function createGitEvidenceReadToolDefinition(
 			const result = pattern
 				? formatSearch(lines, pattern, ignoreCase, context)
 				: formatRead(target.id, lines, offset, limit);
-			return { content: [{ type: "text", text: result.text }], details: result.details };
+			const withSection =
+				target.id && !pattern ? `==== Evidence: ${target.id} ====\n${result.text}\n====` : result.text;
+			return { content: [{ type: "text", text: withSection }], details: result.details };
 		},
 		renderCall(args, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);

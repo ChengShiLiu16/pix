@@ -75,7 +75,14 @@ export async function tryStoreBigOutput(
 		lastLines,
 	].join("\n");
 
-	return { id, summary, rawPath, rawLines: lineCount, rawBytes: bytes, exitCode };
+	return {
+		id,
+		summary: `==== Big Output: ${id} ====\n${summary}\n====`,
+		rawPath,
+		rawLines: lineCount,
+		rawBytes: bytes,
+		exitCode,
+	};
 }
 
 async function pruneEvidenceStore(dir: string): Promise<void> {

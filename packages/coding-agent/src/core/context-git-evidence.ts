@@ -403,7 +403,8 @@ function formatDigest(
 	}
 
 	const text = lines.join("\n");
-	return text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n... git evidence ledger truncated.`;
+	const content = text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n... git evidence ledger truncated.`;
+	return `==== Evidence: ${id} ====\n${content}\n====`;
 }
 
 // In-memory cache: maps normalized command string to evidence result.
