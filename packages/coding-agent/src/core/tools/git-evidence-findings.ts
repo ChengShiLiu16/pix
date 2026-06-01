@@ -16,22 +16,35 @@ const severitySchema = Type.Union([
 	Type.Literal("critical"),
 ]);
 
-const claimKindSchema = Type.Union([
-	Type.Literal("inventory"),
-	Type.Literal("content"),
-	Type.Literal("behavior"),
-	Type.Literal("correctness"),
-	Type.Literal("hypothesis"),
-]);
+const CLAIM_KIND_VALUES = [
+	"inventory",
+	"content",
+	"behavior",
+	"correctness",
+	"absence",
+	"causality",
+	"hypothesis",
+] as const;
 
-const basisSchema = Type.Union([
-	Type.Literal("metadata"),
-	Type.Literal("stat"),
-	Type.Literal("raw_diff"),
-	Type.Literal("source"),
-	Type.Literal("raw_diff_and_source"),
-	Type.Literal("diff"),
-]);
+const BASIS_VALUES = ["metadata", "stat", "raw_diff", "source", "raw_diff_and_source"] as const;
+
+const CLAIM_KIND_HELP = [
+	"inventory: scope/theme/classification from metadata or file inventory",
+	"content: concrete file or diff content",
+	"behavior: behavior impact",
+	"correctness: correctness issue",
+	"absence: missing tests/implementation/coverage; requires searched evidence",
+	"causality: cause/effect claim; requires raw evidence, source spans, and limitations",
+	"hypothesis: insufficiently verified claim with limitations",
+].join("\n- ");
+
+const BASIS_HELP = [
+	"metadata: commit subject, author, date, or ref metadata",
+	"stat: changed-file inventory or insertions/deletions",
+	"raw_diff: git diff/show hunk evidence",
+	"source: inspected current source span",
+	"raw_diff_and_source: both diff evidence and current source span",
+].join("\n- ");
 
 const evidenceSpanSchema = Type.Object({
 	evidenceId: Type.String({ description: "Git evidence id that was read" }),
@@ -49,12 +62,16 @@ const sourceSpanSchema = Type.Object({
 });
 
 const gitEvidenceFindingsSchema = Type.Object({
-	action: Type.Union([Type.Literal("add"), Type.Literal("list"), Type.Literal("clear")], {
-		description: "add=record one analyzed finding, list=show accumulated findings, clear=reset findings",
-	}),
+	action: Type.Union(
+		[Type.Literal("add"), Type.Literal("list"), Type.Literal("clear"), Type.Literal("schema"), Type.Literal("help")],
+		{
+			description:
+				"add=record one analyzed finding, list=show accumulated findings, clear=reset findings, schema/help=show accepted values",
+		},
+	),
 	evidenceId: Type.Optional(Type.String({ description: "Git evidence id that supports this finding" })),
-	claimKind: Type.Optional(claimKindSchema),
-	basis: Type.Optional(basisSchema),
+	claimKind: Type.Optional(Type.String({ description: `Finding kind. Allowed: ${CLAIM_KIND_VALUES.join(", ")}` })),
+	basis: Type.Optional(Type.String({ description: `Evidence basis. Allowed: ${BASIS_VALUES.join(", ")}` })),
 	evidenceSpans: Type.Optional(Type.Array(evidenceSpanSchema)),
 	sourceSpans: Type.Optional(Type.Array(sourceSpanSchema)),
 	confidence: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
@@ -71,12 +88,12 @@ const gitEvidenceFindingsSchema = Type.Object({
 });
 
 const MAX_LISTED_FINDINGS = 5;
-const EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame)-[0-9a-f]{12}$/u;
+const EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}$/u;
 
 export type GitEvidenceFindingsToolInput = Static<typeof gitEvidenceFindingsSchema>;
 export type GitEvidenceSeverity = Static<typeof severitySchema>;
-type GitEvidenceClaimKind = Static<typeof claimKindSchema>;
-type GitEvidenceBasis = Static<typeof basisSchema>;
+type GitEvidenceClaimKind = (typeof CLAIM_KIND_VALUES)[number];
+type GitEvidenceBasis = (typeof BASIS_VALUES)[number];
 type GitEvidenceConfidence = "low" | "medium" | "high";
 type GitEvidenceSpan = Static<typeof evidenceSpanSchema>;
 type SourceSpan = Static<typeof sourceSpanSchema>;
@@ -103,7 +120,7 @@ interface GitEvidenceFinding {
 
 export interface GitEvidenceFindingsToolDetails {
 	count: number;
-	action: "add" | "list" | "clear";
+	action: "add" | "list" | "clear" | "schema" | "help";
 }
 
 export interface GitEvidenceFindingsOperations {
@@ -172,6 +189,88 @@ function formatFindings(findings: GitEvidenceFinding[]): string {
 
 function hashText(text: string): string {
 	return createHash("sha256").update(text).digest("hex").slice(0, 12);
+}
+
+function normalizeToken(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/[\s-]+/gu, "_");
+}
+
+function isClaimKind(value: string): value is GitEvidenceClaimKind {
+	return (CLAIM_KIND_VALUES as readonly string[]).includes(value);
+}
+
+function isBasis(value: string): value is GitEvidenceBasis {
+	return (BASIS_VALUES as readonly string[]).includes(value);
+}
+
+function normalizeClaimKind(value: string): GitEvidenceClaimKind | undefined {
+	const normalized = normalizeToken(value);
+	if (isClaimKind(normalized)) return normalized;
+	if (["summary", "overview", "scope", "theme", "topic", "classification"].includes(normalized)) return "inventory";
+	if (["missing", "not_found", "none", "no_tests", "uncovered", "absent"].includes(normalized)) return "absence";
+	if (["cause", "causal", "causation", "root_cause", "cause_effect", "cause_and_effect"].includes(normalized))
+		return "causality";
+	return undefined;
+}
+
+function normalizeBasis(value: string): GitEvidenceBasis | undefined {
+	const normalized = normalizeToken(value);
+	if (normalized === "diff") return "raw_diff";
+	if (isBasis(normalized)) return normalized;
+	if (["git_log", "commit_log", "log", "subject", "subjects", "commit_subjects"].includes(normalized)) {
+		return "metadata";
+	}
+	if (["diff_stat", "stats", "changed_files", "changed_file_inventory", "file_inventory"].includes(normalized)) {
+		return "stat";
+	}
+	if (["raw_git", "git_diff", "git_show", "patch", "hunk", "raw"].includes(normalized)) return "raw_diff";
+	if (["source_code", "current_source"].includes(normalized)) return "source";
+	if (["diff_and_source", "source_and_diff", "raw_and_source", "raw_git_and_source"].includes(normalized)) {
+		return "raw_diff_and_source";
+	}
+	if ((normalized.includes("changed_file") || normalized.includes("stat")) && normalized.includes("git"))
+		return "stat";
+	if (normalized.includes("git_log") || normalized.includes("subject")) return "metadata";
+	return undefined;
+}
+
+function schemaHelpText(): string {
+	return [
+		"git_evidence_findings schema:",
+		"",
+		"claimKind:",
+		`- ${CLAIM_KIND_HELP}`,
+		"",
+		"basis:",
+		`- ${BASIS_HELP}`,
+		"",
+		"Common mappings:",
+		"- overview/summary/scope -> claimKind=inventory",
+		"- missing/not_found/no_tests -> claimKind=absence",
+		"- cause/root_cause -> claimKind=causality",
+		"- git_log/subjects -> basis=metadata",
+		"- changed_files/diff_stat -> basis=stat",
+		"- raw_git/git_show/git_diff -> basis=raw_diff",
+	].join("\n");
+}
+
+function invalidClaimKindMessage(value: string): string {
+	return [
+		`Invalid claimKind "${value}".`,
+		`Allowed: ${CLAIM_KIND_VALUES.join(", ")}.`,
+		"Use inventory for overview/scope/theme summaries, absence for missing/not found, causality for cause/effect, or hypothesis when evidence is incomplete.",
+	].join(" ");
+}
+
+function invalidBasisMessage(value: string): string {
+	return [
+		`Invalid basis "${value}".`,
+		`Allowed: ${BASIS_VALUES.join(", ")}.`,
+		"Use metadata for git log subjects, stat for changed-file inventory, raw_diff for git show/diff hunks, source for inspected source, raw_diff_and_source for both.",
+	].join(" ");
 }
 
 /**
@@ -247,8 +346,10 @@ interface ValidatedFinding extends Omit<GitEvidenceFinding, "id" | "createdAt" |
 function validateAdd(input: GitEvidenceFindingsToolInput): ValidatedFinding {
 	const title = input.title?.trim();
 	const summary = input.summary?.trim();
-	const claimKind = input.claimKind;
-	let basis = input.basis;
+	const rawClaimKind = input.claimKind?.trim();
+	const rawBasis = input.basis?.trim();
+	const claimKind = rawClaimKind ? normalizeClaimKind(rawClaimKind) : undefined;
+	const basis = rawBasis ? normalizeBasis(rawBasis) : undefined;
 	const confidence = input.confidence ?? "medium";
 	const evidenceSpans = (input.evidenceSpans ?? []).map((span) => ({
 		evidenceId: span.evidenceId.trim(),
@@ -262,15 +363,36 @@ function validateAdd(input: GitEvidenceFindingsToolInput): ValidatedFinding {
 		endLine: Math.floor(span.endLine),
 	}));
 	const limitations = input.limitations?.trim();
-	if (basis === "diff") {
-		basis = "raw_diff";
-	}
 	if (!title) throw new Error("git_evidence_findings add requires title");
 	if (!summary) throw new Error("git_evidence_findings add requires summary");
-	if (!claimKind) throw new Error("git_evidence_findings add requires claimKind");
-	if (!basis) throw new Error("git_evidence_findings add requires basis");
+	if (!rawClaimKind)
+		throw new Error(`git_evidence_findings add requires claimKind. Allowed: ${CLAIM_KIND_VALUES.join(", ")}`);
+	if (!claimKind) throw new Error(invalidClaimKindMessage(rawClaimKind));
+	if (!rawBasis) throw new Error(`git_evidence_findings add requires basis. Allowed: ${BASIS_VALUES.join(", ")}`);
+	if (!basis) throw new Error(invalidBasisMessage(rawBasis));
 	if (claimKind === "hypothesis" && !limitations) {
 		throw new Error("git_evidence_findings add requires limitations for hypothesis claims");
+	}
+	if (claimKind === "absence") {
+		if (evidenceSpans.length === 0) {
+			throw new Error(
+				"absence findings require search evidence spans; otherwise record a hypothesis with limitations",
+			);
+		}
+		if (basis === "metadata" || basis === "stat") {
+			throw new Error("absence findings require searched raw/source evidence, not metadata or stats");
+		}
+	}
+	if (claimKind === "causality") {
+		if (!limitations) {
+			throw new Error("causality findings require limitations describing how the cause/effect link was verified");
+		}
+		if (evidenceSpans.length === 0 || sourceSpans.length === 0) {
+			throw new Error("causality findings require both raw evidence spans and source spans");
+		}
+		if (basis !== "raw_diff_and_source") {
+			throw new Error("causality findings require basis raw_diff_and_source");
+		}
 	}
 	if (claimKind !== "inventory" && claimKind !== "hypothesis") {
 		if (basis === "metadata" || basis === "stat") {
@@ -331,7 +453,10 @@ export function createGitEvidenceFindingsToolDefinition(
 			"For any final answer that includes non-inventory conclusions derived from git evidence, MUST record compact theme-level findings by calling git_evidence_findings action=list to review them before finalizing.",
 			"Findings are scoped to the current session only and the list output is compact. Use at most 3-5 high-signal findings.",
 			"Use one finding per theme or issue, not one per commit; keep findings compact and cite only the strongest raw/source spans.",
+			`Allowed claimKind values: ${CLAIM_KIND_VALUES.join(", ")}. Use inventory for overview/scope/theme summaries.`,
+			`Allowed basis values: ${BASIS_VALUES.join(", ")}. Use metadata for git log subjects; stat for changed-file inventory; raw_diff for git show/diff hunks.`,
 			"Commit subjects, file names, and stats only support inventory claims. Content, behavior, and correctness claims require raw diff and/or source spans.",
+			"Absence claims (missing tests/implementation/coverage) require searched evidence spans. Causality claims require raw evidence plus source spans and limitations explaining the verified link.",
 			"Record unsupported or insufficiently checked conclusions as hypothesis with limitations; do not present them as verified findings.",
 			"Use findings internally to support your analysis; do not repeat raw findings format in user-facing text.",
 		],
@@ -342,6 +467,13 @@ export function createGitEvidenceFindingsToolDefinition(
 				return {
 					content: [{ type: "text", text: "Cleared git evidence findings." }],
 					details: { action: "clear", count: 0 },
+				};
+			}
+
+			if (input.action === "schema" || input.action === "help") {
+				return {
+					content: [{ type: "text", text: schemaHelpText() }],
+					details: { action: input.action, count: findings.length },
 				};
 			}
 

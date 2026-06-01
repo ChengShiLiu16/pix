@@ -59,7 +59,7 @@ export interface GitEvidenceReadToolOptions {
 	operations?: GitEvidenceReadOperations;
 }
 
-const EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame)-[0-9a-f]{12}$/u;
+const EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}$/u;
 const DEFAULT_LIMIT = 80;
 const MAX_LIMIT = 160;
 const MAX_RANGES = 8;

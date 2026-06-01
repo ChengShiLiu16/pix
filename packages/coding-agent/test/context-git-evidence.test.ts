@@ -11,6 +11,7 @@ import {
 	detectGitInspection,
 } from "../src/core/context-git-evidence.ts";
 import type { BashExecutionMessage } from "../src/core/messages.ts";
+import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { createGitEvidenceFindingsToolDefinition } from "../src/core/tools/git-evidence-findings.ts";
 import { createGitEvidenceReadToolDefinition } from "../src/core/tools/git-evidence-read.ts";
 
@@ -159,6 +160,7 @@ describe("git evidence detection", () => {
 		expect(detectGitInspection("git diff main...HEAD")?.kind).toBe("diff");
 		expect(detectGitInspection("git log --oneline -5")?.kind).toBe("log");
 		expect(detectGitInspection("git status --short")?.kind).toBe("status");
+		expect(detectGitInspection("git grep shouldDowngradeBeacon")?.kind).toBe("grep");
 		expect(detectGitInspection("git -C ../repo show abc123")?.kind).toBe("show");
 		expect(detectGitInspection("git diff-tree --stat --no-commit-id -r HEAD")?.kind).toBe("diff-tree");
 	});
@@ -174,6 +176,31 @@ describe("git evidence detection", () => {
 		expect(detectGitInspection("git show abc123 && git checkout main")).toBeUndefined();
 		expect(detectGitInspection("git commit -m test")).toBeUndefined();
 		expect(detectGitInspection("echo ok")).toBeUndefined();
+	});
+
+	it("captures git grep no-match results as evidence", async () => {
+		const cwd = await makeTempDir();
+		const tool = createBashToolDefinition(cwd, {
+			operations: {
+				exec: async () => ({ exitCode: 1 }),
+			},
+		});
+
+		const result = await tool.execute(
+			"grep-no-match",
+			{ command: "git grep shouldDowngradeBeacon -- __tests__" },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(text).toContain("Git evidence captured: git-grep-");
+		expect(text).toContain("Raw: 0 lines, 0 bytes");
+		expect(result.details?.gitEvidence?.kind).toBe("grep");
 	});
 });
 
@@ -239,6 +266,23 @@ describe("createGitEvidenceResult", () => {
 		expect(result?.text).toContain("1234567890abcdef feat: update files");
 		expect(result?.text).toContain("src/a.ts (+2/-1)");
 		expect(result?.text).toContain("src/binary.png (+0/-0)");
+	});
+
+	it("marks broad ref logs with all_refs scope warnings", async () => {
+		const cwd = await makeTempDir();
+		const result = await createGitEvidenceResult("git log -25 --oneline --all", cwd, CUSTOM_LOG_OUTPUT);
+
+		expect(result?.details.scope?.type).toBe("all_refs");
+		expect(result?.text).toContain("Scope: all_refs");
+		expect(result?.text).toContain("Scope warning:");
+	});
+
+	it("marks default logs as current_head scope", async () => {
+		const cwd = await makeTempDir();
+		const result = await createGitEvidenceResult("git log -25 --oneline", cwd, CUSTOM_LOG_OUTPUT);
+
+		expect(result?.details.scope?.type).toBe("current_head");
+		expect(result?.text).toContain("Scope: current_head");
 	});
 
 	it("extracts custom git log format blocks", async () => {
@@ -493,6 +537,31 @@ describe("git_evidence_read tool", () => {
 		expect(text).toContain("commit 1234567890abcdef");
 	});
 
+	it("reads grep evidence ids", async () => {
+		const cwd = await makeTempDir();
+		const evidence = await createGitEvidenceResult(
+			"git grep shouldDowngradeBeacon",
+			cwd,
+			"test.ts:shouldDowngradeBeacon();\n",
+		);
+		const tool = createGitEvidenceReadToolDefinition(cwd);
+
+		const result = await tool.execute(
+			"read-grep-evidence",
+			{ id: evidence!.details.id, limit: 2 },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(evidence!.details.id).toMatch(/^git-grep-/u);
+		expect(text).toContain("shouldDowngradeBeacon");
+	});
+
 	it("reads multiple raw evidence ranges in one call", async () => {
 		const cwd = await makeTempDir();
 		const evidence = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
@@ -601,6 +670,52 @@ describe("git_evidence_findings tool", () => {
 		expect(emptyText).toContain("(no git evidence findings recorded)");
 	});
 
+	it("returns schema help for findings values", async () => {
+		const cwd = await makeTempDir();
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		const result = await tool.execute("schema-help", { action: "schema" }, undefined, undefined, {} as never);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(text).toContain("claimKind:");
+		expect(text).toContain("inventory: scope/theme/classification");
+		expect(text).toContain("basis:");
+		expect(text).toContain("metadata: commit subject");
+		expect(text).toContain("overview/summary/scope -> claimKind=inventory");
+	});
+
+	it("normalizes common claimKind and basis aliases", async () => {
+		const cwd = await makeTempDir();
+		const evidence = await createGitEvidenceResult("git log -5 --oneline", cwd, CUSTOM_LOG_OUTPUT);
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		const result = await tool.execute(
+			"add-normalized-finding",
+			{
+				action: "add",
+				claimKind: "summary",
+				basis: "git_log",
+				evidenceSpans: [{ evidenceId: evidence!.details.id, startLine: 1, endLine: 8 }],
+				confidence: "high",
+				title: "commit overview",
+				summary: "The recent commits focus on rendering compatibility.",
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(text).toContain("Recorded finding");
+		expect(text).toContain("(inventory, metadata");
+	});
+
 	it("keeps findings scoped to one tool session", async () => {
 		const cwd = await makeTempDir();
 		const firstTool = createGitEvidenceFindingsToolDefinition(cwd);
@@ -690,5 +805,154 @@ describe("git_evidence_findings tool", () => {
 				{} as never,
 			),
 		).rejects.toThrow("non-inventory git evidence findings require raw diff or source evidence");
+	});
+
+	it("returns actionable messages for invalid findings values", async () => {
+		const cwd = await makeTempDir();
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		await expect(
+			tool.execute(
+				"add-invalid-kind",
+				{
+					action: "add",
+					claimKind: "narrative",
+					basis: "metadata",
+					title: "invalid kind",
+					summary: "This uses an unsupported claim kind.",
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow(
+			'Invalid claimKind "narrative". Allowed: inventory, content, behavior, correctness, absence, causality, hypothesis.',
+		);
+
+		await expect(
+			tool.execute(
+				"add-invalid-basis",
+				{
+					action: "add",
+					claimKind: "inventory",
+					basis: "narrative prose",
+					title: "invalid basis",
+					summary: "This uses a prose basis.",
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow(
+			'Invalid basis "narrative prose". Allowed: metadata, stat, raw_diff, source, raw_diff_and_source.',
+		);
+	});
+
+	it("requires search evidence for absence findings", async () => {
+		const cwd = await makeTempDir();
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		await expect(
+			tool.execute(
+				"add-unsupported-absence",
+				{
+					action: "add",
+					claimKind: "absence",
+					basis: "source",
+					title: "missing tests",
+					summary: "No tests exist for this behavior.",
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow("absence findings require search evidence spans");
+	});
+
+	it("records absence findings with grep evidence", async () => {
+		const cwd = await makeTempDir();
+		const evidence = await createGitEvidenceResult("git grep shouldDowngradeBeacon -- __tests__", cwd, "");
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		const result = await tool.execute(
+			"add-supported-absence",
+			{
+				action: "add",
+				claimKind: "absence",
+				basis: "source",
+				evidenceSpans: [{ evidenceId: evidence!.details.id, startLine: 1, endLine: 1 }],
+				confidence: "medium",
+				title: "no matching tests found",
+				summary: "Search evidence for the test tree returned no matches.",
+				limitations: "Only the searched test tree is covered by this absence claim.",
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(text).toContain("Recorded finding");
+		expect(text).toContain("(absence, source");
+		expect(text).toContain(evidence!.details.id);
+	});
+
+	it("requires limitations and both evidence types for causality findings", async () => {
+		const cwd = await makeTempDir();
+		const evidence = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		await expect(
+			tool.execute(
+				"add-unsupported-causality",
+				{
+					action: "add",
+					claimKind: "causality",
+					basis: "raw_diff",
+					evidenceSpans: [{ evidenceId: evidence!.details.id, startLine: 11, endLine: 13 }],
+					title: "change caused test failure",
+					summary: "This tries to prove causality from only a diff.",
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow("causality findings require limitations");
+	});
+
+	it("records causality findings with raw and source evidence plus limitations", async () => {
+		const cwd = await makeTempDir();
+		await writeFile(join(cwd, "todo.ts"), "const nextValue = getNextValue();\nvalidateTodo(nextValue);\n", "utf-8");
+		const evidence = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
+		const tool = createGitEvidenceFindingsToolDefinition(cwd);
+
+		const result = await tool.execute(
+			"add-supported-causality",
+			{
+				action: "add",
+				claimKind: "causality",
+				basis: "raw_diff_and_source",
+				evidenceSpans: [{ evidenceId: evidence!.details.id, startLine: 11, endLine: 13 }],
+				sourceSpans: [{ path: "todo.ts", startLine: 1, endLine: 2 }],
+				confidence: "medium",
+				title: "validation change affected behavior",
+				summary: "The diff and current source both show validateTodo in the update path.",
+				limitations: "Causality is limited to the inspected diff/source and does not include runtime reproduction.",
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const text = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(text).toContain("Recorded finding");
+		expect(text).toContain("(causality, raw_diff_and_source");
+		expect(text).toContain("source=todo.ts:1-2");
 	});
 });

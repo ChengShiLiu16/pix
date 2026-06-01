@@ -37,7 +37,7 @@ interface CompactReadClassification {
 }
 
 const COMPACT_RESOURCE_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]);
-const GIT_EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame)-[0-9a-f]{12}$/u;
+const GIT_EVIDENCE_ID_RE = /^git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}$/u;
 
 /**
  * Pluggable operations for the read tool.

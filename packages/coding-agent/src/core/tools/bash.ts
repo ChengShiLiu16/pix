@@ -453,6 +453,21 @@ export function createBashToolDefinition(
 				const snapshot = await finishOutput();
 				const { text: outputText, details } = formatOutput(snapshot);
 				if (exitCode !== 0 && exitCode !== null) {
+					const inspection = detectGitInspection(command);
+					if (inspection?.kind === "grep" && exitCode === 1) {
+						const evidence = await createGitEvidenceResult(
+							command,
+							cwd,
+							snapshot.content,
+							details?.fullOutputPath,
+						);
+						if (evidence) {
+							return {
+								content: [{ type: "text", text: evidence.text }],
+								details: { ...details, gitEvidence: evidence.details },
+							};
+						}
+					}
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}
 				const evidence = await createGitEvidenceResult(command, cwd, outputText, details?.fullOutputPath);

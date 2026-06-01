@@ -16,12 +16,18 @@ const MAX_HUNKS_PER_FILE = 8;
 const MAX_KEY_LINES = 4;
 const MAX_LINE_CHARS = 180;
 
-const READ_ONLY_GIT_KINDS = new Set(["log", "show", "diff", "diff-tree", "status", "blame"]);
+const READ_ONLY_GIT_KINDS = new Set(["log", "show", "diff", "diff-tree", "status", "blame", "grep"]);
 
-export type GitInspectionKind = "log" | "show" | "diff" | "diff-tree" | "status" | "blame";
+export type GitInspectionKind = "log" | "show" | "diff" | "diff-tree" | "status" | "blame" | "grep";
+export type GitEvidenceScopeType = "current_head" | "all_refs" | "working_tree" | "explicit_refs" | "unknown";
 
 export interface GitInspectionInfo {
 	kind: GitInspectionKind;
+}
+
+export interface GitEvidenceScope {
+	type: GitEvidenceScopeType;
+	warnings: string[];
 }
 
 interface GitHunkDigest {
@@ -52,6 +58,7 @@ interface GitCommitDigest {
 interface GitEvidenceDigest {
 	kind: GitInspectionKind;
 	command: string;
+	scope: GitEvidenceScope;
 	commits: GitCommitDigest[];
 	files: GitFileDigest[];
 	rawLines: number;
@@ -64,6 +71,7 @@ export interface GitEvidenceDetails {
 	id: string;
 	command: string;
 	kind: GitInspectionKind;
+	scope?: GitEvidenceScope;
 	rawPath?: string;
 	rawBytes: number;
 	rawLines: number;
@@ -116,6 +124,37 @@ export function detectGitInspection(command: string): GitInspectionInfo | undefi
 		firstKind ??= kind as GitInspectionKind;
 	}
 	return firstKind ? { kind: firstKind } : undefined;
+}
+
+function hasBroadRefOption(command: string): boolean {
+	return /\B--(?:all|branches|remotes)\b/u.test(command) || /\brefs\/stash\b/u.test(command);
+}
+
+function hasExplicitGitRef(command: string): boolean {
+	if (/\b(?:HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD)(?:\b|[~^])/u.test(command)) return true;
+	if (/\b[0-9a-f]{7,40}(?:\b|[~^])/u.test(command)) return true;
+	if (/\S(?:\.\.|\.\.\.)\S/u.test(command)) return true;
+	return /\b(?:origin|upstream)\/[^\s]+/u.test(command);
+}
+
+function detectGitEvidenceScope(command: string, kind: GitInspectionKind): GitEvidenceScope {
+	if (hasBroadRefOption(command)) {
+		return {
+			type: "all_refs",
+			warnings: [
+				"Scope warning: this evidence may include commits outside the current HEAD lineage (for example remotes, branches, or stash refs). Keep conclusions within this captured scope unless separate evidence proves reachability.",
+			],
+		};
+	}
+	if (kind === "status") return { type: "working_tree", warnings: [] };
+	if (kind === "log") {
+		if (hasExplicitGitRef(command)) return { type: "explicit_refs", warnings: [] };
+		return { type: "current_head", warnings: [] };
+	}
+	if (kind === "show" || kind === "diff" || kind === "diff-tree" || kind === "blame") {
+		return { type: hasExplicitGitRef(command) ? "explicit_refs" : "working_tree", warnings: [] };
+	}
+	return { type: "unknown", warnings: [] };
 }
 
 function normalizeDiffPath(path: string): string {
@@ -292,6 +331,7 @@ function parseGitOutput(
 	return {
 		kind,
 		command,
+		scope: detectGitEvidenceScope(command, kind),
 		commits,
 		files,
 		rawLines,
@@ -320,6 +360,8 @@ function formatDigest(
 		"",
 		`Command: ${digest.command}`,
 		`Kind: git ${digest.kind}`,
+		`Scope: ${digest.scope.type}`,
+		...digest.scope.warnings,
 		`Raw: ${digest.rawLines} lines, ${digest.rawBytes} bytes${rawPath ? `, ${rawPath}` : ""}`,
 		...(digest.rawTruncated
 			? [
@@ -399,6 +441,9 @@ function formatDigest(
 		);
 		lines.push(
 			"Before final answers that include non-inventory git conclusions, record theme-level git_evidence_findings with confidence/limitations.",
+		);
+		lines.push(
+			"Keep every conclusion inside the evidence scope; if the user scope and evidence scope differ, downgrade the claim or collect matching evidence.",
 		);
 	}
 
@@ -569,6 +614,7 @@ export async function createGitEvidenceResult(
 			id,
 			command,
 			kind: info.kind,
+			scope: digest.scope,
 			rawPath: rawPath ?? fullOutputPath,
 			rawBytes: digest.rawBytes,
 			rawLines: digest.rawLines,
