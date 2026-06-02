@@ -170,6 +170,7 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
 		expect(text).toContain("Read result omitted to save context");
+		expect(text).toContain("/a.ts");
 		expect(text).toContain("50 lines total");
 		expect(text).not.toContain("line 1:");
 	});
@@ -189,6 +190,7 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
 		expect(text).toContain("Bash output omitted to save context");
+		expect(text).toContain("/a.ts");
 		expect(text).toContain("50 lines total");
 	});
 
@@ -231,6 +233,7 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
 		expect(text).toContain("Ls result omitted to save context");
+		expect(text).toContain("/a.ts");
 		expect(text).toContain("entries total");
 	});
 
@@ -250,6 +253,7 @@ describe("ageToolResults", () => {
 		const result = ageToolResults(messages, 0.9); // heavy
 		const text = resultText(result[1]);
 		expect(text).toContain("Read result omitted to save context");
+		expect(text).toContain("/a.ts");
 	});
 
 	it("heavy aging: replaces grep_many with single-line placeholder", () => {

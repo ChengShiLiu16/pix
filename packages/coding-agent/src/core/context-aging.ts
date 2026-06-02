@@ -142,12 +142,13 @@ function getAgingLevel(contextRatio: number): AgingLevel | undefined {
  * Age a read result: keep head + tail lines, with a truncation notice.
  * For single-line or few-line results, use character-based truncation.
  */
-function ageReadResult(text: string, level: AgingLevel): string {
+function ageReadResult(text: string, level: AgingLevel, anchor?: string): string {
 	const lines = text.split("\n");
 	const totalLines = lines.length;
 
 	if (level.heavy) {
-		return `Read result omitted to save context. ${totalLines} lines total. Re-read the file if needed.`;
+		const target = anchor ? ` Target: ${anchor}.` : "";
+		return `Read result omitted to save context.${target} ${totalLines} lines total. Re-read the file if needed.`;
 	}
 
 	const keptLines = level.readHeadLines + level.readTailLines;
@@ -174,12 +175,13 @@ function ageReadResult(text: string, level: AgingLevel): string {
  * Age a bash result: keep tail lines with truncation notice.
  * For single-line or few-line results, use character-based truncation.
  */
-function ageBashResult(text: string, level: AgingLevel): string {
+function ageBashResult(text: string, level: AgingLevel, anchor?: string): string {
 	const lines = text.split("\n");
 	const totalLines = lines.length;
 
 	if (level.heavy) {
-		return `Bash output omitted to save context. ${totalLines} lines total. Re-run the command if needed.`;
+		const target = anchor ? ` Target: ${anchor}.` : "";
+		return `Bash output omitted to save context.${target} ${totalLines} lines total. Re-run the command if needed.`;
 	}
 
 	if (totalLines <= level.bashTailLines) {
@@ -195,12 +197,13 @@ function ageBashResult(text: string, level: AgingLevel): string {
 /**
  * Age a grep result: keep first N matches with truncation notice.
  */
-function ageGrepResult(text: string, level: AgingLevel): string {
+function ageGrepResult(text: string, level: AgingLevel, anchor?: string): string {
 	if (level.heavy) {
 		// Count matches using ripgrep output format (file:line:content).
 		// Skip empty lines and "--" separators between files.
 		const matchCount = text.split("\n").filter((l) => l.length > 0 && !l.startsWith("--") && /:\d+:/.test(l)).length;
-		return `Grep result omitted to save context. ${matchCount} matches total. Re-run grep if needed.`;
+		const target = anchor ? ` Target: ${anchor}.` : "";
+		return `Grep result omitted to save context.${target} ${matchCount} matches total. Re-run grep if needed.`;
 	}
 	const lines = text.split("\n");
 	if (lines.length <= level.grepMaxMatches) return text;
@@ -211,11 +214,12 @@ function ageGrepResult(text: string, level: AgingLevel): string {
 /**
  * Age an ls/find result: keep first N entries with truncation notice.
  */
-function ageListResult(text: string, level: AgingLevel, toolName: string): string {
+function ageListResult(text: string, level: AgingLevel, toolName: string, anchor?: string): string {
 	if (level.heavy) {
 		const entryCount = text.split("\n").length;
 		const label = toolName === "find" || toolName === "fffind" ? "Find" : "Ls";
-		return `${label} result omitted to save context. ${entryCount} entries total. Re-run if needed.`;
+		const target = anchor ? ` Target: ${anchor}.` : "";
+		return `${label} result omitted to save context.${target} ${entryCount} entries total. Re-run if needed.`;
 	}
 	const lines = text.split("\n");
 	if (lines.length <= level.listMaxEntries) return text;
@@ -234,8 +238,8 @@ function ageListResult(text: string, level: AgingLevel, toolName: string): strin
  * Generate a concise natural-language placeholder for an unrelated tool result.
  * The text is plain prose with no machine markers so the model never mimics it.
  */
-function naturalLanguagePlaceholder(toolName: string, path?: string, lineCount?: number): string {
-	const p = path ?? "this file";
+function naturalLanguagePlaceholder(toolName: string, anchor?: string, lineCount?: number): string {
+	const p = anchor ?? "this file";
 	const n = lineCount !== undefined ? `${lineCount}` : "many";
 	switch (toolName) {
 		case "read":
@@ -273,6 +277,115 @@ function countLines(content: ToolResultMessage["content"]): number {
 	return total;
 }
 
+function compactList(values: string[], maxItems = 3): string | undefined {
+	const clean = values.filter((value) => value.length > 0);
+	if (clean.length === 0) return undefined;
+	const head = clean.slice(0, maxItems).join(", ");
+	const remaining = clean.length - maxItems;
+	return remaining > 0 ? `${head}, +${remaining} more` : head;
+}
+
+function getStringArg(args: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+	if (!args) return undefined;
+	for (const key of keys) {
+		const value = args[key];
+		if (typeof value === "string" && value.length > 0) return value;
+	}
+	return undefined;
+}
+
+function getReadManyAnchor(args: Record<string, unknown> | undefined): string | undefined {
+	if (!args) return undefined;
+	const files = args.files;
+	if (Array.isArray(files)) {
+		const paths = files
+			.map((file) =>
+				typeof file === "object" && file !== null && typeof file.path === "string" ? file.path : undefined,
+			)
+			.filter((path): path is string => path !== undefined);
+		const list = compactList(paths);
+		if (list) return list;
+	}
+	const paths = args.paths;
+	if (Array.isArray(paths)) {
+		return compactList(paths.filter((path): path is string => typeof path === "string"));
+	}
+	return getStringArg(args, ["path"]);
+}
+
+function getGrepManyAnchor(args: Record<string, unknown> | undefined): string | undefined {
+	if (!args) return undefined;
+	const searches = args.searches;
+	if (Array.isArray(searches)) {
+		const paths = searches
+			.map((search) =>
+				typeof search === "object" && search !== null && typeof search.path === "string" ? search.path : undefined,
+			)
+			.filter((path): path is string => path !== undefined);
+		const list = compactList(paths);
+		if (list) return list;
+	}
+	return getStringArg(args, ["path", "constraints"]);
+}
+
+function getLsManyAnchor(args: Record<string, unknown> | undefined): string | undefined {
+	if (!args) return undefined;
+	const paths = args.paths;
+	if (!Array.isArray(paths)) return undefined;
+	return compactList(paths.filter((path): path is string => typeof path === "string"));
+}
+
+const BASH_READ_COMMAND_RE = /\b(?:cat|head|tail|less|more)\s+(?:--?\w+(?:=\S+)?\s+)*["']?([^\s"';|&<>]+)["']?/;
+
+function getBashAnchor(args: Record<string, unknown> | undefined): string | undefined {
+	const command = getStringArg(args, ["command"]);
+	if (!command) return undefined;
+	const match = BASH_READ_COMMAND_RE.exec(command);
+	if (match?.[1]) return match[1];
+	return command.length > 80 ? `${command.slice(0, 77)}...` : command;
+}
+
+function getToolAnchor(toolName: string, args: Record<string, unknown> | undefined): string | undefined {
+	switch (toolName) {
+		case "read":
+			return getStringArg(args, ["path", "file_path", "filePath"]);
+		case "read_many":
+			return getReadManyAnchor(args);
+		case "grep":
+		case "ffgrep":
+		case "find":
+		case "fffind":
+		case "ls":
+			return getStringArg(args, ["path"]);
+		case "grep_many":
+			return getGrepManyAnchor(args);
+		case "fff-multi-grep":
+		case "multi_grep":
+			return getStringArg(args, ["constraints"]);
+		case "ls_many":
+			return getLsManyAnchor(args);
+		case "bash":
+			return getBashAnchor(args);
+		default:
+			return undefined;
+	}
+}
+
+function collectToolAnchors(messages: AgentMessage[]): Map<string, string> {
+	const anchors = new Map<string, string>();
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		const assistant = message as AssistantMessage;
+		if (!("content" in assistant) || !Array.isArray(assistant.content)) continue;
+		for (const block of assistant.content) {
+			if (block.type !== "toolCall") continue;
+			const anchor = getToolAnchor(block.name, block.arguments as Record<string, unknown> | undefined);
+			if (anchor) anchors.set(block.id, anchor);
+		}
+	}
+	return anchors;
+}
+
 export function ageToolResults(
 	messages: AgentMessage[],
 	contextRatio: number,
@@ -282,6 +395,7 @@ export function ageToolResults(
 	if (!level) return messages;
 
 	const ages = computeAges(messages);
+	const anchors = collectToolAnchors(messages);
 	let changed = false;
 
 	const result = messages.map((message, index) => {
@@ -317,36 +431,38 @@ export function ageToolResults(
 		if (r === "unrelated" && level.heavy) {
 			changed = true;
 			const lines = countLines(toolResult.content);
+			const anchor = anchors.get(toolResult.toolCallId);
 			const stub: TextContent = {
 				type: "text",
-				text: naturalLanguagePlaceholder(toolResult.toolName, undefined, lines),
+				text: naturalLanguagePlaceholder(toolResult.toolName, anchor, lines),
 			};
 			return { ...toolResult, content: [stub] } satisfies ToolResultMessage;
 		}
 
 		const text = extractText(toolResult.content);
+		const anchor = anchors.get(toolResult.toolCallId);
 		let agedText: string;
 
 		switch (toolResult.toolName) {
 			case "read":
 			case "read_many":
-				agedText = ageReadResult(text, level);
+				agedText = ageReadResult(text, level, anchor);
 				break;
 			case "bash":
-				agedText = ageBashResult(text, level);
+				agedText = ageBashResult(text, level, anchor);
 				break;
 			case "grep":
 			case "grep_many":
 			case "ffgrep":
 			case "fff-multi-grep":
 			case "multi_grep":
-				agedText = ageGrepResult(text, level);
+				agedText = ageGrepResult(text, level, anchor);
 				break;
 			case "ls":
 			case "ls_many":
 			case "find":
 			case "fffind":
-				agedText = ageListResult(text, level, toolResult.toolName);
+				agedText = ageListResult(text, level, toolResult.toolName, anchor);
 				break;
 			default:
 				return message;

@@ -423,16 +423,17 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				});
 			}
 
-			// Progressive aging reduces old tool results before the more
-			// destructive stale-read pruning. Aging is less invasive
-			// (preserves structure) and triggers at a lower threshold.
 			const contextWindow = agent.state.model?.contextWindow ?? 0;
-			const contextTokens = contextWindow > 0 ? estimateContextTokens(messages).tokens : 0;
-			const contextRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
 
 			// Step 1: Replace bulky git inspection output with structured evidence
 			// digests plus raw evidence references before generic aging.
 			let next = await applyGitEvidenceTransform(messages, cwd);
+
+			// Progressive aging reduces old tool results before the more
+			// destructive stale-read pruning. Compute pressure after git evidence
+			// compression so large git inspections do not cause over-aging.
+			const contextTokens = contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
+			const contextRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
 
 			// Step 2: Age old tool results (triggers at 50% context usage).
 			if (contextRatio >= 0.5) {

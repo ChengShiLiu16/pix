@@ -13,10 +13,10 @@ export function builtin(pi: ExtensionAPI) {
 	// 在内置自动压缩触发前，注入自定义指令
 	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, _ctx) => {
 		// 只在自动压缩时注入指令（手动 /compact 由用户自己控制）
-		if ((event.preparation as any).reason === "auto") {
+		if (event.reason !== "manual") {
 			return {
 				customInstructions: "保留最近的工作内容、文件变更记录和下一步计划。精简中间的探索过程和失败尝试。",
-			} as any;
+			};
 		}
 	});
 

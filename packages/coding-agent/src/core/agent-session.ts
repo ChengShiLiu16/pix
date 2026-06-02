@@ -1637,13 +1637,15 @@ export class AgentSession {
 
 			let extensionCompaction: CompactionResult | undefined;
 			let fromExtension = false;
+			let effectiveCustomInstructions = customInstructions;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 				const result = (await this._extensionRunner.emit({
 					type: "session_before_compact",
+					reason: "manual",
 					preparation,
 					branchEntries: pathEntries,
-					customInstructions,
+					customInstructions: effectiveCustomInstructions,
 					signal: this._compactionAbortController.signal,
 				})) as SessionBeforeCompactResult | undefined;
 
@@ -1654,6 +1656,9 @@ export class AgentSession {
 				if (result?.compaction) {
 					extensionCompaction = result.compaction;
 					fromExtension = true;
+				}
+				if (result?.customInstructions !== undefined) {
+					effectiveCustomInstructions = result.customInstructions;
 				}
 			}
 
@@ -1675,7 +1680,7 @@ export class AgentSession {
 					this.model,
 					apiKey,
 					headers,
-					customInstructions,
+					effectiveCustomInstructions,
 					this._compactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,
@@ -1917,13 +1922,15 @@ export class AgentSession {
 
 			let extensionCompaction: CompactionResult | undefined;
 			let fromExtension = false;
+			let customInstructions: string | undefined;
 
 			if (this._extensionRunner.hasHandlers("session_before_compact")) {
 				const extensionResult = (await this._extensionRunner.emit({
 					type: "session_before_compact",
+					reason,
 					preparation,
 					branchEntries: pathEntries,
-					customInstructions: undefined,
+					customInstructions,
 					signal: this._autoCompactionAbortController.signal,
 				})) as SessionBeforeCompactResult | undefined;
 
@@ -1941,6 +1948,9 @@ export class AgentSession {
 				if (extensionResult?.compaction) {
 					extensionCompaction = extensionResult.compaction;
 					fromExtension = true;
+				}
+				if (extensionResult?.customInstructions !== undefined) {
+					customInstructions = extensionResult.customInstructions;
 				}
 			}
 
@@ -1962,7 +1972,7 @@ export class AgentSession {
 					this.model,
 					apiKey,
 					headers,
-					undefined,
+					customInstructions,
 					this._autoCompactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,

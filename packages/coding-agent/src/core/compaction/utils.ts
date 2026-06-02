@@ -23,6 +23,31 @@ export function createFileOps(): FileOperations {
 	};
 }
 
+function getPathArg(args: Record<string, unknown>): string | undefined {
+	const path = args.path ?? args.file_path ?? args.filePath;
+	return typeof path === "string" && path.length > 0 ? path : undefined;
+}
+
+function addReadManyPaths(args: Record<string, unknown>, fileOps: FileOperations): void {
+	const files = args.files;
+	if (Array.isArray(files)) {
+		for (const file of files) {
+			if (typeof file === "object" && file !== null && typeof file.path === "string" && file.path.length > 0) {
+				fileOps.read.add(file.path);
+			}
+		}
+	}
+
+	const paths = args.paths;
+	if (Array.isArray(paths)) {
+		for (const path of paths) {
+			if (typeof path === "string" && path.length > 0) {
+				fileOps.read.add(path);
+			}
+		}
+	}
+}
+
 /**
  * Extract file operations from tool calls in an assistant message.
  */
@@ -38,19 +63,25 @@ export function extractFileOpsFromMessage(message: AgentMessage, fileOps: FileOp
 		const args = block.arguments as Record<string, unknown> | undefined;
 		if (!args) continue;
 
-		const path = typeof args.path === "string" ? args.path : undefined;
-		if (!path) continue;
-
 		switch (block.name) {
-			case "read":
-				fileOps.read.add(path);
+			case "read": {
+				const path = getPathArg(args);
+				if (path) fileOps.read.add(path);
 				break;
-			case "write":
-				fileOps.written.add(path);
+			}
+			case "read_many":
+				addReadManyPaths(args, fileOps);
 				break;
-			case "edit":
-				fileOps.edited.add(path);
+			case "write": {
+				const path = getPathArg(args);
+				if (path) fileOps.written.add(path);
 				break;
+			}
+			case "edit": {
+				const path = getPathArg(args);
+				if (path) fileOps.edited.add(path);
+				break;
+			}
 		}
 	}
 }
