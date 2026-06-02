@@ -20,6 +20,7 @@ import {
 	createGitEvidenceResult,
 	detectGitInspection,
 	type GitEvidenceDetails,
+	isGitEvidenceDisplayText,
 } from "../context-git-evidence.ts";
 import { tryStoreBigOutput } from "../evidence-store.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
@@ -241,9 +242,10 @@ function rebuildBashResultRenderComponent(
 	}
 
 	if (output) {
+		const outputColor = isGitEvidenceDisplayText(output) ? "dim" : "toolOutput";
 		const styledOutput = output
 			.split("\n")
-			.map((line) => theme.fg("toolOutput", line))
+			.map((line) => theme.fg(outputColor, line))
 			.join("\n");
 
 		if (options.expanded) {

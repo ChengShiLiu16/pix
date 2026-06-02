@@ -11,7 +11,12 @@ import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/inte
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
-import { createGitEvidenceResult, type GitEvidenceDetails, isGitEvidenceText } from "../context-git-evidence.ts";
+import {
+	createGitEvidenceResult,
+	type GitEvidenceDetails,
+	isGitEvidenceDisplayText,
+	isGitEvidenceText,
+} from "../context-git-evidence.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, replaceTabs, shortenPath, str } from "./render-utils.ts";
@@ -235,13 +240,15 @@ function formatReadResult(
 
 	const rawPath = str(args?.file_path ?? args?.path);
 	const output = getTextOutput(result, showImages);
-	const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
+	const isGitEvidenceOutput = isGitEvidenceDisplayText(output);
+	const outputColor = isGitEvidenceOutput ? "dim" : "toolOutput";
+	const lang = rawPath && !isGitEvidenceOutput ? getLanguageFromPath(rawPath) : undefined;
 	const renderedLines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
 	const lines = trimTrailingEmptyLines(renderedLines);
 	const maxLines = options.expanded ? lines.length : 10;
 	const displayLines = lines.slice(0, maxLines);
 	const remaining = lines.length - maxLines;
-	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
+	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg(outputColor, replaceTabs(line)))).join("\n")}`;
 	if (remaining > 0) {
 		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} click or ${keyHint("app.tools.expand", "to expand")})`;
 	}

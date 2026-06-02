@@ -17,6 +17,16 @@ describe("export HTML tool output whitespace", () => {
 		expect(css).not.toMatch(/\.output-preview,\s*\.output-full\s*\{[\s\S]*?white-space:\s*pre-wrap;/);
 	});
 
+	it("styles git evidence output as dim text", () => {
+		const css = readFileSync(new URL("../src/core/export-html/template.css", import.meta.url), "utf-8");
+		const templateJs = readFileSync(new URL("../src/core/export-html/template.js", import.meta.url), "utf-8");
+
+		expect(css).toContain(".tool-output.evidence-output");
+		expect(css).toContain("color: var(--dim)");
+		expect(templateJs).toContain("isGitEvidenceOutput(text)");
+		expect(templateJs).toContain("'tool-output evidence-output'");
+	});
+
 	it("does not insert source whitespace between ANSI-rendered lines", () => {
 		expect(ansiLinesToHtml(["one", "two"])).toBe('<div class="ansi-line">one</div><div class="ansi-line">two</div>');
 	});

@@ -833,11 +833,16 @@
         return null;
       }
 
+      function isGitEvidenceOutput(text) {
+        return /(?:^|\n)(?:Git evidence captured:|==== (?:Evidence: )?git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12} ====|\[Evidence span git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}:)/u.test(text.trimStart());
+      }
+
       function formatExpandableOutput(text, maxLines, lang) {
         text = replaceTabs(text);
         const lines = text.split('\n');
         const displayLines = lines.slice(0, maxLines);
         const remaining = lines.length - maxLines;
+        const outputClass = isGitEvidenceOutput(text) ? 'tool-output evidence-output' : 'tool-output';
 
         if (lang) {
           let highlighted;
@@ -856,18 +861,18 @@
               previewHighlighted = escapeHtml(previewCode);
             }
 
-            return `<div class="tool-output expandable" onclick="if(window.getSelection().toString())return;this.classList.toggle('expanded')">
+            return `<div class="${outputClass} expandable" onclick="if(window.getSelection().toString())return;this.classList.toggle('expanded')">
               <div class="output-preview"><pre><code class="hljs">${previewHighlighted}</code></pre>
               <div class="expand-hint">... (${remaining} more lines)</div></div>
               <div class="output-full"><pre><code class="hljs">${highlighted}</code></pre></div></div>`;
           }
 
-          return `<div class="tool-output"><pre><code class="hljs">${highlighted}</code></pre></div>`;
+          return `<div class="${outputClass}"><pre><code class="hljs">${highlighted}</code></pre></div>`;
         }
 
         // Plain text output
         if (remaining > 0) {
-          let out = '<div class="tool-output expandable" onclick="if(window.getSelection().toString())return;this.classList.toggle(\'expanded\')">';
+          let out = `<div class="${outputClass} expandable" onclick="if(window.getSelection().toString())return;this.classList.toggle('expanded')">`;
           out += '<div class="output-preview">';
           for (const line of displayLines) {
             out += `<div>${escapeHtml(replaceTabs(line))}</div>`;
@@ -881,7 +886,7 @@
           return out;
         }
 
-        let out = '<div class="tool-output">';
+        let out = `<div class="${outputClass}">`;
         for (const line of displayLines) {
           out += `<div>${escapeHtml(replaceTabs(line))}</div>`;
         }

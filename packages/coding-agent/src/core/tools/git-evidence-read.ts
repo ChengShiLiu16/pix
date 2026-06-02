@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { AgentTool } from "@earendil-works/pix-agent-core";
 import { Text } from "@earendil-works/pix-tui";
 import { type Static, Type } from "typebox";
+import { isGitEvidenceDisplayText } from "../context-git-evidence.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -326,12 +327,13 @@ export function createGitEvidenceReadToolDefinition(
 		renderResult(result, _options, theme, context) {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
 			const output = getTextOutput(result, context.showImages).trim();
+			const outputColor = isGitEvidenceDisplayText(output) ? "dim" : "toolOutput";
 			text.setText(
 				output
 					? `\n${output
 							.split("\n")
 							.slice(0, 20)
-							.map((line) => theme.fg("toolOutput", line))
+							.map((line) => theme.fg(outputColor, line))
 							.join("\n")}`
 					: "",
 			);

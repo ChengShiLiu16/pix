@@ -539,6 +539,11 @@
       color: var(--text);
     }
 
+    .tool-output.evidence-output,
+    .tool-output.evidence-output code {
+      color: var(--dim);
+    }
+
     .tool-output.expandable {
       cursor: pointer;
     }

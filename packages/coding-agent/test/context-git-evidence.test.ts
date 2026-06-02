@@ -9,6 +9,7 @@ import {
 	clearGitEvidenceCache,
 	createGitEvidenceResult,
 	detectGitInspection,
+	isGitEvidenceDisplayText,
 } from "../src/core/context-git-evidence.ts";
 import type { BashExecutionMessage } from "../src/core/messages.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
@@ -201,6 +202,13 @@ describe("git evidence detection", () => {
 		expect(text).toContain("Git evidence captured: git-grep-");
 		expect(text).toContain("Raw: 0 lines, 0 bytes");
 		expect(result.details?.gitEvidence?.kind).toBe("grep");
+	});
+
+	it("detects evidence display blocks for dim rendering", () => {
+		expect(isGitEvidenceDisplayText("==== Evidence: git-show-abcdef123456 ====\nGit evidence captured:")).toBe(true);
+		expect(isGitEvidenceDisplayText("==== git-grep-abcdef123456 ====\n(no matches)")).toBe(true);
+		expect(isGitEvidenceDisplayText("[Evidence span git-diff-abcdef123456:1-2 hash=abc]")).toBe(true);
+		expect(isGitEvidenceDisplayText("ordinary tool output")).toBe(false);
 	});
 });
 

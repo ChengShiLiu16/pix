@@ -6,6 +6,11 @@ import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil
 import type { BashExecutionMessage } from "./messages.ts";
 
 const GIT_EVIDENCE_PREFIX = "Git evidence captured:";
+const GIT_EVIDENCE_KIND_PATTERN = "(?:log|show|diff|diff-tree|status|blame|grep)";
+const GIT_EVIDENCE_DISPLAY_RE = new RegExp(
+	String.raw`(?:^|\n)(?:Git evidence captured:|==== (?:Evidence: )?git-${GIT_EVIDENCE_KIND_PATTERN}-[0-9a-f]{12} ====|\[Evidence span git-${GIT_EVIDENCE_KIND_PATTERN}-[0-9a-f]{12}:)`,
+	"u",
+);
 const MAX_RAW_BYTES = 20 * 1024 * 1024;
 const MAX_SESSION_BYTES = 200 * 1024 * 1024;
 const MAX_RECORDS = 200;
@@ -109,6 +114,10 @@ function countLines(text: string): number {
 
 export function isGitEvidenceText(text: string): boolean {
 	return text.startsWith(GIT_EVIDENCE_PREFIX);
+}
+
+export function isGitEvidenceDisplayText(text: string): boolean {
+	return GIT_EVIDENCE_DISPLAY_RE.test(text.trimStart());
 }
 
 export function detectGitInspection(command: string): GitInspectionInfo | undefined {
