@@ -148,13 +148,25 @@ function extractToolScope(
 			const path = getPathArg(args) ?? cwd;
 			return path ? { scope: path } : undefined;
 		}
+		case "ffgrep": {
+			const path = getPathArg(args) ?? cwd;
+			return path ? { scope: path } : undefined;
+		}
 		case "grep_many": {
 			const paths = getGrepManyPaths(args, cwd);
 			if (paths.length === 0) return undefined;
 			return { scope: paths[0], allPaths: paths };
 		}
+		case "fff-multi-grep":
+		case "multi_grep": {
+			return cwd ? { scope: cwd } : undefined;
+		}
 		case "ls":
 		case "find": {
+			const path = getPathArg(args) ?? cwd;
+			return path ? { scope: path } : undefined;
+		}
+		case "fffind": {
 			const path = getPathArg(args) ?? cwd;
 			return path ? { scope: path } : undefined;
 		}

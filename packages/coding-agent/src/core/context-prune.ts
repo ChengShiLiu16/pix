@@ -11,12 +11,12 @@
  * Staleness rules depend on what information each tool returns and what each
  * mutation changes:
  *
- *   Content tools (read, read_many, grep, grep_many, bash-read) — results
+ *   Content tools (read, read_many, grep, grep_many, ffgrep, bash-read) — results
  *   reflect FILE CONTENT.
  *     → stale when a later MUTATION (edit/write) changes content of a file
  *       in the tool's scope, OR a later duplicate read supersedes it.
  *
- *   Structure tools (find, ls, ls_many) — results reflect FILE SYSTEM
+ *   Structure tools (find, fffind, ls, ls_many) — results reflect FILE SYSTEM
  *   STRUCTURE.
  *     → stale when a later STRUCTURAL mutation (write that creates a new file)
  *       adds/removes files in the tool's scope. Content-only mutations (edit)
@@ -24,9 +24,9 @@
  *
  * Scope matching:
  *   - read, read_many, bash-read: path is a FILE → exact match with mutation.
- *   - grep, grep_many: path is a search SCOPE (file or directory) → mutation
+ *   - grep, grep_many, ffgrep: path is a search SCOPE (file or directory) → mutation
  *     file must be within that scope (exact match or prefix match with "/").
- *   - find, ls, ls_many: path is a DIRECTORY scope → mutation file must be
+ *   - find, fffind, ls, ls_many: path is a DIRECTORY scope → mutation file must be
  *     within that scope. When path is absent, cwd is used as the scope.
  *
  * Batch tools (read_many, grep_many, ls_many) combine multiple paths into
@@ -54,14 +54,23 @@ const MUTATION_TOOLS = new Set(["edit", "write"]);
  * Tools whose results reflect file CONTENT.
  * Stale when a mutation changes content of a file in their scope.
  */
-const CONTENT_TOOLS = new Set(["read", "read_many", "grep", "grep_many", "bash"]);
+const CONTENT_TOOLS = new Set([
+	"read",
+	"read_many",
+	"grep",
+	"grep_many",
+	"ffgrep",
+	"fff-multi-grep",
+	"multi_grep",
+	"bash",
+]);
 
 /**
  * Tools whose results reflect file system STRUCTURE (file listings).
  * Stale when a structural mutation (write creating new file) changes the
  * file list in their scope. Content-only mutations (edit) do NOT affect them.
  */
-const STRUCTURE_TOOLS = new Set(["find", "ls", "ls_many"]);
+const STRUCTURE_TOOLS = new Set(["find", "fffind", "ls", "ls_many"]);
 
 /** All trackable tools that can go stale. */
 const STALEABLE_TOOLS = new Set([...CONTENT_TOOLS, ...STRUCTURE_TOOLS]);
@@ -71,7 +80,17 @@ const STALEABLE_TOOLS = new Set([...CONTENT_TOOLS, ...STRUCTURE_TOOLS]);
  * rather than a specific file. For these, a mutation on a file WITHIN the
  * scope makes the result stale (prefix match), not just exact path match.
  */
-const DIR_SCOPE_TOOLS = new Set(["grep", "grep_many", "find", "ls", "ls_many"]);
+const DIR_SCOPE_TOOLS = new Set([
+	"grep",
+	"grep_many",
+	"ffgrep",
+	"fff-multi-grep",
+	"multi_grep",
+	"find",
+	"fffind",
+	"ls",
+	"ls_many",
+]);
 
 /**
  * Regex patterns for bash commands that read file content.
@@ -323,8 +342,12 @@ function stalePlaceholder(toolName: string): string {
 			return "[Stale read omitted to save context — this file was re-read or modified later. Re-read it if you need its current contents.]";
 		case "grep":
 		case "grep_many":
+		case "ffgrep":
+		case "fff-multi-grep":
+		case "multi_grep":
 			return "[Stale grep result omitted to save context — a file in the search scope was modified later. Re-grep if you need current matches.]";
 		case "find":
+		case "fffind":
 			return "[Stale find result omitted to save context — a file was added in the search scope later. Re-run find if needed.]";
 		case "ls":
 		case "ls_many":

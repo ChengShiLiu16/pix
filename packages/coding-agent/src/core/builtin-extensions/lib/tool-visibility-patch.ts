@@ -59,6 +59,8 @@ type ToolArgs = {
 	paths?: string[];
 	files?: { path?: string; offset?: number; limit?: number }[];
 	searches?: { pattern?: string; path?: string }[];
+	patterns?: string[];
+	constraints?: string;
 	action?: string;
 	text?: string;
 	id?: number;
@@ -94,7 +96,11 @@ export const NEVER_HIDE = new Set([
 	"read_many",
 	"grep",
 	"grep_many",
+	"ffgrep",
+	"fff-multi-grep",
+	"multi_grep",
 	"find",
+	"fffind",
 	"ls",
 	"ls_many",
 	"write",
@@ -110,7 +116,11 @@ const TOOL_HEADERS: Record<string, string> = {
 	read_many: "Read",
 	grep: "Grep",
 	grep_many: "Grep",
+	ffgrep: "Grep",
+	"fff-multi-grep": "Grep",
+	multi_grep: "Grep",
 	find: "Find",
+	fffind: "Find",
 	ls: "List",
 	ls_many: "List",
 	write: "Write",
@@ -180,12 +190,17 @@ export function hasVisibleToolArgs(toolName: string, args: ToolArgs): boolean {
 			);
 		case "grep":
 		case "grep_many":
+		case "ffgrep":
+		case "fff-multi-grep":
+		case "multi_grep":
 			return (
 				(typeof args.pattern === "string" && args.pattern.length > 0) ||
+				(Array.isArray(args.patterns) && args.patterns.some((p) => typeof p === "string" && p.length > 0)) ||
 				(Array.isArray(args.searches) &&
 					args.searches.some((s) => typeof s?.pattern === "string" && s.pattern.length > 0))
 			);
 		case "find":
+		case "fffind":
 			return typeof args.pattern === "string" && args.pattern.length > 0;
 		case "ls":
 		case "ls_many":
@@ -233,7 +248,23 @@ function buildFallbackDetail(toolName: string, args: ToolArgs, theme: ThemeLike)
 			const path = shortenPath(search?.path ?? args.path ?? ".");
 			return `/${pattern}/ in ${formatToolPath(path)}`;
 		}
+		case "ffgrep": {
+			const pattern = args.pattern ?? "";
+			const path = shortenPath(args.path ?? ".");
+			return `/${pattern}/ in ${formatToolPath(path)}`;
+		}
+		case "fff-multi-grep":
+		case "multi_grep": {
+			const pattern = args.patterns?.[0] ?? "";
+			const path = shortenPath(args.constraints ?? ".");
+			return `/${pattern}/ in ${formatToolPath(path)}`;
+		}
 		case "find": {
+			const pattern = args.pattern ?? "";
+			const path = shortenPath(args.path ?? ".");
+			return `${pattern} in ${formatToolPath(path)}`;
+		}
+		case "fffind": {
 			const pattern = args.pattern ?? "";
 			const path = shortenPath(args.path ?? ".");
 			return `${pattern} in ${formatToolPath(path)}`;
@@ -275,7 +306,15 @@ export function shouldHideBatchDuplicate(toolName: string, toolCallId: string): 
 
 function shouldHideCompactToolUntilArgsComplete(toolName: string, argsComplete: boolean): boolean {
 	if (argsComplete) return false;
-	return toolName === "ls" || toolName === "ls_many" || toolName === "grep" || toolName === "grep_many";
+	return (
+		toolName === "ls" ||
+		toolName === "ls_many" ||
+		toolName === "grep" ||
+		toolName === "grep_many" ||
+		toolName === "ffgrep" ||
+		toolName === "fff-multi-grep" ||
+		toolName === "multi_grep"
+	);
 }
 
 export function shouldHideUntilBatchReady(
@@ -440,7 +479,11 @@ export function shouldRenderNeverHideFallback(
 		argsReady &&
 		(toolName === "grep" ||
 			toolName === "grep_many" ||
+			toolName === "ffgrep" ||
+			toolName === "fff-multi-grep" ||
+			toolName === "multi_grep" ||
 			toolName === "find" ||
+			toolName === "fffind" ||
 			toolName === "ls" ||
 			toolName === "ls_many")
 	) {

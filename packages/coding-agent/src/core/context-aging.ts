@@ -27,7 +27,20 @@ import type { ReachabilityLevel } from "./context-reachability.ts";
 const MIN_AGING_CHARS = 800;
 
 /** Tools whose results contain file content and can be aged. */
-const AGABLE_TOOLS = new Set(["read", "read_many", "grep", "grep_many", "find", "ls", "ls_many", "bash"]);
+const AGABLE_TOOLS = new Set([
+	"read",
+	"read_many",
+	"grep",
+	"grep_many",
+	"ffgrep",
+	"fff-multi-grep",
+	"multi_grep",
+	"find",
+	"fffind",
+	"ls",
+	"ls_many",
+	"bash",
+]);
 
 /** Mutation tools whose results should never be aged. */
 const MUTATION_TOOLS = new Set(["edit", "write"]);
@@ -201,7 +214,7 @@ function ageGrepResult(text: string, level: AgingLevel): string {
 function ageListResult(text: string, level: AgingLevel, toolName: string): string {
 	if (level.heavy) {
 		const entryCount = text.split("\n").length;
-		const label = toolName === "find" ? "Find" : "Ls";
+		const label = toolName === "find" || toolName === "fffind" ? "Find" : "Ls";
 		return `${label} result omitted to save context. ${entryCount} entries total. Re-run if needed.`;
 	}
 	const lines = text.split("\n");
@@ -230,11 +243,15 @@ function naturalLanguagePlaceholder(toolName: string, path?: string, lineCount?:
 			return `Earlier read of ${p} (${n} lines) omitted to save context. Re-read the file if needed.`;
 		case "grep":
 		case "grep_many":
+		case "ffgrep":
+		case "fff-multi-grep":
+		case "multi_grep":
 			return `Earlier grep results omitted to save context. Re-run grep if needed.`;
 		case "ls":
 		case "ls_many":
 			return `Earlier directory listing (${n} entries) omitted to save context. Re-run ${toolName} if needed.`;
 		case "find":
+		case "fffind":
 			return `Earlier find results (${n} entries) omitted to save context. Re-run find if needed.`;
 		case "bash":
 			return `Earlier command output omitted to save context. Re-run the command if needed.`;
@@ -320,11 +337,15 @@ export function ageToolResults(
 				break;
 			case "grep":
 			case "grep_many":
+			case "ffgrep":
+			case "fff-multi-grep":
+			case "multi_grep":
 				agedText = ageGrepResult(text, level);
 				break;
 			case "ls":
 			case "ls_many":
 			case "find":
+			case "fffind":
 				agedText = ageListResult(text, level, toolResult.toolName);
 				break;
 			default:

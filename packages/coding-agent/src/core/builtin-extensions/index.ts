@@ -20,6 +20,7 @@ import { builtin as askUserQuestion } from "./ask-user-question.ts";
 import { builtin as autoCompactEnhanced } from "./auto-compact-enhanced.ts";
 import { builtin as compactTools } from "./compact-tools.ts";
 import { builtin as diffCommand } from "./diff-command.ts";
+import { builtin as fff } from "./fff.ts";
 import { builtin as generationWatchdog } from "./generation-watchdog.ts";
 import { builtin as gitCheckpoint } from "./git-checkpoint.ts";
 import { builtin as grepMany } from "./grep-many.ts";
@@ -46,6 +47,7 @@ export const builtinExtensionFactories: (ExtensionFactory & { extensionName?: st
 	Object.assign(autoCompactEnhanced, { extensionName: "auto-compact-enhanced" }),
 	Object.assign(diffCommand, { extensionName: "diff-command" }),
 	Object.assign(generationWatchdog, { extensionName: "generation-watchdog" }),
+	Object.assign(fff, { extensionName: "fff" }),
 	Object.assign(gitCheckpoint, { extensionName: "git-checkpoint" }),
 	Object.assign(grepMany, { extensionName: "grep-many" }),
 	Object.assign(lsMany, { extensionName: "ls-many" }),
