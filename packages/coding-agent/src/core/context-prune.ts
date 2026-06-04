@@ -44,11 +44,18 @@
 
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil-works/pix-ai";
-
-/** Minimum text length (chars) of a result before stubbing is worth it. */
-const MIN_STALE_RESULT_CHARS = 600;
-
-const MUTATION_TOOLS = new Set(["edit", "write"]);
+import { MIN_STALE_RESULT_CHARS } from "./context-thresholds.ts";
+import {
+	getBashReadPath,
+	getGrepManyPaths,
+	getLsManyPaths,
+	getNumberArg,
+	getPathArg,
+	getReadManyPaths,
+	MUTATION_TOOLS,
+	normalizePath,
+	type ReadFileEntry,
+} from "./context-tool-scope.ts";
 
 /**
  * Tools whose results reflect file CONTENT.
@@ -92,138 +99,10 @@ const DIR_SCOPE_TOOLS = new Set([
 	"ls_many",
 ]);
 
-/**
- * Regex patterns for bash commands that read file content.
- * Captured group 1 is the file path. Only simple, single-file reads are
- * detected — pipes, redirects, and heredocs are intentionally excluded.
- */
-const BASH_READ_COMMAND_RE = /\b(?:cat|head|tail|less|more)\s+(?:--?\w+(?:=\S+)?\s+)*["']?([^\s"';|&<>]+)["']?/;
-
 interface ReadOpKey {
 	path: string;
 	offset: number | undefined;
 	limit: number | undefined;
-}
-
-/** Per-file details for read_many batch tools. */
-interface ReadFileEntry {
-	path: string;
-	offset?: number;
-	limit?: number;
-}
-
-function getPathArg(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	// Models call edit/write with `path`, `file_path`, or `filePath`; the
-	// persisted tool call keeps whichever the model emitted, so accept all three.
-	const path = args.path ?? args.file_path ?? args.filePath;
-	return typeof path === "string" && path.length > 0 ? path : undefined;
-}
-
-function getNumberArg(args: Record<string, unknown> | undefined, key: string): number | undefined {
-	const value = args?.[key];
-	return typeof value === "number" ? value : undefined;
-}
-
-/**
- * Extract a file path from a bash command if it reads file content.
- * Returns undefined for non-file-reading commands or ambiguous cases.
- */
-function getBashReadPath(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	const command = args.command;
-	if (typeof command !== "string") return undefined;
-	// Skip heredocs and redirect-heavy commands — too ambiguous.
-	if (/<<|>>|>/.test(command) && !/\bcat\s/.test(command)) return undefined;
-	const match = BASH_READ_COMMAND_RE.exec(command);
-	return match?.[1] || undefined;
-}
-
-/**
- * Extract all file paths from a read_many call.
- * read_many accepts either `files: [{path, offset?, limit?}]` or
- * `paths: [string]` with shared offset/limit.
- */
-function getReadManyPaths(args: Record<string, unknown> | undefined): ReadFileEntry[] {
-	if (!args) return [];
-	const result: ReadFileEntry[] = [];
-	const files = args.files;
-	if (Array.isArray(files)) {
-		for (const file of files) {
-			if (typeof file === "object" && file !== null && typeof file.path === "string" && file.path.length > 0) {
-				result.push({
-					path: file.path,
-					offset: typeof file.offset === "number" ? file.offset : undefined,
-					limit: typeof file.limit === "number" ? file.limit : undefined,
-				});
-			}
-		}
-	}
-	const paths = args.paths;
-	if (result.length === 0 && Array.isArray(paths)) {
-		const offset = typeof args.offset === "number" ? args.offset : undefined;
-		const limit = typeof args.limit === "number" ? args.limit : undefined;
-		for (const p of paths) {
-			if (typeof p === "string" && p.length > 0) {
-				result.push({ path: p, offset, limit });
-			}
-		}
-	}
-	return result;
-}
-
-/**
- * Extract all search scopes from a grep_many call.
- * grep_many accepts `searches: [{pattern, path?, ...}]` or single-search
- * shorthand with top-level `pattern`/`path`.
- * Returns paths only (patterns are not needed for staleness tracking).
- * When a search has no path, cwd is used as the default scope.
- */
-function getGrepManyPaths(args: Record<string, unknown> | undefined, cwd?: string): string[] {
-	if (!args) return [];
-	const result: string[] = [];
-	const searches = args.searches;
-	if (Array.isArray(searches)) {
-		for (const s of searches) {
-			if (typeof s === "object" && s !== null) {
-				const p = s.path;
-				if (typeof p === "string" && p.length > 0) {
-					result.push(p);
-				} else if (cwd) {
-					result.push(cwd);
-				}
-			}
-		}
-	}
-	// Single-search shorthand
-	if (result.length === 0) {
-		const p = args.path;
-		if (typeof p === "string" && p.length > 0) {
-			result.push(p);
-		} else if (cwd && typeof args.pattern === "string") {
-			result.push(cwd);
-		}
-	}
-	return result;
-}
-
-/**
- * Extract all directory paths from an ls_many call.
- * ls_many accepts `paths: [string]`.
- */
-function getLsManyPaths(args: Record<string, unknown> | undefined, cwd?: string): string[] {
-	if (!args) return [];
-	const result: string[] = [];
-	const paths = args.paths;
-	if (Array.isArray(paths)) {
-		for (const p of paths) {
-			if (typeof p === "string" && p.length > 0) result.push(p);
-		}
-	}
-	if (result.length === 0 && cwd) {
-		result.push(cwd);
-	}
-	return result;
 }
 
 function textLength(content: ToolResultMessage["content"]): number {
@@ -233,20 +112,6 @@ function textLength(content: ToolResultMessage["content"]): number {
 		else if (block.type === "image") chars += 4800; // rough token-equivalent weight
 	}
 	return chars;
-}
-
-/**
- * Normalize a path to absolute form if cwd is provided and the path is
- * relative. This allows matching between tools that use relative paths
- * (read_many, grep_many) and mutations that use absolute paths (edit, write).
- * When cwd is not provided, returns the path unchanged.
- */
-function normalizePath(path: string, cwd: string | undefined): string {
-	if (!cwd) return path;
-	// Already absolute
-	if (path.startsWith("/")) return path;
-	// Resolve relative path against cwd
-	return `${cwd.replace(/\/+$/, "")}/${path}`;
 }
 
 /**
@@ -484,74 +349,81 @@ export function pruneStaleReads(messages: AgentMessage[], cwd?: string): AgentMe
 		});
 	});
 
+	// Pre-index potential stale-makers so each staleable op scans only relevant
+	// later ops instead of all of them. The original inner loop was O(n²); the
+	// common worst case (many reads of distinct files, few mutations, nothing
+	// superseding) never hit the early `break` and paid the full quadratic.
+	//
+	// Equivalence: an op is stale iff ANY later op makes it stale, and the value
+	// stored is always op.name regardless of which op triggered it — so the order
+	// of checks and the single-`break` are pure perf, not semantics. The mutation
+	// predicates already return false for non-mutations, so restricting to
+	// mutation ops is identical; only single reads are ever superseded, so we only
+	// index reads by the earlier read's normalized path.
+	const mutationOps: Array<{ name: string; path: string; index: number }> = [];
+	const readSupersedersByPath = new Map<string, Array<{ index: number; key: ReadOpKey }>>();
+	const addSuperseder = (path: string, index: number, key: ReadOpKey) => {
+		const norm = normalizePath(path, cwd);
+		let list = readSupersedersByPath.get(norm);
+		if (!list) {
+			list = [];
+			readSupersedersByPath.set(norm, list);
+		}
+		list.push({ index, key });
+	};
+	for (const op of ops) {
+		// A failed op did not change the file or return fresh content, so it
+		// cannot supersede an earlier result.
+		if (op.isError) continue;
+		if (MUTATION_TOOLS.has(op.name)) {
+			mutationOps.push({ name: op.name, path: op.key.path, index: op.index });
+		} else if (op.name === "read" && !op.isBatch) {
+			addSuperseder(op.key.path, op.index, op.key);
+		} else if (op.name === "read_many" && op.files) {
+			// Batch results are not superseded themselves, but their individual
+			// files can supersede earlier single reads of the same file.
+			for (const f of op.files) {
+				addSuperseder(f.path, op.index, { path: f.path, offset: f.offset, limit: f.limit });
+			}
+		}
+	}
+
 	const staleIndices = new Map<number, string>(); // index -> toolName
-	for (let i = 0; i < ops.length; i++) {
-		const op = ops[i];
+	for (const op of ops) {
 		// Only staleable results can go stale. Mutations and unrecognized
 		// tools are never stubbed themselves.
 		if (!STALEABLE_TOOLS.has(op.name)) continue;
 		if (op.isError) continue;
 
-		for (let j = i + 1; j < ops.length; j++) {
-			const later = ops[j];
-			// A failed op did not change the file or return fresh content, so it
-			// cannot supersede an earlier result.
-			if (later.isError) continue;
+		let stale = false;
 
-			// --- Mutation makes result stale ---
-
-			if (op.isBatch) {
-				// Batch: stale if mutation affects ANY of the batch's paths.
-				if (isBatchStaleMutation(op.name, op.allPaths, later.name, later.key.path, cwd)) {
-					staleIndices.set(op.index, op.name);
-					break;
-				}
-			} else {
-				// Single: existing logic.
-				if (isStaleMutation(op.name, later.name, op.key.path, later.key.path, cwd)) {
-					staleIndices.set(op.index, op.name);
-					break;
-				}
+		// --- A later mutation makes the result stale ---
+		for (const mut of mutationOps) {
+			if (mut.index <= op.index) continue;
+			const hit = op.isBatch
+				? isBatchStaleMutation(op.name, op.allPaths, mut.name, mut.path, cwd)
+				: isStaleMutation(op.name, mut.name, op.key.path, mut.path, cwd);
+			if (hit) {
+				stale = true;
+				break;
 			}
+		}
 
-			// --- Later read supersedes earlier read ---
-
-			// Only reads supersede earlier reads. Other tools (grep/find/ls/bash)
-			// do NOT supersede each other or reads — they return partial/different
-			// views. Batch results are NOT superseded by later reads of individual
-			// files (we can't selectively prune parts of a combined result).
-
-			if (op.name === "read" && !op.isBatch) {
-				const opNormPath = normalizePath(op.key.path, cwd);
-				// Later single read supersedes earlier read of the same file
-				if (later.name === "read" && !later.isBatch) {
-					const laterNormPath = normalizePath(later.key.path, cwd);
-					if (opNormPath === laterNormPath) {
-						// Check if the later read covers the earlier read's range.
-						// A read with no offset/limit reads the whole file and
-						// covers any partial read. A partial read covers another
-						// partial read if its range is a superset.
-						if (readCovers(later.key, op.key)) {
-							staleIndices.set(op.index, op.name);
-							break;
-						}
-					}
-				}
-				// Later read_many supersedes earlier read if it includes the same
-				// file with a range that covers the earlier read
-				if (later.name === "read_many" && later.files) {
-					const match = later.files.find(
-						(f) =>
-							normalizePath(f.path, cwd) === opNormPath &&
-							readCovers({ path: "", offset: f.offset, limit: f.limit }, op.key),
-					);
-					if (match) {
-						staleIndices.set(op.index, op.name);
+		// --- A later read supersedes an earlier single read ---
+		if (!stale && op.name === "read" && !op.isBatch) {
+			const candidates = readSupersedersByPath.get(normalizePath(op.key.path, cwd));
+			if (candidates) {
+				for (const c of candidates) {
+					if (c.index <= op.index) continue;
+					if (readCovers(c.key, op.key)) {
+						stale = true;
 						break;
 					}
 				}
 			}
 		}
+
+		if (stale) staleIndices.set(op.index, op.name);
 	}
 
 	if (staleIndices.size === 0) return messages;

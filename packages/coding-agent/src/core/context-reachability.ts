@@ -11,115 +11,16 @@
 
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pix-ai";
+import {
+	getBashReadPath,
+	getGrepManyPaths,
+	getLsManyPaths,
+	getPathArg,
+	getReadManyPaths,
+	normalizePath,
+} from "./context-tool-scope.ts";
 
 export type ReachabilityLevel = "active" | "adjacent" | "unrelated";
-
-/**
- * Normalize a path to absolute form if cwd is provided and the path is
- * relative. When cwd is not provided, returns the path unchanged.
- */
-function normalizePath(path: string, cwd: string | undefined): string {
-	if (!cwd) return path;
-	if (path.startsWith("/")) return path;
-	return `${cwd.replace(/\/+$/, "")}/${path}`;
-}
-
-function getPathArg(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	const path = args.path ?? args.file_path ?? args.filePath;
-	return typeof path === "string" && path.length > 0 ? path : undefined;
-}
-
-/**
- * Regex for bash commands that read file content.
- * Captured group 1 is the file path.
- */
-const BASH_READ_COMMAND_RE = /\b(?:cat|head|tail|less|more)\s+(?:--?\w+(?:=\S+)?\s+)*["']?([^\s"';|&<>]+)["']?/;
-
-function getBashReadPath(args: Record<string, unknown> | undefined): string | undefined {
-	if (!args) return undefined;
-	const command = args.command;
-	if (typeof command !== "string") return undefined;
-	if (/<<|>>|>/.test(command) && !/\bcat\s/.test(command)) return undefined;
-	const match = BASH_READ_COMMAND_RE.exec(command);
-	return match?.[1] || undefined;
-}
-
-interface ReadFileEntry {
-	path: string;
-	offset?: number;
-	limit?: number;
-}
-
-function getReadManyPaths(args: Record<string, unknown> | undefined): ReadFileEntry[] {
-	if (!args) return [];
-	const result: ReadFileEntry[] = [];
-	const files = args.files;
-	if (Array.isArray(files)) {
-		for (const file of files) {
-			if (typeof file === "object" && file !== null && typeof file.path === "string" && file.path.length > 0) {
-				result.push({
-					path: file.path,
-					offset: typeof file.offset === "number" ? file.offset : undefined,
-					limit: typeof file.limit === "number" ? file.limit : undefined,
-				});
-			}
-		}
-	}
-	const paths = args.paths;
-	if (result.length === 0 && Array.isArray(paths)) {
-		const offset = typeof args.offset === "number" ? args.offset : undefined;
-		const limit = typeof args.limit === "number" ? args.limit : undefined;
-		for (const p of paths) {
-			if (typeof p === "string" && p.length > 0) {
-				result.push({ path: p, offset, limit });
-			}
-		}
-	}
-	return result;
-}
-
-function getGrepManyPaths(args: Record<string, unknown> | undefined, cwd?: string): string[] {
-	if (!args) return [];
-	const result: string[] = [];
-	const searches = args.searches;
-	if (Array.isArray(searches)) {
-		for (const s of searches) {
-			if (typeof s === "object" && s !== null) {
-				const p = s.path;
-				if (typeof p === "string" && p.length > 0) {
-					result.push(p);
-				} else if (cwd) {
-					result.push(cwd);
-				}
-			}
-		}
-	}
-	if (result.length === 0) {
-		const p = args.path;
-		if (typeof p === "string" && p.length > 0) {
-			result.push(p);
-		} else if (cwd && typeof args.pattern === "string") {
-			result.push(cwd);
-		}
-	}
-	return result;
-}
-
-function getLsManyPaths(args: Record<string, unknown> | undefined, cwd?: string): string[] {
-	if (!args) return [];
-	const result: string[] = [];
-	const paths = args.paths;
-	if (Array.isArray(paths)) {
-		for (const p of paths) {
-			if (typeof p === "string" && p.length > 0) result.push(p);
-		}
-	}
-	if (result.length === 0 && cwd) {
-		result.push(cwd);
-	}
-	return result;
-}
 
 /**
  * Extract the primary scope path from a tool call.

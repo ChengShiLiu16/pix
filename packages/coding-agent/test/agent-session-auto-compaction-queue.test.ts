@@ -46,6 +46,9 @@ vi.mock("../src/core/compaction/index.js", () => ({
 	},
 	generateBranchSummary: async () => ({ summary: "", aborted: false, readFiles: [], modifiedFiles: [] }),
 	prepareCompaction: () => ({ dummy: true }),
+	// Passthrough: the large-context models in these tests are unaffected by clamping.
+	resolveCompactionSettings: (settings: { enabled: boolean; reserveTokens: number; keepRecentTokens: number }) =>
+		settings,
 	shouldCompact: (
 		contextTokens: number,
 		contextWindow: number,

@@ -175,13 +175,22 @@ describe("ageToolResults", () => {
 		expect(text).not.toContain("line 1:");
 	});
 
+	it("heavy aging starts at 80% context ratio", () => {
+		const messages = buildConversation("read", FIFTY_LINES, 5);
+		const result = ageToolResults(messages, 0.8);
+		const text = resultText(result[1]);
+		expect(text).toContain("Read result omitted to save context");
+	});
+
 	// --- bash aging ---
 
-	it("light aging: keeps tail 10 lines for bash", () => {
+	it("light aging: keeps tail 6 lines for bash", () => {
 		const messages = buildConversation("bash", FIFTY_LINES, 12);
 		const result = ageToolResults(messages, 0.6); // light
 		const text = resultText(result[1]);
+		expect(text).toContain("line 45:");
 		expect(text).toContain("line 50:");
+		expect(text).not.toContain("line 44:");
 		expect(text).toContain("earlier lines not shown");
 	});
 

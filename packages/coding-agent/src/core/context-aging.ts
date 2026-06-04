@@ -13,8 +13,8 @@
  * Aging levels by context ratio (used / window):
  *   < 50% : no aging
  *   50-70%: light aging — results older than 10 user turns
- *   70-85%: medium aging — results older than 5 user turns
- *   > 85% : heavy aging — results older than 3 user turns
+ *   70-80%: medium aging — results older than 5 user turns
+ *   >= 80%: heavy aging — results older than 3 user turns
  *
  * Error results and mutation results (edit/write) are never aged.
  */
@@ -22,9 +22,14 @@
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil-works/pix-ai";
 import type { ReachabilityLevel } from "./context-reachability.ts";
-
-/** Minimum text length (chars) of a result before aging is worth it. */
-const MIN_AGING_CHARS = 800;
+import {
+	AGING_HEAVY_RATIO,
+	AGING_MEDIUM_RATIO,
+	AGING_START_RATIO,
+	EDIT_ARGS_COMPACT_RATIO,
+	MIN_AGING_CHARS,
+} from "./context-thresholds.ts";
+import { BASH_READ_COMMAND_RE, MUTATION_TOOLS } from "./context-tool-scope.ts";
 
 /** Tools whose results contain file content and can be aged. */
 const AGABLE_TOOLS = new Set([
@@ -41,9 +46,6 @@ const AGABLE_TOOLS = new Set([
 	"ls_many",
 	"bash",
 ]);
-
-/** Mutation tools whose results should never be aged. */
-const MUTATION_TOOLS = new Set(["edit", "write"]);
 
 interface AgingLevel {
 	/** Minimum user-turn age to apply aging. */
@@ -67,7 +69,7 @@ const AGING_LEVELS: Record<string, AgingLevel> = {
 		minAge: 10,
 		readHeadLines: 20,
 		readTailLines: 5,
-		bashTailLines: 10,
+		bashTailLines: 6,
 		grepMaxMatches: 20,
 		listMaxEntries: 30,
 		heavy: false,
@@ -76,7 +78,7 @@ const AGING_LEVELS: Record<string, AgingLevel> = {
 		minAge: 5,
 		readHeadLines: 5,
 		readTailLines: 0,
-		bashTailLines: 3,
+		bashTailLines: 2,
 		grepMaxMatches: 5,
 		listMaxEntries: 10,
 		heavy: false,
@@ -132,9 +134,9 @@ function computeAges(messages: AgentMessage[]): Map<number, number> {
  * Determine the aging level based on context ratio.
  */
 function getAgingLevel(contextRatio: number): AgingLevel | undefined {
-	if (contextRatio < 0.5) return undefined;
-	if (contextRatio < 0.7) return AGING_LEVELS.light;
-	if (contextRatio < 0.85) return AGING_LEVELS.medium;
+	if (contextRatio < AGING_START_RATIO) return undefined;
+	if (contextRatio < AGING_MEDIUM_RATIO) return AGING_LEVELS.light;
+	if (contextRatio < AGING_HEAVY_RATIO) return AGING_LEVELS.medium;
 	return AGING_LEVELS.heavy;
 }
 
@@ -335,8 +337,6 @@ function getLsManyAnchor(args: Record<string, unknown> | undefined): string | un
 	return compactList(paths.filter((path): path is string => typeof path === "string"));
 }
 
-const BASH_READ_COMMAND_RE = /\b(?:cat|head|tail|less|more)\s+(?:--?\w+(?:=\S+)?\s+)*["']?([^\s"';|&<>]+)["']?/;
-
 function getBashAnchor(args: Record<string, unknown> | undefined): string | undefined {
 	const command = getStringArg(args, ["command"]);
 	if (!command) return undefined;
@@ -491,7 +491,7 @@ export function ageToolResults(
  * Returns the original array when nothing is changed.
  */
 export function compactEditArguments(messages: AgentMessage[], contextRatio: number): AgentMessage[] {
-	if (contextRatio < 0.7) return messages;
+	if (contextRatio < EDIT_ARGS_COMPACT_RATIO) return messages;
 
 	let changed = false;
 	const result = messages.map((message) => {

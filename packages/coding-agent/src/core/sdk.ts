@@ -1,15 +1,12 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, estimateContextTokens, type ThinkingLevel } from "@earendil-works/pix-agent-core";
+import { Agent, type AgentMessage, type ThinkingLevel } from "@earendil-works/pix-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pix-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
-import { ageToolResults, compactEditArguments } from "./context-aging.ts";
-import { applyGitEvidenceTransform } from "./context-git-evidence.ts";
-import { pruneStaleReads, pruneThinkingForNonAnthropic } from "./context-prune.ts";
-import { computeReachability } from "./context-reachability.ts";
+import { optimizeOutgoingContext } from "./context-optimizer.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { convertToLlm } from "./messages.ts";
@@ -34,7 +31,6 @@ import {
 	type ToolName,
 	withFileMutationQueue,
 } from "./tools/index.ts";
-import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./tools/truncate.ts";
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -204,9 +200,6 @@ function getAttributionHeaders(
  * });
  * ```
  */
-/** Fraction of the context window above which stale `read` results are pruned. */
-const STALE_READ_PRUNE_THRESHOLD = 0.7;
-
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
@@ -389,77 +382,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		},
 		sessionId: sessionManager.getSessionId(),
 		transformContext: async (messages) => {
-			// Step 0: Cap assistant text blocks to prevent unbounded growth.
-			// Some providers (e.g. siliconflow/DeepSeek-V4-Pro) return tool calls
-			// as raw text instead of structured tool_calls, producing assistant
-			// text blocks that can balloon to multiple megabytes. This cap is
-			// a safety net that catches all such cases.
-			const MAX_ASSISTANT_TEXT_BYTES = DEFAULT_MAX_BYTES * 2; // 100KB
-			if (messages.length > 0) {
-				messages = messages.map((msg) => {
-					if (msg.role !== "assistant") return msg;
-					const content = msg.content;
-					if (!content || !Array.isArray(content)) return msg;
-					let changed = false;
-					const newContent = content.map((block) => {
-						if (block.type !== "text") return block;
-						const bytes = Buffer.byteLength(block.text, "utf-8");
-						if (bytes <= MAX_ASSISTANT_TEXT_BYTES) return block;
-						changed = true;
-						const truncated = truncateHead(block.text, { maxBytes: MAX_ASSISTANT_TEXT_BYTES });
-						if (truncated.firstLineExceedsLimit) {
-							return {
-								type: "text" as const,
-								text: `[Assistant text block (${formatSize(bytes)}) exceeds limit. Truncated.]`,
-							};
-						}
-						const totalSize = formatSize(truncated.totalBytes);
-						return {
-							type: "text" as const,
-							text: `${truncated.content}\n\n[Truncated: ${formatSize(MAX_ASSISTANT_TEXT_BYTES)} of ${totalSize} shown.]`,
-						};
-					});
-					return changed ? { ...msg, content: newContent } : msg;
-				});
-			}
-
 			const contextWindow = agent.state.model?.contextWindow ?? 0;
-
-			// Step 1: Replace bulky git inspection output with structured evidence
-			// digests plus raw evidence references before generic aging.
-			let next = await applyGitEvidenceTransform(messages, cwd);
-
-			// Progressive aging reduces old tool results before the more
-			// destructive stale-read pruning. Compute pressure after git evidence
-			// compression so large git inspections do not cause over-aging.
-			const contextTokens = contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
-			const contextRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
-
-			// Step 2: Age old tool results (triggers at 50% context usage).
-			if (contextRatio >= 0.5) {
-				const reachability = computeReachability(next, 2, cwd);
-				next = ageToolResults(next, contextRatio, reachability);
-			}
-
-			// Step 3: Stale-read pruning rewrites mid-history messages, which
-			// invalidates the Anthropic prefix cache from that point. Only do it
-			// once context usage is high enough that the token savings (delaying
-			// compaction / fitting the window) outweigh the one-time cache miss.
-			const nextTokens = contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
-			if (contextWindow > 0 && nextTokens > contextWindow * STALE_READ_PRUNE_THRESHOLD) {
-				next = pruneStaleReads(next, cwd);
-			}
-
-			// Step 4: For non-Anthropic providers, strip thinking blocks from
-			// prior turns. Anthropic filters these server-side at no token cost;
-			// other providers bill for the full thinking text.
 			const provider = agent.state.model?.provider ?? "";
-			next = pruneThinkingForNonAnthropic(next, provider);
-
-			// Step 5: Compact edit tool-call arguments (old_string truncation)
-			// when context is high. Only triggers at >= 70% context usage.
-			next = compactEditArguments(next, contextRatio);
-
+			const next = await optimizeOutgoingContext(messages, { cwd, contextWindow, provider });
 			const runner = extensionRunnerRef.current;
 			if (!runner) return next;
 			return runner.emitContext(next);

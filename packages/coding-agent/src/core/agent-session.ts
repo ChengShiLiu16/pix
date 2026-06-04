@@ -47,9 +47,11 @@ import {
 	estimateContextTokens,
 	generateBranchSummary,
 	prepareCompaction,
+	resolveCompactionSettings,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { ageToolResults } from "./context-aging.ts";
+import { contextDebug } from "./context-debug.ts";
+import { optimizeOutgoingContext } from "./context-optimizer.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -1623,7 +1625,10 @@ export class AgentSession {
 			const { apiKey, headers } = await this._getCompactionRequestAuth(this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
-			const settings = this.settingsManager.getCompactionSettings();
+			const settings = resolveCompactionSettings(
+				this.settingsManager.getCompactionSettings(),
+				this.model.contextWindow ?? 0,
+			);
 
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
@@ -1772,13 +1777,16 @@ export class AgentSession {
 	 * @param skipAbortedCheck If false, include aborted messages (for pre-prompt check). Default: true
 	 */
 	private async _checkCompaction(assistantMessage: AssistantMessage, skipAbortedCheck = true): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
-		if (!settings.enabled) return false;
+		const rawSettings = this.settingsManager.getCompactionSettings();
+		if (!rawSettings.enabled) return false;
 
 		// Skip if message was aborted (user cancelled) - unless skipAbortedCheck is false
 		if (skipAbortedCheck && assistantMessage.stopReason === "aborted") return false;
 
 		const contextWindow = this.model?.contextWindow ?? 0;
+		// Clamp reserve/keepRecent into a window-safe band so small-context models
+		// don't enter a compaction loop (retained tail exceeding the threshold).
+		const settings = resolveCompactionSettings(rawSettings, contextWindow);
 
 		// Skip overflow check if the message came from a different model.
 		// This handles the case where user switched from a smaller-context model (e.g. opus)
@@ -1846,20 +1854,27 @@ export class AgentSession {
 			contextTokens = calculateContextTokens(assistantMessage.usage);
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
-			// Pre-compaction aging: try aging on the current messages before
-			// resorting to full compaction. Use the actual context ratio so
-			// the aging level matches what transformContext will apply on the
-			// next LLM call. If aging reduces context below the threshold,
-			// compaction can be avoided entirely.
+			// compaction 前先跑一遍与 transformContext 一致的上送瘦身流程。
+			// 如果瘦身后的上下文已经低于阈值，就可以跳过完整 compaction。
 			const messages = this.agent.state.messages;
-			const actualRatio = contextWindow > 0 ? contextTokens / contextWindow : 0;
-			const aged = ageToolResults(messages, actualRatio);
-			if (aged !== messages) {
-				const agedEstimate = estimateContextTokens(aged);
+			const provider = this.model?.provider ?? "";
+			const optimized = await optimizeOutgoingContext(messages, { cwd: this._cwd, contextWindow, provider });
+			if (optimized !== messages) {
+				const agedEstimate = estimateContextTokens(optimized);
 				if (!shouldCompact(agedEstimate.tokens, contextWindow, settings)) {
-					return false; // Aging alone is sufficient, skip compaction
+					// 6b: predictive optimize averted a compaction. The avert rate
+					// decides whether this pre-check earns its O(n²) cost.
+					contextDebug(
+						`predictive-optimize AVERTED compaction: ${contextTokens}->${agedEstimate.tokens} tok ` +
+							`(threshold ${contextWindow - settings.reserveTokens})`,
+					);
+					return false;
 				}
 			}
+			contextDebug(
+				`predictive-optimize did NOT avert; compacting ` +
+					`(${contextTokens} tok, threshold ${contextWindow - settings.reserveTokens})`,
+			);
 			return await this._runAutoCompaction("threshold", false);
 		}
 		return false;
@@ -1869,7 +1884,10 @@ export class AgentSession {
 	 * Internal: Run auto-compaction with events.
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		const settings = this.settingsManager.getCompactionSettings();
+		const settings = resolveCompactionSettings(
+			this.settingsManager.getCompactionSettings(),
+			this.model?.contextWindow ?? 0,
+		);
 
 		this._emit({ type: "compaction_start", reason });
 		this._autoCompactionAbortController = new AbortController();

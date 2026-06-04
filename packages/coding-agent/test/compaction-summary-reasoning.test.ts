@@ -132,3 +132,64 @@ describe("generateSummary reasoning options", () => {
 		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
 	});
 });
+
+function promptTextOf(call: unknown[]): string {
+	const ctx = call[1] as { messages: Array<{ content: Array<{ text: string }> }> };
+	return ctx.messages[0].content[0].text;
+}
+
+function longSummaryResponse(chars: number): AssistantMessage {
+	return { ...mockSummaryResponse, content: [{ type: "text", text: "y".repeat(chars) }] };
+}
+
+describe("generateSummary growth bounding (P2-8)", () => {
+	beforeEach(() => {
+		completeSimpleMock.mockReset();
+		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
+	});
+
+	it("uses the update prompt when the previous summary is small", async () => {
+		await generateSummary(
+			messages,
+			createModel(false),
+			2000,
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			"small prev",
+		);
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+		expect(promptTextOf(completeSimpleMock.mock.calls[0])).toContain("PRESERVE all existing information");
+	});
+
+	it("switches to the compaction prompt once the previous summary exceeds the soft cap", async () => {
+		// reserveTokens=2000 → soft cap 1000 tokens. 6000 ASCII chars ≈ 1500 tokens.
+		const bigPrev = "x".repeat(6000);
+		await generateSummary(messages, createModel(false), 2000, "test-key", undefined, undefined, undefined, bigPrev);
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+		const text = promptTextOf(completeSimpleMock.mock.calls[0]);
+		expect(text).toContain("MUST be compacted");
+		expect(text).not.toContain("PRESERVE all existing information");
+	});
+
+	it("collapses the summary once when the produced output still exceeds the hard cap", async () => {
+		// reserveTokens=2000 → hard cap 1600 tokens. 7000 ASCII chars ≈ 1750 tokens.
+		completeSimpleMock.mockReset();
+		completeSimpleMock.mockResolvedValueOnce(longSummaryResponse(7000)).mockResolvedValueOnce(mockSummaryResponse);
+
+		const result = await generateSummary(messages, createModel(false), 2000, "test-key");
+
+		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+		// The second (collapse) call re-summarizes from scratch: no previous-summary tag.
+		const collapseText = promptTextOf(completeSimpleMock.mock.calls[1]);
+		expect(collapseText).toContain("The messages above are a conversation to summarize");
+		expect(collapseText).not.toContain("<previous-summary>");
+		expect(result).toBe("## Goal\nTest summary");
+	});
+
+	it("does not collapse when the produced output is within the hard cap", async () => {
+		await generateSummary(messages, createModel(false), 2000, "test-key");
+		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+	});
+});

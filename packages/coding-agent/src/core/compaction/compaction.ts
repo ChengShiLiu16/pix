@@ -189,11 +189,13 @@ function getLastAssistantUsageInfo(messages: AgentMessage[]): { usage: Usage; in
  * Estimate context tokens from messages, using the last assistant usage when available.
  * If there are messages after the last usage, estimate their tokens with estimateTokens.
  */
-export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEstimate {
+export function estimateContextTokens(messages: AgentMessage[], baselineTokens = 0): ContextUsageEstimate {
 	const usageInfo = getLastAssistantUsageInfo(messages);
 
 	if (!usageInfo) {
-		let estimated = 0;
+		// No usage data (first turn / persistent errors): fold in the fixed
+		// baseline (system prompt + tool schemas) the provider would also count.
+		let estimated = baselineTokens;
 		for (const message of messages) {
 			estimated += estimateTokens(message);
 		}
@@ -227,68 +229,113 @@ export function shouldCompact(contextTokens: number, contextWindow: number, sett
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 
+/**
+ * Clamp compaction settings into a window-safe band.
+ *
+ * The compaction threshold is `contextWindow - reserveTokens`, and after
+ * compaction the retained tail is up to `keepRecentTokens`. On small-context
+ * models the absolute defaults (reserve 16384, keepRecent 20000) can make the
+ * retained tail exceed the threshold (e.g. window=32768 → threshold=16384 <
+ * keepRecent=20000), so compaction immediately re-triggers and burns summary
+ * calls without making progress. This clamps both values so the tail can never
+ * exceed the threshold; large windows pass the defaults through unchanged.
+ *
+ * Idempotent. Returns settings unchanged when the window is unknown (<= 0).
+ */
+export function resolveCompactionSettings(settings: CompactionSettings, contextWindow: number): CompactionSettings {
+	if (contextWindow <= 0) return settings;
+	// Math.min outermost: when hi < lo (tiny windows) this yields hi, not lo.
+	const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+	const reserveTokens = clamp(settings.reserveTokens, 4096, Math.floor(contextWindow * 0.25));
+	const maxKeep = Math.floor((contextWindow - reserveTokens) * 0.6);
+	const keepRecentTokens = clamp(settings.keepRecentTokens, 2048, maxKeep);
+	// Guarantees: reserve <= 0.25w, keepRecent <= 0.6*(w-reserve) <= 0.45w, so
+	// keepRecent + reserve <= 0.7w < 0.85w, and keepRecent < threshold = w-reserve.
+	return { ...settings, reserveTokens, keepRecentTokens };
+}
+
 // ============================================================================
 // Cut point detection
 // ============================================================================
 
 /**
- * Estimate token count for a message using chars/4 heuristic.
- * This is conservative (overestimates tokens).
+ * Estimate tokens for a text string, accounting for CJK density.
+ *
+ * CJK characters encode at ~1.5-1.7 chars/token, far denser than the ~4
+ * chars/token of ASCII-ish text. A flat chars/4 therefore underestimates
+ * CJK-heavy content by ~2.5x, which makes downstream budget math (e.g.
+ * findCutPoint's keepRecentTokens accumulation) retain far more than intended.
+ */
+export function estimateTextTokens(text: string): number {
+	let cjk = 0;
+	for (const ch of text) {
+		const c = ch.codePointAt(0) ?? 0;
+		// CJK ideographs/punctuation/kana (0x3000-0x9fff), Hangul (0xac00-0xd7af),
+		// fullwidth & halfwidth forms (0xff00-0xffef).
+		if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef)) {
+			cjk++;
+		}
+	}
+	const other = text.length - cjk;
+	return Math.ceil(cjk / 1.7 + other / 4);
+}
+
+/**
+ * Estimate token count for a message. Uses estimateTextTokens so CJK-heavy
+ * content is not underestimated; images count as a fixed ~1200 tokens.
  */
 export function estimateTokens(message: AgentMessage): number {
-	let chars = 0;
+	let tokens = 0;
 
 	switch (message.role) {
 		case "user": {
 			const content = (message as { content: string | Array<{ type: string; text?: string }> }).content;
 			if (typeof content === "string") {
-				chars = content.length;
+				tokens += estimateTextTokens(content);
 			} else if (Array.isArray(content)) {
 				for (const block of content) {
 					if (block.type === "text" && block.text) {
-						chars += block.text.length;
+						tokens += estimateTextTokens(block.text);
 					}
 				}
 			}
-			return Math.ceil(chars / 4);
+			return tokens;
 		}
 		case "assistant": {
 			const assistant = message as AssistantMessage;
 			for (const block of assistant.content) {
 				if (block.type === "text") {
-					chars += block.text.length;
+					tokens += estimateTextTokens(block.text);
 				} else if (block.type === "thinking") {
-					chars += block.thinking.length;
+					tokens += estimateTextTokens(block.thinking);
 				} else if (block.type === "toolCall") {
-					chars += block.name.length + JSON.stringify(block.arguments).length;
+					tokens += estimateTextTokens(block.name) + estimateTextTokens(JSON.stringify(block.arguments));
 				}
 			}
-			return Math.ceil(chars / 4);
+			return tokens;
 		}
 		case "custom":
 		case "toolResult": {
 			if (typeof message.content === "string") {
-				chars = message.content.length;
+				tokens += estimateTextTokens(message.content);
 			} else {
 				for (const block of message.content) {
 					if (block.type === "text" && block.text) {
-						chars += block.text.length;
+						tokens += estimateTextTokens(block.text);
 					}
 					if (block.type === "image") {
-						chars += 4800; // Estimate images as 4000 chars, or 1200 tokens
+						tokens += 1200; // Estimate images as ~1200 tokens
 					}
 				}
 			}
-			return Math.ceil(chars / 4);
+			return tokens;
 		}
 		case "bashExecution": {
-			chars = message.command.length + message.output.length;
-			return Math.ceil(chars / 4);
+			return estimateTextTokens(message.command) + estimateTextTokens(message.output);
 		}
 		case "branchSummary":
 		case "compactionSummary": {
-			chars = message.summary.length;
-			return Math.ceil(chars / 4);
+			return estimateTextTokens(message.summary);
 		}
 	}
 
@@ -529,6 +576,47 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+// Used instead of UPDATE_SUMMARIZATION_PROMPT once the previous summary itself
+// grows large. "PRESERVE all" makes summaries grow monotonically across
+// compactions until they consume the reserve; this template instead compacts.
+const COMPACT_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags. The existing summary has grown large and MUST be compacted while merging in the new messages.
+
+RULES:
+- PRESERVE the Goal, Constraints & Preferences, Key Decisions, Blocked items, and Next Steps.
+- COMPACT the Progress/Done list: merge related completed items into concise single lines; drop intermediate steps that have been superseded by later work.
+- Drop low-value historical detail that is not needed to continue the work.
+- PRESERVE exact file paths, function names, and error messages that are still relevant.
+- The result MUST be shorter than the previous summary.
+
+Use this EXACT format:
+
+## Goal
+[Preserve existing goals]
+
+## Constraints & Preferences
+- [Preserve existing]
+
+## Progress
+### Done
+- [x] [Merged, compacted completed items]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Current blockers]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Update based on current state]
+
+## Critical Context
+- [Only context still needed to continue]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+
 function createSummarizationOptions(
 	model: Model<any>,
 	maxTokens: number,
@@ -578,8 +666,18 @@ export async function generateSummary(
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	);
 
-	// Use update prompt if we have a previous summary, otherwise initial prompt
-	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
+	// Pick the base prompt: initial when there is no previous summary; otherwise
+	// the update prompt, switching to the compaction prompt once the previous
+	// summary itself has grown past a soft cap (half the reserve budget).
+	const prevSummaryTokens = previousSummary ? estimateTextTokens(previousSummary) : 0;
+	let basePrompt: string;
+	if (!previousSummary) {
+		basePrompt = SUMMARIZATION_PROMPT;
+	} else if (prevSummaryTokens > reserveTokens * 0.5) {
+		basePrompt = COMPACT_SUMMARIZATION_PROMPT;
+	} else {
+		basePrompt = UPDATE_SUMMARIZATION_PROMPT;
+	}
 	if (customInstructions) {
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
@@ -617,10 +715,38 @@ export async function generateSummary(
 		throw new Error(`Summarization failed: ${response.errorMessage || "Unknown error"}`);
 	}
 
-	const textContent = response.content
+	let textContent = response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
 		.map((c) => c.text)
 		.join("\n");
+
+	// Hard cap: if the produced summary still exceeds the reserve budget, collapse
+	// it once by re-summarizing it from scratch (no previous-summary preservation).
+	if (textContent && estimateTextTokens(textContent) > reserveTokens * 0.8) {
+		const collapsePrompt = `<conversation>\n${textContent}\n</conversation>\n\n${SUMMARIZATION_PROMPT}`;
+		const collapseResponse = await completeSummarization(
+			model,
+			{
+				systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
+				messages: [
+					{
+						role: "user" as const,
+						content: [{ type: "text" as const, text: collapsePrompt }],
+						timestamp: Date.now(),
+					},
+				],
+			},
+			completionOptions,
+			streamFn,
+		);
+		if (collapseResponse.stopReason !== "error") {
+			const collapsed = collapseResponse.content
+				.filter((c): c is { type: "text"; text: string } => c.type === "text")
+				.map((c) => c.text)
+				.join("\n");
+			if (collapsed.trim()) textContent = collapsed;
+		}
+	}
 
 	return textContent;
 }
