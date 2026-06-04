@@ -29,6 +29,19 @@ import {
 // File Operation Tracking
 // ============================================================================
 
+/**
+ * Stringify a value for token estimation, tolerating unserializable input.
+ * Mirrors the pix-agent-core harness implementation so the two compaction
+ * copies do not diverge on circular/unserializable tool arguments.
+ */
+function safeJsonStringify(value: unknown): string {
+	try {
+		return JSON.stringify(value) ?? "undefined";
+	} catch {
+		return "[unserializable]";
+	}
+}
+
 /** Details stored in CompactionEntry.details for file tracking */
 export interface CompactionDetails {
 	readFiles: string[];
@@ -309,7 +322,7 @@ export function estimateTokens(message: AgentMessage): number {
 				} else if (block.type === "thinking") {
 					tokens += estimateTextTokens(block.thinking);
 				} else if (block.type === "toolCall") {
-					tokens += estimateTextTokens(block.name) + estimateTextTokens(JSON.stringify(block.arguments));
+					tokens += estimateTextTokens(block.name) + estimateTextTokens(safeJsonStringify(block.arguments));
 				}
 			}
 			return tokens;
