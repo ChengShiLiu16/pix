@@ -14,12 +14,14 @@ import {
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
 	estimateContextTokens,
+	estimateTextTokens,
 	estimateTokens,
 	findCutPoint,
 	findTurnStartIndex,
 	generateSummary,
 	getLastAssistantUsage,
 	prepareCompaction,
+	resolveCompactionSettings,
 	serializeConversation,
 	shouldCompact,
 } from "../../src/harness/compaction/compaction.ts";
@@ -672,3 +674,52 @@ describe("harness compaction", () => {
 function convertMessages(messages: Message[]): Message[] {
 	return messages;
 }
+
+describe("resolveCompactionSettings", () => {
+	const windows = [8192, 16384, 32768, 131072, 200000];
+
+	it.each(windows)("keeps the retained tail below the compaction threshold (window=%i)", (window) => {
+		const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, window);
+		const threshold = window - resolved.reserveTokens;
+		expect(resolved.keepRecentTokens).toBeLessThan(threshold);
+		expect(resolved.keepRecentTokens + resolved.reserveTokens).toBeLessThanOrEqual(window * 0.85);
+	});
+
+	it("passes large-window defaults through unchanged", () => {
+		for (const window of [131072, 200000]) {
+			const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, window);
+			expect(resolved.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
+			expect(resolved.keepRecentTokens).toBe(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
+		}
+	});
+
+	it("clamps the 32k loop case", () => {
+		const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 32768);
+		expect(resolved.reserveTokens).toBe(8192);
+		expect(resolved.keepRecentTokens).toBe(14745);
+		expect(resolved.keepRecentTokens).toBeLessThan(32768 - resolved.reserveTokens);
+	});
+
+	it("is idempotent and a no-op for unknown window", () => {
+		const once = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 32768);
+		expect(resolveCompactionSettings(once, 32768)).toEqual(once);
+		expect(resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 0)).toEqual(DEFAULT_COMPACTION_SETTINGS);
+	});
+});
+
+describe("estimateTextTokens", () => {
+	it("matches chars/4 for ASCII-only text", () => {
+		const ascii = "the quick brown fox jumps over the lazy dog";
+		expect(estimateTextTokens(ascii)).toBe(Math.ceil(ascii.length / 4));
+	});
+
+	it("estimates CJK far higher than a flat chars/4", () => {
+		const cjk = "这是一段中文文本用于测试令牌估算的准确性";
+		expect(estimateTextTokens(cjk)).toBe(Math.ceil(cjk.length / 1.7));
+		expect(estimateTextTokens(cjk)).toBeGreaterThan(Math.ceil(cjk.length / 4) * 2);
+	});
+
+	it("returns 0 for empty string", () => {
+		expect(estimateTextTokens("")).toBe(0);
+	});
+});

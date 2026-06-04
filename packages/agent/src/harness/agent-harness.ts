@@ -17,7 +17,12 @@ import type {
 	ThinkingLevel,
 } from "../types.ts";
 import { collectEntriesForBranchSummary, generateBranchSummary } from "./compaction/branch-summarization.ts";
-import { compact, DEFAULT_COMPACTION_SETTINGS, prepareCompaction } from "./compaction/compaction.ts";
+import {
+	compact,
+	DEFAULT_COMPACTION_SETTINGS,
+	prepareCompaction,
+	resolveCompactionSettings,
+} from "./compaction/compaction.ts";
 import { convertToLlm } from "./messages.ts";
 import { formatPromptTemplateInvocation } from "./prompt-templates.ts";
 import { formatSkillInvocation } from "./skills.ts";
@@ -689,7 +694,8 @@ export class AgentHarness<
 			const auth = await this.getApiKeyAndHeaders?.(model);
 			if (!auth) throw new AgentHarnessError("auth", "No auth available for compaction");
 			const branchEntries = await this.session.getBranch();
-			const preparationResult = prepareCompaction(branchEntries, DEFAULT_COMPACTION_SETTINGS);
+			const compactionSettings = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, model.contextWindow ?? 0);
+			const preparationResult = prepareCompaction(branchEntries, compactionSettings);
 			if (!preparationResult.ok) throw preparationResult.error;
 			const preparation = preparationResult.value;
 			if (!preparation) throw new AgentHarnessError("compaction", "Nothing to compact");
