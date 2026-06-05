@@ -132,11 +132,17 @@ function computeAges(messages: AgentMessage[]): Map<number, number> {
 
 /**
  * Determine the aging level based on context ratio.
+ *
+ * @param contextRatio - Current context usage ratio (used / window)
+ * @param effectiveHeavyThreshold - Optional dynamic heavy aging threshold
+ *   (computed from compaction threshold minus hysteresis gap). If not provided,
+ *   falls back to static AGING_HEAVY_RATIO.
  */
-function getAgingLevel(contextRatio: number): AgingLevel | undefined {
+function getAgingLevel(contextRatio: number, effectiveHeavyThreshold?: number): AgingLevel | undefined {
+	const heavyThreshold = effectiveHeavyThreshold ?? AGING_HEAVY_RATIO;
 	if (contextRatio < AGING_START_RATIO) return undefined;
 	if (contextRatio < AGING_MEDIUM_RATIO) return AGING_LEVELS.light;
-	if (contextRatio < AGING_HEAVY_RATIO) return AGING_LEVELS.medium;
+	if (contextRatio < heavyThreshold) return AGING_LEVELS.medium;
 	return AGING_LEVELS.heavy;
 }
 
@@ -390,8 +396,9 @@ export function ageToolResults(
 	messages: AgentMessage[],
 	contextRatio: number,
 	reachability?: Map<number, ReachabilityLevel>,
+	effectiveHeavyThreshold?: number,
 ): AgentMessage[] {
-	const level = getAgingLevel(contextRatio);
+	const level = getAgingLevel(contextRatio, effectiveHeavyThreshold);
 	if (!level) return messages;
 
 	const ages = computeAges(messages);

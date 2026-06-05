@@ -8,6 +8,7 @@
 import type { AgentMessage, StreamFn, ThinkingLevel } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/pix-ai";
 import { completeSimple } from "@earendil-works/pix-ai";
+import { emitCompaction, emitCompactionQuality } from "../context-metrics.ts";
 import {
 	convertToLlm,
 	createBranchSummaryMessage,
@@ -30,16 +31,60 @@ import {
 // ============================================================================
 
 /**
- * Stringify a value for token estimation, tolerating unserializable input.
+ * Stringify a value for token estimation, tolerating circular references.
+ * Includes depth tracking and type/length info for better token estimates.
  * Mirrors the pix-agent-core harness implementation so the two compaction
  * copies do not diverge on circular/unserializable tool arguments.
  */
-function safeJsonStringify(value: unknown): string {
-	try {
-		return JSON.stringify(value) ?? "undefined";
-	} catch {
-		return "[unserializable]";
+function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
+	const seen = new WeakSet<object>();
+	let truncated = false;
+
+	function stringify(v: unknown, depth: number): string {
+		if (v === null) return "null";
+		if (typeof v !== "object") return JSON.stringify(v);
+		if (depth >= maxDepth) {
+			truncated = true;
+			return typeTag(v);
+		}
+		if (seen.has(v)) {
+			truncated = true;
+			return `[Circular ${typeTag(v)}]`;
+		}
+		seen.add(v);
+		try {
+			if (Array.isArray(v)) {
+				if (v.length === 0) return "[]";
+				const items = v.slice(0, 50).map((x) => stringify(x, depth + 1));
+				if (v.length > 50) {
+					truncated = true;
+					items.push("...");
+				}
+				return "[" + items.join(",") + "]";
+			}
+			const keys = Object.keys(v);
+			if (keys.length === 0) return "{}";
+			const entries = keys
+				.slice(0, 30)
+				.map((k) => JSON.stringify(k) + ":" + stringify((v as Record<string, unknown>)[k], depth + 1));
+			if (keys.length > 30) {
+				truncated = true;
+				entries.push("...");
+			}
+			return "{" + entries.join(",") + "}";
+		} finally {
+			seen.delete(v);
+		}
 	}
+
+	const result = stringify(value, 0);
+	return truncated ? result + "⟪truncated⟫" : result;
+}
+
+function typeTag(v: object): string {
+	const ctor = v.constructor?.name ?? "Object";
+	if (Array.isArray(v)) return `Array[${v.length}]`;
+	return ctor;
 }
 
 /** Details stored in CompactionEntry.details for file tracking */
@@ -322,7 +367,8 @@ export function estimateTokens(message: AgentMessage): number {
 				} else if (block.type === "thinking") {
 					tokens += estimateTextTokens(block.thinking);
 				} else if (block.type === "toolCall") {
-					tokens += estimateTextTokens(block.name) + estimateTextTokens(safeJsonStringify(block.arguments));
+					tokens +=
+						estimateTextTokens(block.name) + estimateTextTokens(safeJsonStringifyForTokens(block.arguments));
 				}
 			}
 			return tokens;
@@ -863,6 +909,166 @@ export function prepareCompaction(
 	};
 }
 
+/**
+ * Word-set Jaccard similarity of two short strings, used to decide whether a
+ * key item or anchor survived re-summarization. Naive substring matching
+ * over-counts (a short item like "done" matches many lines); comparing the
+ * normalized word sets is more robust to reordering and minor edits.
+ */
+function itemSimilarity(a: string, b: string): number {
+	const words = (s: string): Set<string> =>
+		new Set(
+			s
+				.toLowerCase()
+				.split(/[^a-z0-9]+/)
+				.filter((w) => w.length > 0),
+		);
+	const wa = words(a);
+	const wb = words(b);
+	if (wa.size === 0 || wb.size === 0) return 0;
+	let intersection = 0;
+	for (const w of wa) {
+		if (wb.has(w)) intersection++;
+	}
+	return intersection / (wa.size + wb.size - intersection);
+}
+
+/** Two anchors are considered the same if equal or one contains the other (guarding tiny strings). */
+function anchorsMatch(a: string, b: string): boolean {
+	if (a === b) return true;
+	const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+	return short.length >= 4 && long.includes(short);
+}
+
+/**
+ * Analyze summary quality by comparing previous and new summaries.
+ * Returns metrics for compression ratio, key-item retention, structure
+ * preservation, and anchor retention (all ratios in [0, 1] except
+ * compressionRatio which is newTokens/prevTokens).
+ */
+function analyzeSummaryQuality(
+	previousSummary: string,
+	newSummary: string,
+): {
+	compressionRatio: number;
+	keyItemRetention: number;
+	structurePreservation: number;
+	anchorRetention: number;
+} {
+	const sections = [
+		"Goal",
+		"Constraints & Preferences",
+		"Progress",
+		"Key Decisions",
+		"Next Steps",
+		"Critical Context",
+	];
+
+	function parseSections(text: string): Map<string, string> {
+		const result = new Map<string, string>();
+		const lines = text.split("\n");
+		let currentSection = "";
+		let currentContent: string[] = [];
+
+		for (const line of lines) {
+			const sectionMatch = line.match(/^##\s+(.+)$/);
+			if (sectionMatch) {
+				if (currentSection) {
+					result.set(currentSection, currentContent.join("\n"));
+				}
+				currentSection = sectionMatch[1].trim();
+				currentContent = [];
+			} else if (currentSection) {
+				currentContent.push(line);
+			}
+		}
+		if (currentSection) {
+			result.set(currentSection, currentContent.join("\n"));
+		}
+		return result;
+	}
+
+	function extractItems(sectionText: string): string[] {
+		return sectionText
+			.split("\n")
+			.map((l) => l.trim())
+			.filter(
+				(l) =>
+					l.startsWith("- ") ||
+					l.startsWith("- [") ||
+					l.startsWith("1.") ||
+					l.startsWith("2.") ||
+					l.startsWith("3."),
+			)
+			.map((l) =>
+				l
+					.replace(/^[-*]\s*\[?[x\s]?\]?\s*/, "")
+					.replace(/^\d+\.\s*/, "")
+					.trim(),
+			)
+			.filter((l) => l.length > 0);
+	}
+
+	function extractAnchors(text: string): string[] {
+		// Extract file paths, function names, error messages as "anchors"
+		const anchors: string[] = [];
+		// File paths
+		anchors.push(
+			...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/g) ?? []),
+		);
+		// Function names (camelCase/PascalCase)
+		anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/g) ?? []));
+		// Error messages in quotes
+		anchors.push(...(text.match(/"[^"]{10,}"/g) ?? []));
+		return [...new Set(anchors)];
+	}
+
+	const prevSections = parseSections(previousSummary);
+	const newSections = parseSections(newSummary);
+
+	// Compression ratio: output tokens / input tokens
+	const prevTokens = estimateTextTokens(previousSummary);
+	const newTokens = estimateTextTokens(newSummary);
+	const compressionRatio = prevTokens > 0 ? newTokens / prevTokens : 1;
+
+	// Key-item retention: of the previous summary's key items, how many survive
+	// in the new one. Iterating over prev items keeps the ratio bounded to [0, 1]
+	// even when the new summary adds items.
+	let totalItems = 0;
+	let keptItems = 0;
+	for (const section of sections) {
+		const prevItems = extractItems(prevSections.get(section) ?? "");
+		const newItems = extractItems(newSections.get(section) ?? "");
+		totalItems += prevItems.length;
+		for (const prevItem of prevItems) {
+			if (newItems.some((n) => itemSimilarity(prevItem, n) >= 0.5)) {
+				keptItems++;
+			}
+		}
+	}
+	const keyItemRetention = totalItems > 0 ? keptItems / totalItems : 1;
+
+	// Structure preservation: sections preserved / total sections
+	const preservedSections = sections.filter((s) => newSections.has(s)).length;
+	const structurePreservation = sections.length > 0 ? preservedSections / sections.length : 1;
+
+	// Anchor retention: anchors preserved / total anchors
+	const prevAnchors = extractAnchors(previousSummary);
+	const newAnchors = extractAnchors(newSummary);
+	let keptAnchors = 0;
+	for (const a of prevAnchors) {
+		if (newAnchors.some((n) => anchorsMatch(a, n))) keptAnchors++;
+	}
+	const anchorRetention = prevAnchors.length > 0 ? keptAnchors / prevAnchors.length : 1;
+
+	return {
+		compressionRatio,
+		keyItemRetention,
+		structurePreservation,
+		anchorRetention,
+	};
+}
+
 // ============================================================================
 // Main compaction function
 // ============================================================================
@@ -888,6 +1094,8 @@ Be concise. Focus on what's needed to understand the kept suffix.`;
  *
  * @param preparation - Pre-calculated preparation from prepareCompaction()
  * @param customInstructions - Optional custom focus for the summary
+ * @param sessionId - Optional session UUID for metrics emission
+ * @param reason - What triggered this compaction (for metrics). Defaults to "threshold".
  */
 export async function compact(
 	preparation: CompactionPreparation,
@@ -898,7 +1106,10 @@ export async function compact(
 	signal?: AbortSignal,
 	thinkingLevel?: ThinkingLevel,
 	streamFn?: StreamFn,
+	sessionId?: string,
+	reason: "manual" | "threshold" | "overflow" = "threshold",
 ): Promise<CompactionResult> {
+	const compactStartTime = performance.now();
 	const {
 		firstKeptEntryId,
 		messagesToSummarize,
@@ -965,6 +1176,42 @@ export async function compact(
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no UUID - session may need migration");
+	}
+
+	// Emit compaction metrics if sessionId provided
+	const summaryTokensAfter = estimateTextTokens(summary);
+	const compactTemplateUsed: boolean = Boolean(
+		previousSummary && estimateTextTokens(previousSummary) > settings.reserveTokens * 0.5,
+	);
+	const doubleCompactTriggered: boolean = summaryTokensAfter > settings.reserveTokens * 0.8;
+	const droppedMessages = messagesToSummarize.length + turnPrefixMessages.length;
+
+	if (sessionId) {
+		emitCompaction({
+			sessionId,
+			reason,
+			summaryTokensBefore: previousSummary ? estimateTextTokens(previousSummary) : 0,
+			summaryTokensAfter,
+			keptRecentTokens: settings.keepRecentTokens,
+			droppedMessages,
+			compactTemplateUsed,
+			doubleCompactTriggered,
+			durationMs: performance.now() - compactStartTime,
+		});
+
+		// Emit quality metrics if we have a previous summary
+		if (previousSummary) {
+			const quality = analyzeSummaryQuality(previousSummary, summary);
+			emitCompactionQuality({
+				sessionId,
+				compressionRatio: quality.compressionRatio,
+				keyItemRetention: quality.keyItemRetention,
+				structurePreservation: quality.structurePreservation,
+				anchorRetention: quality.anchorRetention,
+				compactTemplateUsed,
+				doubleCompactTriggered,
+			});
+		}
 	}
 
 	return {

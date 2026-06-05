@@ -384,7 +384,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transformContext: async (messages) => {
 			const contextWindow = agent.state.model?.contextWindow ?? 0;
 			const provider = agent.state.model?.provider ?? "";
-			const next = await optimizeOutgoingContext(messages, { cwd, contextWindow, provider });
+			const next = await optimizeOutgoingContext(messages, {
+				cwd,
+				contextWindow,
+				provider,
+				sessionId: sessionManager.getSessionId(),
+				compactionSettings: settingsManager.getCompactionSettings(),
+			});
 			const runner = extensionRunnerRef.current;
 			if (!runner) return next;
 			return runner.emitContext(next);

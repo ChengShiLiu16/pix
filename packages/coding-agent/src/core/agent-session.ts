@@ -1689,6 +1689,8 @@ export class AgentSession {
 					this._compactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,
+					this.sessionId,
+					"manual",
 				);
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
@@ -1858,7 +1860,13 @@ export class AgentSession {
 			// 如果瘦身后的上下文已经低于阈值，就可以跳过完整 compaction。
 			const messages = this.agent.state.messages;
 			const provider = this.model?.provider ?? "";
-			const optimized = await optimizeOutgoingContext(messages, { cwd: this._cwd, contextWindow, provider });
+			const optimized = await optimizeOutgoingContext(messages, {
+				cwd: this._cwd,
+				contextWindow,
+				provider,
+				sessionId: this.sessionId,
+				compactionSettings: this.settingsManager.getCompactionSettings(),
+			});
 			if (optimized !== messages) {
 				const agedEstimate = estimateContextTokens(optimized);
 				if (!shouldCompact(agedEstimate.tokens, contextWindow, settings)) {
@@ -1994,6 +2002,8 @@ export class AgentSession {
 					this._autoCompactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,
+					this.sessionId,
+					reason,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;

@@ -157,7 +157,7 @@ describe("ageToolResults", () => {
 
 	it("medium aging: keeps head 5 lines for read", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 8);
-		const result = ageToolResults(messages, 0.75); // medium
+		const result = ageToolResults(messages, 0.69); // medium (between AGING_MEDIUM_RATIO=0.68 and AGING_HEAVY_RATIO=0.70)
 		const text = resultText(result[1]);
 		expect(text).toContain("line 1:");
 		expect(text).toContain("line 5:");
@@ -167,7 +167,7 @@ describe("ageToolResults", () => {
 
 	it("heavy aging: replaces read with single-line placeholder", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 5);
-		const result = ageToolResults(messages, 0.9); // heavy
+		const result = ageToolResults(messages, 0.75); // heavy (>= AGING_HEAVY_RATIO=0.70)
 		const text = resultText(result[1]);
 		expect(text).toContain("Read result omitted to save context");
 		expect(text).toContain("/a.ts");
@@ -175,9 +175,9 @@ describe("ageToolResults", () => {
 		expect(text).not.toContain("line 1:");
 	});
 
-	it("heavy aging starts at 80% context ratio", () => {
+	it("heavy aging starts at 70% context ratio", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 5);
-		const result = ageToolResults(messages, 0.8);
+		const result = ageToolResults(messages, 0.72);
 		const text = resultText(result[1]);
 		expect(text).toContain("Read result omitted to save context");
 	});
