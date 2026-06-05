@@ -54,25 +54,25 @@ function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
 					truncated = true;
 					items.push("...");
 				}
-				return "[" + items.join(",") + "]";
+				return `[${items.join(",")}]`;
 			}
 			const keys = Object.keys(v);
 			if (keys.length === 0) return "{}";
 			const entries = keys
 				.slice(0, 30)
-				.map((k) => JSON.stringify(k) + ":" + stringify((v as Record<string, unknown>)[k], depth + 1));
+				.map((k) => `${JSON.stringify(k)}:${stringify((v as Record<string, unknown>)[k], depth + 1)}`);
 			if (keys.length > 30) {
 				truncated = true;
 				entries.push("...");
 			}
-			return "{" + entries.join(",") + "}";
+			return `{${entries.join(",")}}`;
 		} finally {
 			seen.delete(v);
 		}
 	}
 
 	const result = stringify(value, 0);
-	return truncated ? result + "⟪truncated⟫" : result;
+	return truncated ? `${result}⟪truncated⟫` : result;
 }
 
 function typeTag(v: object): string {
@@ -864,6 +864,7 @@ export async function compact(
 
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary += formatFileOperations(readFiles, modifiedFiles);
+	summary = ensureSummaryQuality(summary, previousSummary);
 
 	return ok({
 		summary,
@@ -921,4 +922,53 @@ async function generateTurnPrefixSummary(
 			.map((c) => c.text)
 			.join("\n"),
 	);
+}
+
+const REQUIRED_SUMMARY_SECTIONS = [
+	"Goal",
+	"Constraints & Preferences",
+	"Progress",
+	"Key Decisions",
+	"Next Steps",
+	"Critical Context",
+];
+
+function extractSummarySections(text: string): Set<string> {
+	const sections = new Set<string>();
+	for (const line of text.split("\n")) {
+		const match = /^##\s+(.+)$/u.exec(line);
+		if (match) sections.add(match[1].trim());
+	}
+	return sections;
+}
+
+function extractCriticalAnchors(text: string): string[] {
+	const anchors: string[] = [];
+	anchors.push(
+		...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/gu) ?? []),
+	);
+	anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/gu) ?? []));
+	anchors.push(...(text.match(/"[^"]{10,}"/gu) ?? []));
+	return [...new Set(anchors)].filter((anchor) => anchor.length >= 4);
+}
+
+function ensureSummaryQuality(summary: string, previousSummary: string | undefined): string {
+	let next = summary.trim();
+	const sections = extractSummarySections(next);
+	const missingSections = REQUIRED_SUMMARY_SECTIONS.filter((section) => !sections.has(section));
+	if (missingSections.length > 0) {
+		next += "\n\n";
+		next += missingSections.map((section) => `## ${section}\n- (none recorded)`).join("\n\n");
+	}
+
+	if (!previousSummary) return next;
+	const lostAnchors = extractCriticalAnchors(previousSummary).filter((anchor) => !next.includes(anchor));
+	if (lostAnchors.length === 0) return next;
+	const restored = lostAnchors.slice(0, 20);
+	next += "\n\n## Critical Context Anchors Preserved\n";
+	next += restored.map((anchor) => `- ${anchor}`).join("\n");
+	if (lostAnchors.length > restored.length) {
+		next += `\n- ... ${lostAnchors.length - restored.length} more anchors omitted`;
+	}
+	return next;
 }

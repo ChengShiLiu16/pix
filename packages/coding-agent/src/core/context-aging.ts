@@ -249,27 +249,82 @@ function ageListResult(text: string, level: AgingLevel, toolName: string, anchor
 function naturalLanguagePlaceholder(toolName: string, anchor?: string, lineCount?: number): string {
 	const p = anchor ?? "this file";
 	const n = lineCount !== undefined ? `${lineCount}` : "many";
+	const restore = restoreAgedHint(toolName, anchor);
 	switch (toolName) {
 		case "read":
 		case "read_many":
-			return `Earlier read of ${p} (${n} lines) omitted to save context. Re-read the file if needed.`;
+			return `Earlier read of ${p} (${n} lines) omitted to save context. ${restore}`;
 		case "grep":
 		case "grep_many":
 		case "ffgrep":
 		case "fff-multi-grep":
 		case "multi_grep":
-			return `Earlier grep results omitted to save context. Re-run grep if needed.`;
+			return `Earlier grep results omitted to save context. ${restore}`;
 		case "ls":
 		case "ls_many":
-			return `Earlier directory listing (${n} entries) omitted to save context. Re-run ${toolName} if needed.`;
+			return `Earlier directory listing (${n} entries) omitted to save context. ${restore}`;
 		case "find":
 		case "fffind":
-			return `Earlier find results (${n} entries) omitted to save context. Re-run find if needed.`;
+			return `Earlier find results (${n} entries) omitted to save context. ${restore}`;
 		case "bash":
-			return `Earlier command output omitted to save context. Re-run the command if needed.`;
+			return `Earlier command output omitted to save context. ${restore}`;
 		default:
-			return `Earlier tool result omitted to save context. Re-run the tool if needed.`;
+			return `Earlier tool result omitted to save context. ${restore}`;
 	}
+}
+
+function restoreAgedHint(toolName: string, anchor?: string): string {
+	const target = anchor ? ` for ${anchor}` : "";
+	switch (toolName) {
+		case "read":
+		case "read_many":
+			return `Restore by re-reading${target}.`;
+		case "grep":
+		case "grep_many":
+		case "ffgrep":
+		case "fff-multi-grep":
+		case "multi_grep":
+			return `Restore by re-running grep${target}.`;
+		case "ls":
+		case "ls_many":
+			return `Restore by re-running ${toolName}${target}.`;
+		case "find":
+		case "fffind":
+			return `Restore by re-running find${target}.`;
+		case "bash":
+			return anchor
+				? `Restore by re-running the command or reading ${anchor}.`
+				: "Restore by re-running the command.";
+		default:
+			return "Restore by re-running the original tool call.";
+	}
+}
+
+interface AgedToolResultDetails {
+	reason: "aged";
+	toolName: string;
+	anchor?: string;
+	reachability?: ReachabilityLevel;
+	restoreHint: string;
+}
+
+function withAgedDetails(
+	existing: unknown,
+	toolName: string,
+	anchor: string | undefined,
+	reachability: ReachabilityLevel | undefined,
+): Record<string, unknown> {
+	const contextOmitted: AgedToolResultDetails = {
+		reason: "aged",
+		toolName,
+		restoreHint: restoreAgedHint(toolName, anchor),
+	};
+	if (anchor !== undefined) contextOmitted.anchor = anchor;
+	if (reachability !== undefined) contextOmitted.reachability = reachability;
+	if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+		return { ...(existing as Record<string, unknown>), contextOmitted };
+	}
+	return { contextOmitted };
 }
 
 /**
@@ -443,7 +498,11 @@ export function ageToolResults(
 				type: "text",
 				text: naturalLanguagePlaceholder(toolResult.toolName, anchor, lines),
 			};
-			return { ...toolResult, content: [stub] } satisfies ToolResultMessage;
+			return {
+				...toolResult,
+				content: [stub],
+				details: withAgedDetails(toolResult.details, toolResult.toolName, anchor, r),
+			} satisfies ToolResultMessage;
 		}
 
 		const text = extractText(toolResult.content);
@@ -480,7 +539,11 @@ export function ageToolResults(
 
 		changed = true;
 		const stub: TextContent = { type: "text", text: agedText };
-		return { ...toolResult, content: [stub] } satisfies ToolResultMessage;
+		return {
+			...toolResult,
+			content: [stub],
+			details: withAgedDetails(toolResult.details, toolResult.toolName, anchor, r),
+		} satisfies ToolResultMessage;
 	});
 
 	return changed ? result : messages;

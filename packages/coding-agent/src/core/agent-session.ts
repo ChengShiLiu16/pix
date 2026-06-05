@@ -51,7 +51,10 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { contextDebug } from "./context-debug.ts";
-import { optimizeOutgoingContext } from "./context-optimizer.ts";
+import {
+	optimizeOutgoingContextWithReport,
+	shouldUseOptimizedContextInsteadOfCompaction,
+} from "./context-optimizer.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
@@ -1860,28 +1863,25 @@ export class AgentSession {
 			// 如果瘦身后的上下文已经低于阈值，就可以跳过完整 compaction。
 			const messages = this.agent.state.messages;
 			const provider = this.model?.provider ?? "";
-			const optimized = await optimizeOutgoingContext(messages, {
+			const optimized = await optimizeOutgoingContextWithReport(messages, {
 				cwd: this._cwd,
 				contextWindow,
 				provider,
 				sessionId: this.sessionId,
 				compactionSettings: this.settingsManager.getCompactionSettings(),
 			});
-			if (optimized !== messages) {
-				const agedEstimate = estimateContextTokens(optimized);
-				if (!shouldCompact(agedEstimate.tokens, contextWindow, settings)) {
-					// 6b: predictive optimize averted a compaction. The avert rate
-					// decides whether this pre-check earns its O(n²) cost.
-					contextDebug(
-						`predictive-optimize AVERTED compaction: ${contextTokens}->${agedEstimate.tokens} tok ` +
-							`(threshold ${contextWindow - settings.reserveTokens})`,
-					);
-					return false;
-				}
+			if (shouldUseOptimizedContextInsteadOfCompaction(optimized.report, settings)) {
+				contextDebug(
+					`predictive-optimize AVERTED compaction: ${optimized.report.tokensBefore}->${optimized.report.tokensAfter} tok ` +
+						`(saved ${optimized.report.savedTokens}, risk=${optimized.report.cacheBreakRisk}, ` +
+						`threshold ${contextWindow - settings.reserveTokens})`,
+				);
+				return false;
 			}
 			contextDebug(
 				`predictive-optimize did NOT avert; compacting ` +
-					`(${contextTokens} tok, threshold ${contextWindow - settings.reserveTokens})`,
+					`(${contextTokens} tok, optimized ${optimized.report.tokensBefore}->${optimized.report.tokensAfter}, ` +
+					`risk=${optimized.report.cacheBreakRisk}, threshold ${contextWindow - settings.reserveTokens})`,
 			);
 			return await this._runAutoCompaction("threshold", false);
 		}

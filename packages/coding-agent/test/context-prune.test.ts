@@ -52,6 +52,13 @@ function resultText(message: AgentMessage): string {
 		.join("");
 }
 
+function omittedDetails(message: AgentMessage): Record<string, unknown> {
+	if (message.role !== "toolResult") return {};
+	const details = (message as ToolResultMessage<Record<string, unknown>>).details;
+	const omitted = details?.contextOmitted;
+	return typeof omitted === "object" && omitted !== null ? (omitted as Record<string, unknown>) : {};
+}
+
 // ============================================================================
 // read tool (original tests, preserved)
 // ============================================================================
@@ -68,6 +75,13 @@ describe("pruneStaleReads", () => {
 		];
 		const result = pruneStaleReads(messages);
 		expect(resultText(result[1])).toContain("Stale read omitted");
+		expect(resultText(result[1])).toContain("read /a.ts");
+		expect(omittedDetails(result[1])).toMatchObject({
+			reason: "stale",
+			toolName: "read",
+			paths: ["/a.ts"],
+			restoreHint: "Restore by re-reading: read /a.ts.",
+		});
 		expect(resultText(result[3])).toBe(BIG);
 	});
 

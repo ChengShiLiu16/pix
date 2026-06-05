@@ -36,6 +36,11 @@ export interface CompactionQualityEvent {
 	keyItemRetention: number; // keptKeyItems / totalKeyItems (of previous summary)
 	structurePreservation: number; // sectionsPreserved / totalSections
 	anchorRetention: number; // anchorsPreserved / totalAnchors
+	requiredSectionRetention: number; // 已保留必需章节 / 必需章节总数
+	userConstraintRetention: number; // 已保留用户约束 / 旧约束总数
+	nextStepRetention: number; // 已保留下一步 / 旧下一步总数
+	criticalAnchorCount: number;
+	lostCriticalAnchorCount: number;
 	compactTemplateUsed: boolean;
 	doubleCompactTriggered: boolean;
 }

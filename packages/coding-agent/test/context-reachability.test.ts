@@ -100,6 +100,17 @@ describe("computeReachability", () => {
 		expect(reachability.get(5)).toBe("active");
 	});
 
+	it("uses explicit recent user path mentions as focus targets", () => {
+		const messages: AgentMessage[] = [
+			assistantCall("c1", "read", { path: "packages/coding-agent/src/core/context-aging.ts" }),
+			toolResult("c1", "read", BIG),
+			userMessage("unrelated turn"),
+			userMessage("继续看 packages/coding-agent/src/core/context-aging.ts 的上下文压缩"),
+		];
+		const reachability = computeReachability(messages, 2, "/repo");
+		expect(reachability.get(1)).toBe("adjacent");
+	});
+
 	it("marks read_many as active when any file matches a recent target", () => {
 		const messages: AgentMessage[] = [
 			assistantCall("c1", "read_many", { files: [{ path: "/a.ts" }, { path: "/b.ts" }] }),
@@ -171,7 +182,7 @@ describe("ageToolResults with reachability", () => {
 			toolResult("c2", "read", FIFTY_LINES),
 		];
 		const reachability = computeReachability(messages, 2, "/");
-		const result = ageToolResults(messages, 0.75, reachability); // medium aging
+		const result = ageToolResults(messages, 0.75, reachability, 0.8);
 		// ls on /src is adjacent to read on /src/core/a.ts → kept full (not heavy)
 		expect(resultText(result[1])).toBe(FIFTY_LINES);
 	});

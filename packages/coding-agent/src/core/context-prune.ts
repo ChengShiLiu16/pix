@@ -199,28 +199,91 @@ function readCovers(later: ReadOpKey, earlier: ReadOpKey): boolean {
 	return laterEnd >= earlierEnd;
 }
 
-/** Stale placeholder text per tool category. */
-function stalePlaceholder(toolName: string): string {
-	switch (toolName) {
+function compactPaths(paths: string[], maxItems = 4): string {
+	const unique = [...new Set(paths)].filter((path) => path.length > 0);
+	if (unique.length === 0) return "unknown scope";
+	const head = unique.slice(0, maxItems).join(", ");
+	const remaining = unique.length - maxItems;
+	return remaining > 0 ? `${head}, +${remaining} more` : head;
+}
+
+function formatReadRange(key: ReadOpKey): string {
+	const parts: string[] = [];
+	if (key.offset !== undefined) parts.push(`offset=${key.offset}`);
+	if (key.limit !== undefined) parts.push(`limit=${key.limit}`);
+	return parts.length > 0 ? ` ${parts.join(" ")}` : "";
+}
+
+function restoreHint(op: ResultOp): string {
+	const paths = compactPaths(op.allPaths);
+	switch (op.name) {
 		case "read":
+			return `Restore by re-reading: read ${op.key.path}${formatReadRange(op.key)}.`;
 		case "read_many":
-			return "[Stale read omitted to save context — this file was re-read or modified later. Re-read it if you need its current contents.]";
+			return `Restore by re-reading the batch paths: ${paths}.`;
 		case "grep":
 		case "grep_many":
 		case "ffgrep":
 		case "fff-multi-grep":
 		case "multi_grep":
-			return "[Stale grep result omitted to save context — a file in the search scope was modified later. Re-grep if you need current matches.]";
+			return `Restore by re-running grep over: ${paths}.`;
 		case "find":
 		case "fffind":
-			return "[Stale find result omitted to save context — a file was added in the search scope later. Re-run find if needed.]";
+			return `Restore by re-running find over: ${paths}.`;
 		case "ls":
 		case "ls_many":
-			return "[Stale ls result omitted to save context — a file was added in the listed directory later. Re-run ls if needed.]";
+			return `Restore by re-running ls over: ${paths}.`;
 		case "bash":
-			return "[Stale command output omitted to save context — the read file was modified later. Re-run if needed.]";
+			return `Restore by re-running the original command or reading: ${op.key.path}.`;
 		default:
-			return "[Stale result omitted to save context — the referenced file was modified later. Re-run the tool if needed.]";
+			return "Restore by re-running the original tool call if the omitted detail is needed.";
+	}
+}
+
+interface OmittedToolResultDetails {
+	reason: "stale";
+	toolName: string;
+	paths: string[];
+	restoreHint: string;
+}
+
+function withOmittedDetails(existing: unknown, op: ResultOp): Record<string, unknown> {
+	const contextOmitted: OmittedToolResultDetails = {
+		reason: "stale",
+		toolName: op.name,
+		paths: [...new Set(op.allPaths)],
+		restoreHint: restoreHint(op),
+	};
+	if (typeof existing === "object" && existing !== null && !Array.isArray(existing)) {
+		return { ...(existing as Record<string, unknown>), contextOmitted };
+	}
+	return { contextOmitted };
+}
+
+/** Stale placeholder text per tool category. */
+function stalePlaceholder(op: ResultOp): string {
+	const paths = compactPaths(op.allPaths);
+	const restore = restoreHint(op);
+	switch (op.name) {
+		case "read":
+		case "read_many":
+			return `[Stale read omitted to save context — this file was re-read or modified later. Paths: ${paths}. ${restore}]`;
+		case "grep":
+		case "grep_many":
+		case "ffgrep":
+		case "fff-multi-grep":
+		case "multi_grep":
+			return `[Stale grep result omitted to save context — a file in the search scope was modified later. Scope: ${paths}. ${restore}]`;
+		case "find":
+		case "fffind":
+			return `[Stale find result omitted to save context — a file was added in the search scope later. Scope: ${paths}. ${restore}]`;
+		case "ls":
+		case "ls_many":
+			return `[Stale ls result omitted to save context — a file was added in the listed directory later. Scope: ${paths}. ${restore}]`;
+		case "bash":
+			return `[Stale command output omitted to save context — the read file was modified later. Path: ${paths}. ${restore}]`;
+		default:
+			return `[Stale result omitted to save context — the referenced file was modified later. ${restore}]`;
 	}
 }
 
@@ -388,7 +451,7 @@ export function pruneStaleReads(messages: AgentMessage[], cwd?: string): AgentMe
 		}
 	}
 
-	const staleIndices = new Map<number, string>(); // index -> toolName
+	const staleOps = new Map<number, ResultOp>();
 	for (const op of ops) {
 		// Only staleable results can go stale. Mutations and unrecognized
 		// tools are never stubbed themselves.
@@ -423,23 +486,27 @@ export function pruneStaleReads(messages: AgentMessage[], cwd?: string): AgentMe
 			}
 		}
 
-		if (stale) staleIndices.set(op.index, op.name);
+		if (stale) staleOps.set(op.index, op);
 	}
 
-	if (staleIndices.size === 0) return messages;
+	if (staleOps.size === 0) return messages;
 
 	let changed = false;
 	const result = messages.map((message, index) => {
-		if (!staleIndices.has(index) || message.role !== "toolResult") return message;
+		const op = staleOps.get(index);
+		if (!op || message.role !== "toolResult") return message;
 		const toolResult = message as ToolResultMessage;
 		if (textLength(toolResult.content) < MIN_STALE_RESULT_CHARS) return message;
 		changed = true;
-		const toolName = staleIndices.get(index)!;
 		const stub: TextContent = {
 			type: "text",
-			text: stalePlaceholder(toolName),
+			text: stalePlaceholder(op),
 		};
-		return { ...toolResult, content: [stub], details: undefined } satisfies ToolResultMessage;
+		return {
+			...toolResult,
+			content: [stub],
+			details: withOmittedDetails(toolResult.details, op),
+		} satisfies ToolResultMessage;
 	});
 
 	return changed ? result : messages;

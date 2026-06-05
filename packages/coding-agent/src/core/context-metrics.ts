@@ -8,6 +8,7 @@
  *   - "file:/path/to.log" -> JSONL file append
  */
 
+import { appendFile } from "node:fs/promises";
 import type { MetricsEvent } from "./context-metrics-types.ts";
 
 type MetricsSink = (event: MetricsEvent) => void | Promise<void>;
@@ -92,6 +93,8 @@ function consoleSinkHuman(event: MetricsEvent): void {
 			console.log(
 				`[${ts}] [ctx:${session}] quality: ratio=${e.compressionRatio.toFixed(2)} retention=${e.keyItemRetention.toFixed(2)} ` +
 					`structure=${e.structurePreservation.toFixed(2)} anchors=${e.anchorRetention.toFixed(2)} ` +
+					`constraints=${e.userConstraintRetention.toFixed(2)} next=${e.nextStepRetention.toFixed(2)} ` +
+					`lostAnchors=${e.lostCriticalAnchorCount}/${e.criticalAnchorCount} ` +
 					`template=${e.compactTemplateUsed} double=${e.doubleCompactTriggered}`,
 			);
 			break;
@@ -120,8 +123,7 @@ function createFileSink(filePath: string): MetricsSink {
 		const line = `${JSON.stringify(event)}\n`;
 		writeQueue = writeQueue
 			.then(async () => {
-				const fs = await import("node:fs/promises");
-				await fs.appendFile(filePath, line);
+				await appendFile(filePath, line);
 			})
 			.catch(() => {
 				// Swallow write errors to avoid crashing the session
@@ -219,6 +221,11 @@ export function emitCompactionQuality(event: {
 	keyItemRetention: number; // keptKeyItems / totalKeyItems (of previous summary)
 	structurePreservation: number; // sectionsPreserved / totalSections
 	anchorRetention: number; // anchorsPreserved / totalAnchors
+	requiredSectionRetention: number;
+	userConstraintRetention: number;
+	nextStepRetention: number;
+	criticalAnchorCount: number;
+	lostCriticalAnchorCount: number;
 	compactTemplateUsed: boolean;
 	doubleCompactTriggered: boolean;
 }): void {

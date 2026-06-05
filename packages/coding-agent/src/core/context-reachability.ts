@@ -22,6 +22,32 @@ import {
 
 export type ReachabilityLevel = "active" | "adjacent" | "unrelated";
 
+const FILE_PATH_RE =
+	/\b(?:\.{1,2}\/|\/)?[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)+\.(?:ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)\b/gu;
+
+function addTargetPath(path: string, targetPaths: Set<string>, targetScopes: Set<string>, cwd?: string): void {
+	targetPaths.add(normalizePath(path, cwd));
+	const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) || "/" : ".";
+	if (dir !== "/") {
+		targetScopes.add(normalizePath(dir, cwd));
+	}
+}
+
+function messageText(message: AgentMessage): string {
+	if (message.role === "user" || message.role === "custom") {
+		const content = message.content;
+		if (typeof content === "string") return content;
+		if (Array.isArray(content)) {
+			return content
+				.filter((block): block is { type: "text"; text: string } => block.type === "text")
+				.map((block) => block.text)
+				.join("\n");
+		}
+	}
+	if (message.role === "bashExecution") return message.command;
+	return "";
+}
+
 /**
  * Extract the primary scope path from a tool call.
  * For scope tools (grep/find/ls), returns the directory/file scope.
@@ -116,9 +142,14 @@ function buildFocusContext(
 		}
 	}
 
-	// Scan forward from startIndex, collecting all toolCall targets.
+	// 从 focus 窗口起点向后扫描，收集用户显式提到的路径和工具调用目标。
 	for (let i = startIndex; i < messages.length; i++) {
 		const msg = messages[i];
+		if (msg.role === "user" || msg.role === "custom" || msg.role === "bashExecution") {
+			for (const match of messageText(msg).matchAll(FILE_PATH_RE)) {
+				addTargetPath(match[0], targetPaths, targetScopes, cwd);
+			}
+		}
 		if (msg.role !== "assistant") continue;
 		const assistant = msg as AssistantMessage;
 		if (!("content" in assistant) || !Array.isArray(assistant.content)) continue;
@@ -130,12 +161,7 @@ function buildFocusContext(
 			if (!scope) continue;
 
 			if (scope.path) {
-				targetPaths.add(normalizePath(scope.path, cwd));
-				const dir = scope.path.includes("/") ? scope.path.slice(0, scope.path.lastIndexOf("/")) || "/" : ".";
-				// Root directory as a scope is too broad to be useful.
-				if (dir !== "/") {
-					targetScopes.add(normalizePath(dir, cwd));
-				}
+				addTargetPath(scope.path, targetPaths, targetScopes, cwd);
 			}
 			if (scope.scope) {
 				const normalizedScope = normalizePath(scope.scope, cwd);

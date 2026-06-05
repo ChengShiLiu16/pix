@@ -52,6 +52,13 @@ function resultText(message: AgentMessage): string {
 		.join("");
 }
 
+function omittedDetails(message: AgentMessage): Record<string, unknown> {
+	if (message.role !== "toolResult") return {};
+	const details = (message as ToolResultMessage<Record<string, unknown>>).details;
+	const omitted = details?.contextOmitted;
+	return typeof omitted === "object" && omitted !== null ? (omitted as Record<string, unknown>) : {};
+}
+
 /** Build a conversation with N user turns after the tool result. */
 function buildConversation(toolName: string, resultText: string, userTurnsAfter: number): AgentMessage[] {
 	const messages: AgentMessage[] = [
@@ -173,6 +180,12 @@ describe("ageToolResults", () => {
 		expect(text).toContain("/a.ts");
 		expect(text).toContain("50 lines total");
 		expect(text).not.toContain("line 1:");
+		expect(omittedDetails(result[1])).toMatchObject({
+			reason: "aged",
+			toolName: "read",
+			anchor: "/a.ts",
+			restoreHint: "Restore by re-reading for /a.ts.",
+		});
 	});
 
 	it("heavy aging starts at 70% context ratio", () => {

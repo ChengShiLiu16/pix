@@ -3,8 +3,10 @@ import type { AssistantMessage, Model } from "@earendil-works/pix-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type CompactionPreparation, compact, generateSummary } from "../src/core/compaction/index.ts";
 
-const { completeSimpleMock } = vi.hoisted(() => ({
+const { completeSimpleMock, emitCompactionMock, emitCompactionQualityMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
+	emitCompactionMock: vi.fn(),
+	emitCompactionQualityMock: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pix-ai", async (importOriginal) => {
@@ -14,6 +16,11 @@ vi.mock("@earendil-works/pix-ai", async (importOriginal) => {
 		completeSimple: completeSimpleMock,
 	};
 });
+
+vi.mock("../src/core/context-metrics.ts", () => ({
+	emitCompaction: emitCompactionMock,
+	emitCompactionQuality: emitCompactionQualityMock,
+}));
 
 function createModel(reasoning: boolean, maxTokens = 8192): Model<"anthropic-messages"> {
 	return {
@@ -53,6 +60,8 @@ const messages: AgentMessage[] = [{ role: "user", content: "Summarize this.", ti
 describe("generateSummary reasoning options", () => {
 	beforeEach(() => {
 		completeSimpleMock.mockReset();
+		emitCompactionMock.mockReset();
+		emitCompactionQualityMock.mockReset();
 		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
 	});
 
@@ -131,6 +140,93 @@ describe("generateSummary reasoning options", () => {
 
 		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
 	});
+
+	it("preserves required sections and previous critical anchors in compacted summaries", async () => {
+		completeSimpleMock.mockReset();
+		completeSimpleMock.mockResolvedValue({
+			...mockSummaryResponse,
+			content: [{ type: "text", text: "## Goal\nContinue work" }],
+		});
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 600000,
+			previousSummary:
+				'## Critical Context\n- Keep packages/coding-agent/src/core/context-aging.ts and restoreHint() visible.\n- Error was "Context overflow recovery failed".',
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		const result = await compact(preparation, createModel(false), "test-key");
+
+		expect(result.summary).toContain("## Constraints & Preferences");
+		expect(result.summary).toContain("## Critical Context");
+		expect(result.summary).toContain("## Critical Context Anchors Preserved");
+		expect(result.summary).toContain("packages/coding-agent/src/core/context-aging.ts");
+		expect(result.summary).toContain("restoreHint()");
+		expect(result.summary).toContain('"Context overflow recovery failed"');
+	});
+
+	it("emits quality metrics for constraint, next step, and critical anchor retention", async () => {
+		completeSimpleMock.mockReset();
+		emitCompactionQualityMock.mockReset();
+		completeSimpleMock.mockResolvedValue({
+			...mockSummaryResponse,
+			content: [{ type: "text", text: "## Goal\nContinue work" }],
+		});
+		const preparation: CompactionPreparation = {
+			firstKeptEntryId: "entry-keep",
+			messagesToSummarize: messages,
+			turnPrefixMessages: [],
+			isSplitTurn: false,
+			tokensBefore: 600000,
+			previousSummary: [
+				"## Goal",
+				"Reduce context safely",
+				"",
+				"## Constraints & Preferences",
+				"- Do not lose user constraints",
+				"",
+				"## Progress",
+				"- [ ] Wire metrics",
+				"",
+				"## Key Decisions",
+				"- **Evidence**: Keep packages/coding-agent/src/core/context-optimizer.ts visible",
+				"",
+				"## Next Steps",
+				"1. Run npm run check",
+				"",
+				"## Critical Context",
+				'- Error was "Context overflow recovery failed"',
+			].join("\n"),
+			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
+		};
+
+		await compact(
+			preparation,
+			createModel(false),
+			"test-key",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"session-quality",
+		);
+
+		expect(emitCompactionQualityMock).toHaveBeenCalledTimes(1);
+		expect(emitCompactionQualityMock.mock.calls[0][0]).toMatchObject({
+			sessionId: "session-quality",
+			requiredSectionRetention: 1,
+			userConstraintRetention: 0,
+			nextStepRetention: 0,
+			criticalAnchorCount: 2,
+			lostCriticalAnchorCount: 0,
+		});
+	});
 });
 
 function promptTextOf(call: unknown[]): string {
@@ -145,6 +241,8 @@ function longSummaryResponse(chars: number): AssistantMessage {
 describe("generateSummary growth bounding (P2-8)", () => {
 	beforeEach(() => {
 		completeSimpleMock.mockReset();
+		emitCompactionMock.mockReset();
+		emitCompactionQualityMock.mockReset();
 		completeSimpleMock.mockResolvedValue(mockSummaryResponse);
 	});
 

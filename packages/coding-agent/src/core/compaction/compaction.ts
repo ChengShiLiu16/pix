@@ -60,25 +60,25 @@ function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
 					truncated = true;
 					items.push("...");
 				}
-				return "[" + items.join(",") + "]";
+				return `[${items.join(",")}]`;
 			}
 			const keys = Object.keys(v);
 			if (keys.length === 0) return "{}";
 			const entries = keys
 				.slice(0, 30)
-				.map((k) => JSON.stringify(k) + ":" + stringify((v as Record<string, unknown>)[k], depth + 1));
+				.map((k) => `${JSON.stringify(k)}:${stringify((v as Record<string, unknown>)[k], depth + 1)}`);
 			if (keys.length > 30) {
 				truncated = true;
 				entries.push("...");
 			}
-			return "{" + entries.join(",") + "}";
+			return `{${entries.join(",")}}`;
 		} finally {
 			seen.delete(v);
 		}
 	}
 
 	const result = stringify(value, 0);
-	return truncated ? result + "⟪truncated⟫" : result;
+	return truncated ? `${result}⟪truncated⟫` : result;
 }
 
 function typeTag(v: object): string {
@@ -940,6 +940,55 @@ function anchorsMatch(a: string, b: string): boolean {
 	return short.length >= 4 && long.includes(short);
 }
 
+function parseSummarySections(text: string): Map<string, string> {
+	const result = new Map<string, string>();
+	const lines = text.split("\n");
+	let currentSection = "";
+	let currentContent: string[] = [];
+
+	for (const line of lines) {
+		const sectionMatch = line.match(/^##\s+(.+)$/);
+		if (sectionMatch) {
+			if (currentSection) {
+				result.set(currentSection, currentContent.join("\n"));
+			}
+			currentSection = sectionMatch[1].trim();
+			currentContent = [];
+		} else if (currentSection) {
+			currentContent.push(line);
+		}
+	}
+	if (currentSection) {
+		result.set(currentSection, currentContent.join("\n"));
+	}
+	return result;
+}
+
+function extractSummaryItems(sectionText: string): string[] {
+	return sectionText
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.startsWith("- ") || line.startsWith("- [") || /^\d+\./u.test(line))
+		.map((line) =>
+			line
+				.replace(/^[-*]\s*\[?[x\s]?\]?\s*/, "")
+				.replace(/^\d+\.\s*/, "")
+				.trim(),
+		)
+		.filter((line) => line.length > 0 && line !== "(none)" && line !== "(none recorded)");
+}
+
+function itemRetention(prevItems: string[], newItems: string[]): number {
+	if (prevItems.length === 0) return 1;
+	let keptItems = 0;
+	for (const prevItem of prevItems) {
+		if (newItems.some((item) => itemSimilarity(prevItem, item) >= 0.5)) {
+			keptItems++;
+		}
+	}
+	return keptItems / prevItems.length;
+}
+
 /**
  * Analyze summary quality by comparing previous and new summaries.
  * Returns metrics for compression ratio, key-item retention, structure
@@ -954,6 +1003,11 @@ function analyzeSummaryQuality(
 	keyItemRetention: number;
 	structurePreservation: number;
 	anchorRetention: number;
+	requiredSectionRetention: number;
+	userConstraintRetention: number;
+	nextStepRetention: number;
+	criticalAnchorCount: number;
+	lostCriticalAnchorCount: number;
 } {
 	const sections = [
 		"Goal",
@@ -964,67 +1018,8 @@ function analyzeSummaryQuality(
 		"Critical Context",
 	];
 
-	function parseSections(text: string): Map<string, string> {
-		const result = new Map<string, string>();
-		const lines = text.split("\n");
-		let currentSection = "";
-		let currentContent: string[] = [];
-
-		for (const line of lines) {
-			const sectionMatch = line.match(/^##\s+(.+)$/);
-			if (sectionMatch) {
-				if (currentSection) {
-					result.set(currentSection, currentContent.join("\n"));
-				}
-				currentSection = sectionMatch[1].trim();
-				currentContent = [];
-			} else if (currentSection) {
-				currentContent.push(line);
-			}
-		}
-		if (currentSection) {
-			result.set(currentSection, currentContent.join("\n"));
-		}
-		return result;
-	}
-
-	function extractItems(sectionText: string): string[] {
-		return sectionText
-			.split("\n")
-			.map((l) => l.trim())
-			.filter(
-				(l) =>
-					l.startsWith("- ") ||
-					l.startsWith("- [") ||
-					l.startsWith("1.") ||
-					l.startsWith("2.") ||
-					l.startsWith("3."),
-			)
-			.map((l) =>
-				l
-					.replace(/^[-*]\s*\[?[x\s]?\]?\s*/, "")
-					.replace(/^\d+\.\s*/, "")
-					.trim(),
-			)
-			.filter((l) => l.length > 0);
-	}
-
-	function extractAnchors(text: string): string[] {
-		// Extract file paths, function names, error messages as "anchors"
-		const anchors: string[] = [];
-		// File paths
-		anchors.push(
-			...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/g) ?? []),
-		);
-		// Function names (camelCase/PascalCase)
-		anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/g) ?? []));
-		// Error messages in quotes
-		anchors.push(...(text.match(/"[^"]{10,}"/g) ?? []));
-		return [...new Set(anchors)];
-	}
-
-	const prevSections = parseSections(previousSummary);
-	const newSections = parseSections(newSummary);
+	const prevSections = parseSummarySections(previousSummary);
+	const newSections = parseSummarySections(newSummary);
 
 	// Compression ratio: output tokens / input tokens
 	const prevTokens = estimateTextTokens(previousSummary);
@@ -1037,8 +1032,8 @@ function analyzeSummaryQuality(
 	let totalItems = 0;
 	let keptItems = 0;
 	for (const section of sections) {
-		const prevItems = extractItems(prevSections.get(section) ?? "");
-		const newItems = extractItems(newSections.get(section) ?? "");
+		const prevItems = extractSummaryItems(prevSections.get(section) ?? "");
+		const newItems = extractSummaryItems(newSections.get(section) ?? "");
 		totalItems += prevItems.length;
 		for (const prevItem of prevItems) {
 			if (newItems.some((n) => itemSimilarity(prevItem, n) >= 0.5)) {
@@ -1053,20 +1048,82 @@ function analyzeSummaryQuality(
 	const structurePreservation = sections.length > 0 ? preservedSections / sections.length : 1;
 
 	// Anchor retention: anchors preserved / total anchors
-	const prevAnchors = extractAnchors(previousSummary);
-	const newAnchors = extractAnchors(newSummary);
+	const prevAnchors = extractCriticalAnchors(previousSummary);
+	const newAnchors = extractCriticalAnchors(newSummary);
 	let keptAnchors = 0;
 	for (const a of prevAnchors) {
 		if (newAnchors.some((n) => anchorsMatch(a, n))) keptAnchors++;
 	}
 	const anchorRetention = prevAnchors.length > 0 ? keptAnchors / prevAnchors.length : 1;
+	const constraintRetention = itemRetention(
+		extractSummaryItems(prevSections.get("Constraints & Preferences") ?? ""),
+		extractSummaryItems(newSections.get("Constraints & Preferences") ?? ""),
+	);
+	const nextStepRetention = itemRetention(
+		extractSummaryItems(prevSections.get("Next Steps") ?? ""),
+		extractSummaryItems(newSections.get("Next Steps") ?? ""),
+	);
 
 	return {
 		compressionRatio,
 		keyItemRetention,
 		structurePreservation,
 		anchorRetention,
+		requiredSectionRetention: structurePreservation,
+		userConstraintRetention: constraintRetention,
+		nextStepRetention,
+		criticalAnchorCount: prevAnchors.length,
+		lostCriticalAnchorCount: prevAnchors.length - keptAnchors,
 	};
+}
+
+const REQUIRED_SUMMARY_SECTIONS = [
+	"Goal",
+	"Constraints & Preferences",
+	"Progress",
+	"Key Decisions",
+	"Next Steps",
+	"Critical Context",
+];
+
+function extractSummarySections(text: string): Set<string> {
+	const sections = new Set<string>();
+	for (const line of text.split("\n")) {
+		const match = /^##\s+(.+)$/u.exec(line);
+		if (match) sections.add(match[1].trim());
+	}
+	return sections;
+}
+
+function extractCriticalAnchors(text: string): string[] {
+	const anchors: string[] = [];
+	anchors.push(
+		...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/gu) ?? []),
+	);
+	anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/gu) ?? []));
+	anchors.push(...(text.match(/"[^"]{10,}"/gu) ?? []));
+	return [...new Set(anchors)].filter((anchor) => anchor.length >= 4);
+}
+
+function ensureSummaryQuality(summary: string, previousSummary: string | undefined): string {
+	let next = summary.trim();
+	const sections = extractSummarySections(next);
+	const missingSections = REQUIRED_SUMMARY_SECTIONS.filter((section) => !sections.has(section));
+	if (missingSections.length > 0) {
+		next += "\n\n";
+		next += missingSections.map((section) => `## ${section}\n- (none recorded)`).join("\n\n");
+	}
+
+	if (!previousSummary) return next;
+	const lostAnchors = extractCriticalAnchors(previousSummary).filter((anchor) => !next.includes(anchor));
+	if (lostAnchors.length === 0) return next;
+	const restored = lostAnchors.slice(0, 20);
+	next += "\n\n## Critical Context Anchors Preserved\n";
+	next += restored.map((anchor) => `- ${anchor}`).join("\n");
+	if (lostAnchors.length > restored.length) {
+		next += `\n- ... ${lostAnchors.length - restored.length} more anchors omitted`;
+	}
+	return next;
 }
 
 // ============================================================================
@@ -1173,6 +1230,7 @@ export async function compact(
 	// Compute file lists and append to summary
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary += formatFileOperations(readFiles, modifiedFiles);
+	summary = ensureSummaryQuality(summary, previousSummary);
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no UUID - session may need migration");
@@ -1208,6 +1266,11 @@ export async function compact(
 				keyItemRetention: quality.keyItemRetention,
 				structurePreservation: quality.structurePreservation,
 				anchorRetention: quality.anchorRetention,
+				requiredSectionRetention: quality.requiredSectionRetention,
+				userConstraintRetention: quality.userConstraintRetention,
+				nextStepRetention: quality.nextStepRetention,
+				criticalAnchorCount: quality.criticalAnchorCount,
+				lostCriticalAnchorCount: quality.lostCriticalAnchorCount,
 				compactTemplateUsed,
 				doubleCompactTriggered,
 			});
