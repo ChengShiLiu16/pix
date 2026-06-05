@@ -38,8 +38,11 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 const DEFAULT_SESSIONS_DIR = path.join(homedir(), ".pix/agent/sessions");
 const MODELS_GENERATED_PATH = path.join(REPO_ROOT, "packages/ai/src/models.generated.ts");
+const MODELS_CONFIG_PATH = path.join(homedir(), ".pix/agent/models.json");
 const CHARS_PER_TOKEN = 4;
-const AGING_TRIGGER = 0.7;
+const AGING_START_TRIGGER = 0.5;
+const STALE_PRUNE_TRIGGER = 0.65;
+const HEAVY_AGING_TRIGGER = 0.7;
 
 // ---------------------------------------------------------------------------
 // args
@@ -91,29 +94,68 @@ function printHelp() {
 // ---------------------------------------------------------------------------
 
 async function loadContextWindows() {
-	// map[modelId] = window, picking the largest seen (proxies often register
-	// the same modelId under several providers; the largest is the safe upper
-	// bound for "did this session approach any threshold").
-	const map = new Map();
-	let text;
+	const windows = { byProviderModel: new Map(), byModelId: new Map() };
+	const rememberWindow = (provider, modelId, contextWindow) => {
+		if (!provider || !modelId || !Number.isFinite(contextWindow) || contextWindow <= 0) return;
+		windows.byProviderModel.set(`${provider}/${modelId}`, contextWindow);
+		const prev = windows.byModelId.get(modelId) ?? 0;
+		if (contextWindow > prev) windows.byModelId.set(modelId, contextWindow);
+	};
+
+	let text = "";
 	try {
 		text = await fs.readFile(MODELS_GENERATED_PATH, "utf8");
 	} catch {
-		return map;
+		// 非仓库环境下允许缺失。
 	}
-	const lines = text.split("\n");
-	let currentModel;
-	for (const line of lines) {
-		const keyMatch = line.match(/^\t\t"([\w./-]+)":\s*\{/);
-		if (keyMatch) currentModel = keyMatch[1];
-		const winMatch = line.match(/contextWindow:\s*(\d+)/);
-		if (winMatch && currentModel) {
-			const w = Number(winMatch[1]);
-			const prev = map.get(currentModel) ?? 0;
-			if (w > prev) map.set(currentModel, w);
+
+	const providerRegex = /\n\t"([^"]+)": \{([\s\S]*?\n\t)\},/g;
+	let providerMatch;
+	while ((providerMatch = providerRegex.exec(text)) !== null) {
+		const provider = providerMatch[1];
+		const body = providerMatch[2];
+		const modelRegex = /\n\t\t"([^"]+)": \{[\s\S]*?contextWindow: (\d+),/g;
+		let modelMatch;
+		while ((modelMatch = modelRegex.exec(body)) !== null) {
+			rememberWindow(provider, modelMatch[1], Number(modelMatch[2]));
 		}
 	}
-	return map;
+
+	try {
+		const config = JSON.parse(await fs.readFile(MODELS_CONFIG_PATH, "utf8"));
+		const providers = config?.providers && typeof config.providers === "object" ? config.providers : {};
+		for (const [providerName, provider] of Object.entries(providers)) {
+			const overrides = provider?.modelOverrides && typeof provider.modelOverrides === "object" ? provider.modelOverrides : {};
+			for (const [modelId, override] of Object.entries(overrides)) {
+				if (typeof override?.contextWindow === "number") rememberWindow(providerName, modelId, override.contextWindow);
+			}
+			if (Array.isArray(provider?.models)) {
+				for (const model of provider.models) {
+					if (typeof model?.id === "string" && typeof model.contextWindow === "number") rememberWindow(providerName, model.id, model.contextWindow);
+				}
+			}
+		}
+	} catch {
+		// 用户模型配置允许缺失。
+	}
+
+	return windows;
+}
+
+function resolveSessionWindow(windows, session) {
+	const provider = session.model?.provider;
+	const modelId = session.model?.modelId;
+	if (!modelId) return { window: 0, source: "unknown" };
+
+	if (provider) {
+		const exact = windows.byProviderModel.get(`${provider}/${modelId}`);
+		if (exact) return { window: exact, source: "provider-model" };
+	}
+
+	const fallback = windows.byModelId.get(modelId);
+	if (fallback) return { window: fallback, source: "model-id-fallback" };
+
+	return { window: 0, source: "unknown" };
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +205,7 @@ async function parseSession(file) {
 		if (!m) continue;
 		const role = m.role;
 		if (role === "assistant") {
+			if (typeof m.provider === "string" && typeof m.model === "string") session.model = { provider: m.provider, modelId: m.model };
 			if (m.usage) session.usages.push(m.usage);
 			const c = m.content;
 			if (Array.isArray(c)) {
@@ -460,7 +503,8 @@ async function main() {
 		const a = analyze(session);
 		if (a.assistantTurns < opts.minTurns) continue;
 		const peak = peakContext(session);
-		const win = windows.get(session.model?.modelId) || 0;
+		const resolvedWindow = resolveSessionWindow(windows, session);
+		const win = resolvedWindow.window;
 		const growth = perTurnGrowth(session);
 		perSession.push({
 			file: f,
@@ -468,6 +512,7 @@ async function main() {
 			model: session.model,
 			peak,
 			window: win,
+			windowSource: resolvedWindow.source,
 			ratio: win ? peak / win : null,
 			meanTurnTokens: growth.meanTurnTokens,
 			cumulativeGrowth: growth.cumulative,
@@ -546,7 +591,9 @@ function renderText(perSession, agg, opts) {
 	if (opts.perSession) {
 		for (const s of perSession) {
 			const ratioStr = s.ratio != null ? `${(s.ratio * 100).toFixed(1)}%` : "n/a";
-			out += `\n• ${s.project}  ${s.model?.modelId || "?"}  turns=${s.assistantTurns}  peak=${s.peak}t  ratio=${ratioStr}  ${s.ratio != null && s.ratio >= AGING_TRIGGER ? "[AGING WOULD TRIGGER]" : ""}\n`;
+			const modelStr = `${s.model?.provider || "?"}/${s.model?.modelId || "?"}`;
+			const windowStr = s.window ? `${s.window}(${s.windowSource})` : `unknown(${s.windowSource})`;
+			out += `\n• ${s.project}  ${modelStr}  turns=${s.assistantTurns}  peak=${s.peak}t  window=${windowStr}  ratio=${ratioStr}  ${s.ratio != null && s.ratio >= AGING_START_TRIGGER ? "[AGING WOULD START]" : ""}\n`;
 			out += fmtSourceTable(s.bySource, s.totalChars);
 			out += `    scatter-probed files=${s.scatterFiles}  exploration-reads-before-edit=${s.explorationReads}  reread-overlap=${s.totalReadLines ? ((s.redundantLines / s.totalReadLines) * 100).toFixed(1) : 0}%\n`;
 			if (s.scatterDetail.length) {
@@ -569,7 +616,8 @@ function renderText(perSession, agg, opts) {
 	out += `    redundant (re-read) lines      : median ${agg.rereadPctMedian.toFixed(1)}% of read lines  [readCovers ceiling]\n`;
 
 	out += `\n--- context pressure ---\n`;
-	out += `    peak ratio vs window           : median ${agg.ratioMedian.toFixed(1)}%  max ${agg.ratioMax != null ? agg.ratioMax.toFixed(1) + "%" : "n/a"}  (aging triggers at ${AGING_TRIGGER * 100}%)\n`;
+	out += `    peak ratio vs window           : median ${agg.ratioMedian.toFixed(1)}%  max ${agg.ratioMax != null ? agg.ratioMax.toFixed(1) + "%" : "n/a"}\n`;
+	out += `    thresholds                     : aging start ${AGING_START_TRIGGER * 100}%, stale prune ${STALE_PRUNE_TRIGGER * 100}%, heavy/edit compact ${HEAVY_AGING_TRIGGER * 100}%\n`;
 
 	// decision hints
 	out += `\n--- token growth ---\n`;
@@ -586,7 +634,7 @@ function renderText(perSession, agg, opts) {
 	if (bashShare > 30) hints.push(`Gate A (bash governance): bash is ${bashShare.toFixed(1)}% — biggest sink for these tasks.`);
 	if (readShare > 25 && agg.scatterMedian >= 1) hints.push(`Gate B candidate (outline): reads ${readShare.toFixed(1)}% with median ${agg.scatterMedian} scatter-probed file(s)/session → run perfect-outline experiment.`);
 	if (agg.rereadPctMedian > 5) hints.push(`Gate C (readCovers eager): ~${agg.rereadPctMedian.toFixed(1)}% of read lines are re-read — loss-free dedup ceiling.`);
-	if (agg.ratioMax != null && agg.ratioMax < AGING_TRIGGER * 100) hints.push(`Note: max context ratio ${agg.ratioMax.toFixed(1)}% never reached the ${AGING_TRIGGER * 100}% aging trigger — aging/compaction inert in this corpus.`);
+	if (agg.ratioMax != null && agg.ratioMax < AGING_START_TRIGGER * 100) hints.push(`Note: max context ratio ${agg.ratioMax.toFixed(1)}% never reached the ${AGING_START_TRIGGER * 100}% aging-start trigger — aging/stale-prune/compaction inert in this corpus.`);
 	if (hints.length === 0) hints.push("No gate clearly triggered at default thresholds — inspect per-session with --per-session.");
 	for (const h of hints) out += `    • ${h}\n`;
 	out += `\n`;
