@@ -307,6 +307,86 @@ describe("agentLoop with AgentMessage", () => {
 		}
 	});
 
+	it("should execute a tool when the assistant uses a registered alias", async () => {
+		const findSchema = Type.Object({
+			pattern: Type.String(),
+			path: Type.Optional(Type.String()),
+		});
+		const executed: Array<{ pattern: string; path?: string }> = [];
+		const tool: AgentTool<typeof findSchema, { matched: string }> = {
+			name: "fffind",
+			label: "FFF Find",
+			aliases: ["ffind"],
+			description: "Find files",
+			parameters: findSchema,
+			async execute(_toolCallId, params) {
+				executed.push({ pattern: params.pattern, path: params.path });
+				return {
+					content: [{ type: "text", text: "src/router/index.ts" }],
+					details: { matched: params.pattern },
+				};
+			},
+		};
+
+		const context: AgentContext = {
+			systemPrompt: "",
+			messages: [],
+			tools: [tool],
+		};
+
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+		};
+
+		let callIndex = 0;
+		const stream = agentLoop([createUserMessage("find router")], context, config, undefined, () => {
+			const mockStream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (callIndex === 0) {
+					const message = createAssistantMessage(
+						[
+							{
+								type: "toolCall",
+								id: "tool-1",
+								name: "ffind",
+								arguments: { pattern: "router/index.ts", path: "src/router" },
+							},
+						],
+						"toolUse",
+					);
+					mockStream.push({ type: "done", reason: "toolUse", message });
+				} else {
+					mockStream.push({
+						type: "done",
+						reason: "stop",
+						message: createAssistantMessage([{ type: "text", text: "done" }]),
+					});
+				}
+				callIndex++;
+			});
+			return mockStream;
+		});
+
+		const events: AgentEvent[] = [];
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+
+		expect(executed).toEqual([{ pattern: "router/index.ts", path: "src/router" }]);
+		const toolEnd = events.find(
+			(event): event is Extract<AgentEvent, { type: "tool_execution_end" }> => event.type === "tool_execution_end",
+		);
+		expect(toolEnd?.isError).toBe(false);
+		expect(toolEnd?.toolName).toBe("ffind");
+		const toolResult = messages.find(
+			(message): message is Extract<AgentMessage, { role: "toolResult" }> => message.role === "toolResult",
+		);
+		expect(toolResult?.toolName).toBe("ffind");
+		expect(toolResult?.isError).toBe(false);
+	});
+
 	it("should execute mutated beforeToolCall args without revalidation", async () => {
 		const toolSchema = Type.Object({ value: Type.String() });
 		const executed: Array<string | number> = [];

@@ -353,11 +353,13 @@ export function builtin(pi: ExtensionAPI): void {
 		pi.registerTool<typeof findSchema, FffFindDetails>({
 			name: toolNames.find,
 			label: toolNames.find,
-			description: `Fuzzy path search with FFF. Matches whole repo-relative paths, frecency-ranked, git-aware. Default limit ${DEFAULT_FIND_LIMIT}.`,
+			aliases: toolNames.findAliases,
+			description: `Fuzzy path search with FFF. Exact tool name: ${toolNames.find}. Matches whole repo-relative paths, frecency-ranked, git-aware. Default limit ${DEFAULT_FIND_LIMIT}.`,
 			promptSnippet: "Find files with FFF fuzzy path search",
 			promptGuidelines: [
-				"Use fffind for fuzzy filename/path exploration when the user names a concept, feature, or symbol.",
-				"Use grep or ffgrep for content; fffind is for paths.",
+				`Use ${toolNames.find} for fuzzy filename/path exploration when the user names a concept, feature, or symbol.`,
+				`The exact FFF find tool name is ${toolNames.find}; do not call ffind unless recovering from a previous failed call.`,
+				`Use grep or ffgrep for content; ${toolNames.find} is for paths.`,
 				"Use ls/ls_many when you specifically need an alphabetical directory layout.",
 			],
 			parameters: findSchema,

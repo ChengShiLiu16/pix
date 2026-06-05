@@ -428,6 +428,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	name: string;
 	/** Human-readable label for UI */
 	label: string;
+	/** 兼容旧名或常见误写；不会作为独立工具暴露给模型。 */
+	aliases?: string[];
 	/** Description for LLM */
 	description: string;
 	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */

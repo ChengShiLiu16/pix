@@ -41,6 +41,7 @@ const AGABLE_TOOLS = new Set([
 	"fff-multi-grep",
 	"multi_grep",
 	"find",
+	"ffind",
 	"fffind",
 	"ls",
 	"ls_many",
@@ -225,7 +226,7 @@ function ageGrepResult(text: string, level: AgingLevel, anchor?: string): string
 function ageListResult(text: string, level: AgingLevel, toolName: string, anchor?: string): string {
 	if (level.heavy) {
 		const entryCount = text.split("\n").length;
-		const label = toolName === "find" || toolName === "fffind" ? "Find" : "Ls";
+		const label = toolName === "find" || toolName === "ffind" || toolName === "fffind" ? "Find" : "Ls";
 		const target = anchor ? ` Target: ${anchor}.` : "";
 		return `${label} result omitted to save context.${target} ${entryCount} entries total. Re-run if needed.`;
 	}
@@ -264,6 +265,7 @@ function naturalLanguagePlaceholder(toolName: string, anchor?: string, lineCount
 		case "ls_many":
 			return `Earlier directory listing (${n} entries) omitted to save context. ${restore}`;
 		case "find":
+		case "ffind":
 		case "fffind":
 			return `Earlier find results (${n} entries) omitted to save context. ${restore}`;
 		case "bash":
@@ -289,6 +291,7 @@ function restoreAgedHint(toolName: string, anchor?: string): string {
 		case "ls_many":
 			return `Restore by re-running ${toolName}${target}.`;
 		case "find":
+		case "ffind":
 		case "fffind":
 			return `Restore by re-running find${target}.`;
 		case "bash":
@@ -415,6 +418,7 @@ function getToolAnchor(toolName: string, args: Record<string, unknown> | undefin
 		case "grep":
 		case "ffgrep":
 		case "find":
+		case "ffind":
 		case "fffind":
 		case "ls":
 			return getStringArg(args, ["path"]);
@@ -527,6 +531,7 @@ export function ageToolResults(
 			case "ls":
 			case "ls_many":
 			case "find":
+			case "ffind":
 			case "fffind":
 				agedText = ageListResult(text, level, toolResult.toolName, anchor);
 				break;

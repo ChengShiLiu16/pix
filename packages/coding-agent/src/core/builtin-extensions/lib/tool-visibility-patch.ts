@@ -100,6 +100,7 @@ export const NEVER_HIDE = new Set([
 	"fff-multi-grep",
 	"multi_grep",
 	"find",
+	"ffind",
 	"fffind",
 	"ls",
 	"ls_many",
@@ -120,6 +121,7 @@ const TOOL_HEADERS: Record<string, string> = {
 	"fff-multi-grep": "Grep",
 	multi_grep: "Grep",
 	find: "Find",
+	ffind: "Find",
 	fffind: "Find",
 	ls: "List",
 	ls_many: "List",
@@ -200,6 +202,7 @@ export function hasVisibleToolArgs(toolName: string, args: ToolArgs): boolean {
 					args.searches.some((s) => typeof s?.pattern === "string" && s.pattern.length > 0))
 			);
 		case "find":
+		case "ffind":
 		case "fffind":
 			return typeof args.pattern === "string" && args.pattern.length > 0;
 		case "ls":
@@ -264,6 +267,7 @@ function buildFallbackDetail(toolName: string, args: ToolArgs, theme: ThemeLike)
 			const path = shortenPath(args.path ?? ".");
 			return `${pattern} in ${formatToolPath(path)}`;
 		}
+		case "ffind":
 		case "fffind": {
 			const pattern = args.pattern ?? "";
 			const path = shortenPath(args.path ?? ".");
@@ -483,6 +487,7 @@ export function shouldRenderNeverHideFallback(
 			toolName === "fff-multi-grep" ||
 			toolName === "multi_grep" ||
 			toolName === "find" ||
+			toolName === "ffind" ||
 			toolName === "fffind" ||
 			toolName === "ls" ||
 			toolName === "ls_many")

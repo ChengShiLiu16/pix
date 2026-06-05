@@ -93,6 +93,7 @@ function extractToolScope(
 			const path = getPathArg(args) ?? cwd;
 			return path ? { scope: path } : undefined;
 		}
+		case "ffind":
 		case "fffind": {
 			const path = getPathArg(args) ?? cwd;
 			return path ? { scope: path } : undefined;

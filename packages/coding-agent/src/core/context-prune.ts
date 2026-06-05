@@ -16,7 +16,7 @@
  *     → stale when a later MUTATION (edit/write) changes content of a file
  *       in the tool's scope, OR a later duplicate read supersedes it.
  *
- *   Structure tools (find, fffind, ls, ls_many) — results reflect FILE SYSTEM
+ *   Structure tools (find, ffind, fffind, ls, ls_many) — results reflect FILE SYSTEM
  *   STRUCTURE.
  *     → stale when a later STRUCTURAL mutation (write that creates a new file)
  *       adds/removes files in the tool's scope. Content-only mutations (edit)
@@ -26,7 +26,7 @@
  *   - read, read_many, bash-read: path is a FILE → exact match with mutation.
  *   - grep, grep_many, ffgrep: path is a search SCOPE (file or directory) → mutation
  *     file must be within that scope (exact match or prefix match with "/").
- *   - find, fffind, ls, ls_many: path is a DIRECTORY scope → mutation file must be
+ *   - find, ffind, fffind, ls, ls_many: path is a DIRECTORY scope → mutation file must be
  *     within that scope. When path is absent, cwd is used as the scope.
  *
  * Batch tools (read_many, grep_many, ls_many) combine multiple paths into
@@ -77,7 +77,7 @@ const CONTENT_TOOLS = new Set([
  * Stale when a structural mutation (write creating new file) changes the
  * file list in their scope. Content-only mutations (edit) do NOT affect them.
  */
-const STRUCTURE_TOOLS = new Set(["find", "fffind", "ls", "ls_many"]);
+const STRUCTURE_TOOLS = new Set(["find", "ffind", "fffind", "ls", "ls_many"]);
 
 /** All trackable tools that can go stale. */
 const STALEABLE_TOOLS = new Set([...CONTENT_TOOLS, ...STRUCTURE_TOOLS]);
@@ -94,6 +94,7 @@ const DIR_SCOPE_TOOLS = new Set([
 	"fff-multi-grep",
 	"multi_grep",
 	"find",
+	"ffind",
 	"fffind",
 	"ls",
 	"ls_many",
@@ -228,6 +229,7 @@ function restoreHint(op: ResultOp): string {
 		case "multi_grep":
 			return `Restore by re-running grep over: ${paths}.`;
 		case "find":
+		case "ffind":
 		case "fffind":
 			return `Restore by re-running find over: ${paths}.`;
 		case "ls":
@@ -275,6 +277,7 @@ function stalePlaceholder(op: ResultOp): string {
 		case "multi_grep":
 			return `[Stale grep result omitted to save context — a file in the search scope was modified later. Scope: ${paths}. ${restore}]`;
 		case "find":
+		case "ffind":
 		case "fffind":
 			return `[Stale find result omitted to save context — a file was added in the search scope later. Scope: ${paths}. ${restore}]`;
 		case "ls":

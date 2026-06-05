@@ -379,7 +379,7 @@ async function executeToolCalls(
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const hasSequentialToolCall = toolCalls.some(
-		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
+		(tc) => resolveToolForCall(currentContext.tools, tc.name)?.tool.executionMode === "sequential",
 	);
 	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
 		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
@@ -559,6 +559,16 @@ function prepareToolCallArguments(tool: AgentTool<any>, toolCall: AgentToolCall)
 	};
 }
 
+function resolveToolForCall(
+	tools: AgentTool<any>[] | undefined,
+	toolName: string,
+): { tool: AgentTool<any>; toolName: string } | undefined {
+	const direct = tools?.find((tool) => tool.name === toolName);
+	if (direct) return { tool: direct, toolName: direct.name };
+	const aliased = tools?.find((tool) => tool.aliases?.includes(toolName));
+	return aliased ? { tool: aliased, toolName: aliased.name } : undefined;
+}
+
 async function prepareToolCall(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
@@ -566,8 +576,8 @@ async function prepareToolCall(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
-	if (!tool) {
+	const resolved = resolveToolForCall(currentContext.tools, toolCall.name);
+	if (!resolved) {
 		return {
 			kind: "immediate",
 			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
@@ -576,8 +586,8 @@ async function prepareToolCall(
 	}
 
 	try {
-		const preparedToolCall = prepareToolCallArguments(tool, toolCall);
-		const validatedArgs = validateToolArguments(tool, preparedToolCall);
+		const preparedToolCall = prepareToolCallArguments(resolved.tool, toolCall);
+		const validatedArgs = validateToolArguments(resolved.tool, preparedToolCall);
 		if (config.beforeToolCall) {
 			const beforeResult = await config.beforeToolCall(
 				{
@@ -613,7 +623,7 @@ async function prepareToolCall(
 		return {
 			kind: "prepared",
 			toolCall,
-			tool,
+			tool: resolved.tool,
 			args: validatedArgs,
 		};
 	} catch (error) {

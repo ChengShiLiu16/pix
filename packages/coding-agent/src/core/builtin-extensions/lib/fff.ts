@@ -9,18 +9,21 @@ export const VALID_FFF_MODES: FffMode[] = ["tools-and-ui", "tools-only", "overri
 export interface FffToolNames {
 	grep: string;
 	find: string;
+	findAliases: string[];
 	multiGrep: string;
 }
 
 const FFF_TOOL_NAMES: FffToolNames = {
 	grep: "ffgrep",
 	find: "fffind",
+	findAliases: ["ffind"],
 	multiGrep: "fff-multi-grep",
 };
 
 const OVERRIDE_TOOL_NAMES: FffToolNames = {
 	grep: "grep",
 	find: "find",
+	findAliases: [],
 	multiGrep: "multi_grep",
 };
 

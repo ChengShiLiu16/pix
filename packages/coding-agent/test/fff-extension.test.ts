@@ -54,6 +54,7 @@ vi.mock("@ff-labs/fff-node", () => ({
 
 function createMockApi(flagValues = new Map<string, boolean | string>()) {
 	const tools: string[] = [];
+	const toolDefinitions: Array<{ name: string; aliases?: string[] }> = [];
 	const commands: string[] = [];
 	const flags: string[] = [];
 	const sessionStartHandlers: Array<(event: unknown, ctx: unknown) => void> = [];
@@ -64,8 +65,9 @@ function createMockApi(flagValues = new Map<string, boolean | string>()) {
 				sessionStartHandlers.push(handler as (event: unknown, ctx: unknown) => void);
 			}
 		},
-		registerTool(tool: { name: string }) {
+		registerTool(tool: { name: string; aliases?: string[] }) {
 			tools.push(tool.name);
+			toolDefinitions.push({ name: tool.name, aliases: tool.aliases });
 		},
 		registerCommand(name: string) {
 			commands.push(name);
@@ -81,6 +83,7 @@ function createMockApi(flagValues = new Map<string, boolean | string>()) {
 	return {
 		api: api as unknown as ExtensionAPI,
 		tools,
+		toolDefinitions,
 		commands,
 		flags,
 		sessionStartHandlers,
@@ -111,11 +114,13 @@ describe("fff builtin extension", () => {
 		expect(resolveFffToolNames("tools-and-ui")).toEqual({
 			grep: "ffgrep",
 			find: "fffind",
+			findAliases: ["ffind"],
 			multiGrep: "fff-multi-grep",
 		});
 		expect(resolveFffToolNames("override")).toEqual({
 			grep: "grep",
 			find: "find",
+			findAliases: [],
 			multiGrep: "multi_grep",
 		});
 	});
@@ -210,8 +215,10 @@ describe("fff builtin extension", () => {
 		expect(mock.commands).toEqual(["fff-mode", "fff-health", "fff-rescan"]);
 		expect(mock.tools).toContain("fffind");
 		expect(mock.tools).toContain("ffgrep");
+		expect(mock.tools).not.toContain("ffind");
 		expect(mock.tools).not.toContain("find");
 		expect(mock.tools).not.toContain("grep");
+		expect(mock.toolDefinitions.find((tool) => tool.name === "fffind")?.aliases).toEqual(["ffind"]);
 		expect(ctx.ui.addAutocompleteProvider).toHaveBeenCalledTimes(1);
 	});
 
@@ -224,7 +231,9 @@ describe("fff builtin extension", () => {
 
 		expect(mock.tools).toContain("find");
 		expect(mock.tools).toContain("grep");
+		expect(mock.tools).not.toContain("ffind");
 		expect(mock.tools).not.toContain("fffind");
 		expect(mock.tools).not.toContain("ffgrep");
+		expect(mock.toolDefinitions.find((tool) => tool.name === "find")?.aliases).toEqual([]);
 	});
 });
