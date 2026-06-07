@@ -273,6 +273,12 @@ function getBedrockBaseUrl(modelId: string): string {
 		: "https://bedrock-runtime.us-east-1.amazonaws.com";
 }
 
+function addModelIfMissing(models: Model<any>[], model: Model<any>): void {
+	if (!models.some((candidate) => candidate.provider === model.provider && candidate.id === model.id)) {
+		models.push(model);
+	}
+}
+
 async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 	try {
 		console.log("Fetching models from OpenRouter API...");
@@ -1589,6 +1595,49 @@ async function generateModels() {
 		},
 	];
 	allModels.push(...codexModels);
+
+	// Keep test-covered legacy aliases stable when upstream catalogs temporarily remove them.
+	addModelIfMissing(allModels, {
+		id: "gpt-4o",
+		name: "GPT-4o",
+		api: "openai-completions",
+		provider: "github-copilot",
+		baseUrl: "https://api.individual.githubcopilot.com",
+		headers: { ...COPILOT_STATIC_HEADERS },
+		compat: {
+			supportsStore: false,
+			supportsDeveloperRole: false,
+			supportsReasoningEffort: false,
+		},
+		reasoning: false,
+		input: ["text", "image"],
+		cost: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+		},
+		contextWindow: 128000,
+		maxTokens: 4096,
+	});
+
+	addModelIfMissing(allModels, {
+		id: "google/gemini-2.0-flash-001",
+		name: "Google: Gemini 2.0 Flash",
+		api: "openai-completions",
+		provider: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		reasoning: false,
+		input: ["text", "image"],
+		cost: {
+			input: 0.09999999999999999,
+			output: 0.39999999999999997,
+			cacheRead: 0.024999999999999998,
+			cacheWrite: 0.08333333333333334,
+		},
+		contextWindow: 1048576,
+		maxTokens: 8192,
+	});
 
 	// Add missing Grok models
 	const missingGrokModels: Model<"openai-completions">[] = [
