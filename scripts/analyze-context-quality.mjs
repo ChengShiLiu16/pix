@@ -5,7 +5,7 @@
  * Reads persisted session JSONL files and reports, per session and in
  * aggregate, the three metrics that decide WHERE to spend optimization effort:
  *
- *   M1  token-by-source     — share of context chars per tool / thinking / text
+ *   M1  token-by-source     — share of context tokens per tool / thinking / text
  *   M2  same-file scatter    — repeated, non-monotonic windowed reads of one file
  *                              (the "hunting" pattern), + exploration reads
  *                              issued before the first edit of a file
@@ -14,7 +14,7 @@
  *   + read_many tracking      — batch-read share, files-per-call, batch truncation
  *
  * It NEVER writes anything and does not touch the running agent. Token counts
- * are chars/4 estimates (same heuristic as the agent), good for relative shares.
+ * use the same CJK-aware heuristic as the agent, good for relative shares.
  *
  * Usage:
  *   node scripts/analyze-context-quality.mjs [options]
@@ -39,7 +39,6 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 const DEFAULT_SESSIONS_DIR = path.join(homedir(), ".pix/agent/sessions");
 const MODELS_GENERATED_PATH = path.join(REPO_ROOT, "packages/ai/src/models.generated.ts");
 const MODELS_CONFIG_PATH = path.join(homedir(), ".pix/agent/models.json");
-const CHARS_PER_TOKEN = 4;
 const AGING_START_TRIGGER = 0.5;
 const STALE_PRUNE_TRIGGER = 0.65;
 const HEAVY_AGING_TRIGGER = 0.7;
@@ -94,7 +93,7 @@ function printHelp() {
 // ---------------------------------------------------------------------------
 
 async function loadContextWindows() {
-	const windows = { byProviderModel: new Map(), byModelId: new Map() };
+	const windows = { byProviderModel: new Map(), byModelId: new Map(), diagnostics: [] };
 	const rememberWindow = (provider, modelId, contextWindow) => {
 		if (!provider || !modelId || !Number.isFinite(contextWindow) || contextWindow <= 0) return;
 		windows.byProviderModel.set(`${provider}/${modelId}`, contextWindow);
@@ -105,8 +104,8 @@ async function loadContextWindows() {
 	let text = "";
 	try {
 		text = await fs.readFile(MODELS_GENERATED_PATH, "utf8");
-	} catch {
-		// 非仓库环境下允许缺失。
+	} catch (error) {
+		windows.diagnostics.push(`models.generated.ts not loaded: ${error?.message || error}`);
 	}
 
 	const providerRegex = /\n\t"([^"]+)": \{([\s\S]*?\n\t)\},/g;
@@ -135,8 +134,8 @@ async function loadContextWindows() {
 				}
 			}
 		}
-	} catch {
-		// 用户模型配置允许缺失。
+	} catch (error) {
+		windows.diagnostics.push(`models.json not loaded: ${error?.message || error}`);
 	}
 
 	return windows;
@@ -179,6 +178,28 @@ function countLines(s) {
 	return s.split("\n").length;
 }
 
+/**
+ * 估算文本的 token 数量，支持 CJK 字符。
+ * 
+ * CJK 字符的 token 比率基于实际测试：
+ * - 英文/数字/符号：约 4 字符 = 1 token
+ * - 中日韩字符：约 1.7 字符 = 1 token
+ * 
+ * 这个比率来自对 Claude 模型的实验观察，用于相对份额估算。
+ * 对于精确计费，应使用 provider 返回的实际 token 数。
+ */
+function estimateTextTokens(text) {
+	let cjk = 0;
+	for (const ch of text) {
+		const c = ch.codePointAt(0) ?? 0;
+		if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef)) {
+			cjk++;
+		}
+	}
+	const other = text.length - cjk;
+	return Math.ceil(cjk / 1.7 + other / 4);
+}
+
 async function parseSession(file) {
 	const session = {
 		file,
@@ -214,14 +235,17 @@ async function parseSession(file) {
 					if (b.type === "toolCall") {
 						session.events.push({ kind: "call", id: b.id, name: b.name, args: b.arguments || {} });
 					} else if (b.type === "thinking") {
-						session.events.push({ kind: "thinking", chars: (b.thinking || "").length });
+						const text = b.thinking || "";
+						session.events.push({ kind: "thinking", chars: text.length, tokens: estimateTextTokens(text) });
 					} else if (b.type === "text") {
-						session.events.push({ kind: "asstText", chars: (b.text || "").length });
+						const text = b.text || "";
+						session.events.push({ kind: "asstText", chars: text.length, tokens: estimateTextTokens(text) });
 					}
 				}
 			}
 		} else if (role === "user") {
-			session.events.push({ kind: "user", chars: textOfContent(m.content).length });
+			const text = textOfContent(m.content);
+			session.events.push({ kind: "user", chars: text.length, tokens: estimateTextTokens(text) });
 		} else if (role === "toolResult" || role === "tool") {
 			const txt = textOfContent(m.content);
 			session.events.push({
@@ -229,6 +253,7 @@ async function parseSession(file) {
 				id: m.toolCallId,
 				name: m.toolName,
 				chars: txt.length,
+				tokens: estimateTextTokens(txt),
 				lines: countLines(txt),
 				truncated: /Use offset=|to continue\.\]/.test(txt),
 				isError: !!m.isError,
@@ -265,12 +290,13 @@ function analyze(session) {
 	const callById = new Map();
 	for (const e of session.events) if (e.kind === "call") callById.set(e.id, e);
 
-	// M1: chars by source
-	const bySource = {}; // name -> {count, chars}
-	const add = (name, chars, n = 1) => {
-		const e = (bySource[name] ??= { count: 0, chars: 0 });
+	// M1: chars/tokens by source
+	const bySource = {}; // name -> {count, chars, tokens}
+	const add = (name, chars, tokens, n = 1) => {
+		const e = (bySource[name] ??= { count: 0, chars: 0, tokens: 0 });
 		e.count += n;
 		e.chars += chars;
+		e.tokens += tokens;
 	};
 
 	// read pattern tracking
@@ -282,11 +308,12 @@ function analyze(session) {
 	const readManyCalls = []; // {files:n, truncated:bool, chars}
 	let singleReadChars = 0;
 	let readManyChars = 0;
+	let readManyTokens = 0;
 
 	for (const e of session.events) {
-		if (e.kind === "thinking") add("thinking", e.chars);
-		else if (e.kind === "asstText") add("assistant_text", e.chars);
-		else if (e.kind === "user") add("user", e.chars);
+		if (e.kind === "thinking") add("thinking", e.chars, e.tokens);
+		else if (e.kind === "asstText") add("assistant_text", e.chars, e.tokens);
+		else if (e.kind === "user") add("user", e.chars, e.tokens);
 		else if (e.kind === "call") {
 			seq++;
 			if (e.name === "edit" || e.name === "write") {
@@ -313,10 +340,11 @@ function analyze(session) {
 		} else if (e.kind === "result") {
 			const call = callById.get(e.id);
 			const name = e.name || call?.name || "unknown";
-			add(name, e.chars);
+			add(name, e.chars, e.tokens);
 			if (name === "read") singleReadChars += e.chars;
 			if (name === "read_many") {
 				readManyChars += e.chars;
+				readManyTokens += e.tokens;
 				const rc = readManyCalls.find((c) => callById.get(e.id) && c._seq && true && c._truncated === undefined);
 				if (rc) rc._truncated = e.truncated;
 				// attach result line count to the most recent read entries lacking it is non-trivial;
@@ -377,7 +405,11 @@ function analyze(session) {
 
 	// totals
 	let totalChars = 0;
-	for (const v of Object.values(bySource)) totalChars += v.chars;
+	let sourceTotalTokens = 0;
+	for (const v of Object.values(bySource)) {
+		totalChars += v.chars;
+		sourceTotalTokens += v.tokens;
+	}
 
 	const readManyFilesCounts = readManyCalls.map((c) => c.files).filter((n) => n > 0);
 	const readManyTruncated = readManyCalls.filter((c) => c._truncated).length;
@@ -385,6 +417,7 @@ function analyze(session) {
 	return {
 		bySource,
 		totalChars,
+		sourceTotalTokens,
 		assistantTurns: session.usages.length,
 		scatterFiles,
 		scatterDetail,
@@ -393,6 +426,7 @@ function analyze(session) {
 		totalReadLines,
 		singleReadChars,
 		readManyChars,
+		readManyTokens,
 		readManyCalls: readManyCalls.length,
 		readManyFilesCounts,
 		readManyTruncated,
@@ -409,22 +443,21 @@ function peakContext(session) {
 }
 
 /**
- * Per-turn cumulative token growth and per-turn deltas.
- * Returns an array of cumulative token counts (one entry per assistant turn)
- * and the per-turn token deltas.
+ * Per-turn token burn and per-turn prompt sizes.
+ * Provider usage is per request. Summing it estimates spend/burn, not context growth.
  */
-function perTurnGrowth(session) {
-	const cumulative = [];
+function perTurnTokenBurn(session) {
+	const cumulativeBurn = [];
 	const deltas = [];
 	let cum = 0;
 	for (const u of session.usages) {
 		const tokens = u.totalTokens || (u.input || 0) + (u.output || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
 		cum += tokens;
-		cumulative.push(cum);
+		cumulativeBurn.push(cum);
 		deltas.push(tokens);
 	}
 	const meanTurnTokens = deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
-	return { cumulative, deltas, meanTurnTokens };
+	return { cumulativeBurn, deltas, meanTurnTokens, totalBurnTokens: cum };
 }
 
 // ---------------------------------------------------------------------------
@@ -443,12 +476,13 @@ function bar(pct, width = 24) {
 	return "━".repeat(n) + " ".repeat(Math.max(0, width - n));
 }
 
-function fmtSourceTable(bySource, totalChars) {
-	const rows = Object.entries(bySource).sort((a, b) => b[1].chars - a[1].chars);
+function fmtSourceTable(bySource, totalTokens) {
+	const rows = Object.entries(bySource).sort((a, b) => (b[1].tokens ?? b[1].chars / 4) - (a[1].tokens ?? a[1].chars / 4));
 	let out = "";
 	for (const [name, v] of rows) {
-		const tok = Math.round(v.chars / CHARS_PER_TOKEN);
-		const pct = totalChars ? (v.chars / totalChars) * 100 : 0;
+		const tokens = v.tokens ?? v.chars / 4;
+		const tok = Math.round(tokens);
+		const pct = totalTokens ? (tokens / totalTokens) * 100 : 0;
 		out += `    ${name.padEnd(16)}${String(v.count).padStart(5)}  ${String(tok).padStart(8)}t  ${pct.toFixed(1).padStart(5)}%  ${bar(pct)}\n`;
 	}
 	return out;
@@ -505,7 +539,7 @@ async function main() {
 		const peak = peakContext(session);
 		const resolvedWindow = resolveSessionWindow(windows, session);
 		const win = resolvedWindow.window;
-		const growth = perTurnGrowth(session);
+		const burn = perTurnTokenBurn(session);
 		perSession.push({
 			file: f,
 			project: path.basename(path.dirname(f)),
@@ -514,10 +548,10 @@ async function main() {
 			window: win,
 			windowSource: resolvedWindow.source,
 			ratio: win ? peak / win : null,
-			meanTurnTokens: growth.meanTurnTokens,
-			cumulativeGrowth: growth.cumulative,
-			turnDeltas: growth.deltas,
-			totalTokens: growth.cumulative[growth.cumulative.length - 1] || 0,
+			meanTurnTokens: burn.meanTurnTokens,
+			cumulativeBurn: burn.cumulativeBurn,
+			turnRequestTokens: burn.deltas,
+			totalBurnTokens: burn.totalBurnTokens,
 			...a,
 		});
 		if (opts.top && perSession.length >= opts.top) break;
@@ -532,16 +566,17 @@ async function main() {
 	const agg = aggregate(perSession);
 
 	if (opts.json) {
-		process.stdout.write(JSON.stringify({ sessions: perSession, aggregate: agg }, null, 2));
+		process.stdout.write(JSON.stringify({ sessions: perSession, aggregate: agg, diagnostics: windows.diagnostics }, null, 2));
 		return;
 	}
 
-	renderText(perSession, agg, opts);
+	renderText(perSession, agg, opts, windows.diagnostics);
 }
 
 function aggregate(perSession) {
 	const sourceTotals = {};
 	let grandChars = 0;
+	let grandTokens = 0;
 	const readManyShareArr = [];
 	const scatterPerSession = [];
 	const explorationArr = [];
@@ -549,28 +584,31 @@ function aggregate(perSession) {
 	const ratios = [];
 	const filesPerReadMany = [];
 	const meanTurnTokensArr = [];
-	const totalTokensArr = [];
+	const totalBurnTokensArr = [];
 	for (const s of perSession) {
 		for (const [name, v] of Object.entries(s.bySource)) {
-			const e = (sourceTotals[name] ??= { count: 0, chars: 0 });
+			const e = (sourceTotals[name] ??= { count: 0, chars: 0, tokens: 0 });
 			e.count += v.count;
 			e.chars += v.chars;
+			e.tokens += v.tokens ?? v.chars / 4;
 			grandChars += v.chars;
+			grandTokens += v.tokens ?? v.chars / 4;
 		}
-		const readChars = (s.bySource.read?.chars || 0) + (s.bySource.read_many?.chars || 0);
-		if (readChars > 0) readManyShareArr.push((s.readManyChars / readChars) * 100);
+		const readTokens = (s.bySource.read?.tokens || 0) + (s.bySource.read_many?.tokens || 0);
+		if (readTokens > 0) readManyShareArr.push((s.readManyTokens / readTokens) * 100);
 		scatterPerSession.push(s.scatterFiles);
 		explorationArr.push(s.explorationReads);
 		if (s.totalReadLines > 0) rereadPctArr.push((s.redundantLines / s.totalReadLines) * 100);
 		if (s.ratio != null) ratios.push(s.ratio * 100);
 		filesPerReadMany.push(...s.readManyFilesCounts);
 		if (s.meanTurnTokens != null) meanTurnTokensArr.push(s.meanTurnTokens);
-		if (s.totalTokens != null) totalTokensArr.push(s.totalTokens);
+		if (s.totalBurnTokens != null) totalBurnTokensArr.push(s.totalBurnTokens);
 	}
 	return {
 		nSessions: perSession.length,
 		sourceTotals,
 		grandChars,
+		grandTokens,
 		readManyShareMedian: median(readManyShareArr),
 		scatterMedian: median(scatterPerSession),
 		scatterMax: Math.max(...scatterPerSession),
@@ -580,13 +618,17 @@ function aggregate(perSession) {
 		ratioMax: ratios.length ? Math.max(...ratios) : null,
 		filesPerReadManyMedian: median(filesPerReadMany),
 		meanTurnTokensMedian: median(meanTurnTokensArr),
-		totalTokensMedian: median(totalTokensArr),
+		totalBurnTokensMedian: median(totalBurnTokensArr),
 	};
 }
 
-function renderText(perSession, agg, opts) {
+function renderText(perSession, agg, opts, diagnostics) {
 	let out = "";
 	out += `\n=== Context-quality baseline — ${agg.nSessions} sessions ===\n`;
+	if (diagnostics.length > 0) {
+		out += `\n--- diagnostics ---\n`;
+		for (const diagnostic of diagnostics) out += `    ${diagnostic}\n`;
+	}
 
 	if (opts.perSession) {
 		for (const s of perSession) {
@@ -594,7 +636,7 @@ function renderText(perSession, agg, opts) {
 			const modelStr = `${s.model?.provider || "?"}/${s.model?.modelId || "?"}`;
 			const windowStr = s.window ? `${s.window}(${s.windowSource})` : `unknown(${s.windowSource})`;
 			out += `\n• ${s.project}  ${modelStr}  turns=${s.assistantTurns}  peak=${s.peak}t  window=${windowStr}  ratio=${ratioStr}  ${s.ratio != null && s.ratio >= AGING_START_TRIGGER ? "[AGING WOULD START]" : ""}\n`;
-			out += fmtSourceTable(s.bySource, s.totalChars);
+			out += fmtSourceTable(s.bySource, s.sourceTotalTokens);
 			out += `    scatter-probed files=${s.scatterFiles}  exploration-reads-before-edit=${s.explorationReads}  reread-overlap=${s.totalReadLines ? ((s.redundantLines / s.totalReadLines) * 100).toFixed(1) : 0}%\n`;
 			if (s.scatterDetail.length) {
 				for (const d of s.scatterDetail.slice(0, 4))
@@ -604,7 +646,7 @@ function renderText(perSession, agg, opts) {
 	}
 
 	out += `\n--- M1: token-by-source (aggregate) ---\n`;
-	out += fmtSourceTable(agg.sourceTotals, agg.grandChars);
+	out += fmtSourceTable(agg.sourceTotals, agg.grandTokens);
 
 	out += `\n--- M2: read-pattern ---\n`;
 	out += `    scatter-probed files / session : median ${agg.scatterMedian}  (max ${agg.scatterMax})\n`;
@@ -619,14 +661,13 @@ function renderText(perSession, agg, opts) {
 	out += `    peak ratio vs window           : median ${agg.ratioMedian.toFixed(1)}%  max ${agg.ratioMax != null ? agg.ratioMax.toFixed(1) + "%" : "n/a"}\n`;
 	out += `    thresholds                     : aging start ${AGING_START_TRIGGER * 100}%, stale prune ${STALE_PRUNE_TRIGGER * 100}%, heavy/edit compact ${HEAVY_AGING_TRIGGER * 100}%\n`;
 
-	// decision hints
-	out += `\n--- token growth ---\n`;
-	out += `    total tokens per session    : median ${agg.totalTokensMedian.toFixed(0)}t\n`;
-	out += `    tokens per assistant turn   : median ${agg.meanTurnTokensMedian.toFixed(0)}t\n`;
+	out += `\n--- token burn ---\n`;
+	out += `    request tokens per session : median ${agg.totalBurnTokensMedian.toFixed(0)}t\n`;
+	out += `    request tokens per turn    : median ${agg.meanTurnTokensMedian.toFixed(0)}t\n`;
 
 	out += `\n--- decision hints ---\n`;
 	const src = agg.sourceTotals;
-	const share = (name) => (agg.grandChars ? (((src[name]?.chars || 0) / agg.grandChars) * 100) : 0);
+	const share = (name) => (agg.grandTokens ? (((src[name]?.tokens || 0) / agg.grandTokens) * 100) : 0);
 	const bashShare = share("bash");
 	const readShare = share("read") + share("read_many");
 	out += `    bash share=${bashShare.toFixed(1)}%  read share=${readShare.toFixed(1)}%  thinking share=${share("thinking").toFixed(1)}%\n`;
