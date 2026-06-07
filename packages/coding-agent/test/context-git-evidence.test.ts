@@ -1,9 +1,13 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pix-ai";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+	canReuseGitEvidenceWithoutExecuting,
+	getGitEvidenceSeriesKey,
+} from "../src/core/context-evidence/git-detect.ts";
 import {
 	applyGitEvidenceTransform,
 	clearGitEvidenceCache,
@@ -11,6 +15,7 @@ import {
 	detectGitInspection,
 	isGitEvidenceDisplayText,
 } from "../src/core/context-git-evidence.ts";
+import { tryStoreBigOutput } from "../src/core/evidence-store.ts";
 import type { BashExecutionMessage } from "../src/core/messages.ts";
 import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { createGitEvidenceFindingsToolDefinition } from "../src/core/tools/git-evidence-findings.ts";
@@ -97,8 +102,14 @@ fix: 修复三处渲染兼容性问题
 ---STAT---
  src/components/MarkdownEditor/index.vue | 12 +++++++++---
  src/utils/mathLatexCompat.ts            |  4 +++-
- 2 files changed, 12 insertions(+), 4 deletions(-)
+2 files changed, 12 insertions(+), 4 deletions(-)
 `;
+
+/** 完整 40 字符 SHA，用于测试不可变 git 命令缓存 */
+const FULL_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+
+/** 短 SHA（7 字符），用于测试动态 git 命令（不会被缓存） */
+const SHORT_SHA = "abcdef1";
 
 let tempDirs: string[] = [];
 
@@ -204,18 +215,252 @@ describe("git evidence detection", () => {
 		expect(result.details?.gitEvidence?.kind).toBe("grep");
 	});
 
+	it("does not serve dynamic git command results from the evidence cache", async () => {
+		const cwd = await makeTempDir();
+		let calls = 0;
+		const tool = createBashToolDefinition(cwd, {
+			operations: {
+				exec: async (_command, _cwd, { onData }) => {
+					calls++;
+					onData(Buffer.from(calls === 1 ? " M first.ts\n" : " M second.ts\n"));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		const first = await tool.execute(
+			"status-1",
+			{ command: "git status --short" },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const second = await tool.execute(
+			"status-2",
+			{ command: "git status --short" },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const secondText = second.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+
+		expect(calls).toBe(2);
+		expect(first.details?.gitEvidence?.kind).toBe("status");
+		expect(secondText).toContain("second.ts");
+	});
+
+	it("does not cache composite git commands with dynamic parts", async () => {
+		const cwd = await makeTempDir();
+		let calls = 0;
+		const tool = createBashToolDefinition(cwd, {
+			operations: {
+				exec: async (_command, _cwd, { onData }) => {
+					calls++;
+					onData(Buffer.from(calls === 1 ? `${DIFF_OUTPUT}\n M first.ts\n` : `${DIFF_OUTPUT}\n M second.ts\n`));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		await tool.execute(
+			"composite-1",
+			{ command: `git show ${SHORT_SHA} && git status --short` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const second = await tool.execute(
+			"composite-2",
+			{ command: `git show ${SHORT_SHA} && git status --short` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const rawPath = second.details?.gitEvidence?.rawPath;
+
+		expect(calls).toBe(2);
+		expect(rawPath).toBeDefined();
+		expect(await readFile(rawPath!, "utf-8")).toContain("second.ts");
+	});
+
+	it("serves immutable git command results from the evidence cache", async () => {
+		const cwd = await makeTempDir();
+		let calls = 0;
+		const tool = createBashToolDefinition(cwd, {
+			operations: {
+				exec: async (_command, _cwd, { onData }) => {
+					calls++;
+					onData(Buffer.from(DIFF_OUTPUT));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		await tool.execute("show-1", { command: `git show ${FULL_SHA}` }, undefined, undefined, {} as never);
+		await tool.execute("show-2", { command: `git show ${FULL_SHA}` }, undefined, undefined, {} as never);
+
+		expect(calls).toBe(1);
+	});
+
+	it("does not skip execution for short SHA commands", async () => {
+		const cwd = await makeTempDir();
+		let calls = 0;
+		const tool = createBashToolDefinition(cwd, {
+			operations: {
+				exec: async (_command, _cwd, { onData }) => {
+					calls++;
+					onData(Buffer.from(DIFF_OUTPUT));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		await tool.execute("short-show-1", { command: `git show ${SHORT_SHA}` }, undefined, undefined, {} as never);
+		await tool.execute("short-show-2", { command: `git show ${SHORT_SHA}` }, undefined, undefined, {} as never);
+
+		expect(calls).toBe(2);
+	});
+
+	it("uses the resolved spawn context for git evidence cache keys", async () => {
+		const firstCwd = await makeTempDir();
+		const secondCwd = await makeTempDir();
+		let calls = 0;
+		const tool = createBashToolDefinition(firstCwd, {
+			spawnHook: (context) => ({ ...context, cwd: secondCwd }),
+			operations: {
+				exec: async (_command, _cwd, { onData }) => {
+					calls++;
+					onData(Buffer.from(DIFF_OUTPUT));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		const first = await tool.execute(
+			"spawn-show-1",
+			{ command: `git show ${FULL_SHA}` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const second = await tool.execute(
+			"spawn-show-2",
+			{ command: `git show ${FULL_SHA}` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+
+		expect(calls).toBe(1);
+		expect(first.details?.gitEvidence?.rawPath).toContain(secondCwd);
+		expect(second.details?.gitEvidence?.rawPath).toContain(secondCwd);
+	});
+
+	it("does not reuse immutable git evidence when git environment changes", async () => {
+		const cwd = await makeTempDir();
+		let calls = 0;
+		let hookCalls = 0;
+		const tool = createBashToolDefinition(cwd, {
+			spawnHook: (context) => {
+				hookCalls++;
+				return {
+					...context,
+					env: { ...context.env, GIT_INDEX_FILE: join(cwd, `index-${hookCalls}`) },
+				};
+			},
+			operations: {
+				exec: async (_command, _cwd, { env, onData }) => {
+					calls++;
+					onData(Buffer.from(DIFF_OUTPUT.replace("fix: improve todo handling", `fix: ${env?.GIT_INDEX_FILE}`)));
+					return { exitCode: 0 };
+				},
+			},
+		});
+
+		const first = await tool.execute(
+			"env-show-1",
+			{ command: `git show ${FULL_SHA}` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const second = await tool.execute(
+			"env-show-2",
+			{ command: `git show ${FULL_SHA}` },
+			undefined,
+			undefined,
+			{} as never,
+		);
+
+		expect(calls).toBe(2);
+		expect(first.details?.gitEvidence?.gitContextKey).not.toBe(second.details?.gitEvidence?.gitContextKey);
+		expect(await readFile(second.details!.gitEvidence!.rawPath!, "utf-8")).toContain("index-2");
+	});
+
 	it("detects evidence display blocks for dim rendering", () => {
 		expect(isGitEvidenceDisplayText("==== Evidence: git-show-abcdef123456 ====\nGit evidence captured:")).toBe(true);
+		expect(isGitEvidenceDisplayText("==== Evidence superseded: git-status-abcdef123456 ====\nCommand:")).toBe(true);
 		expect(isGitEvidenceDisplayText("==== git-grep-abcdef123456 ====\n(no matches)")).toBe(true);
 		expect(isGitEvidenceDisplayText("[Evidence span git-diff-abcdef123456:1-2 hash=abc]")).toBe(true);
 		expect(isGitEvidenceDisplayText("ordinary tool output")).toBe(false);
+	});
+
+	it("only treats immutable git evidence commands as cacheable", () => {
+		expect(canReuseGitEvidenceWithoutExecuting(`git show ${FULL_SHA}`)).toBe(true);
+		expect(canReuseGitEvidenceWithoutExecuting(`git diff-tree --stat --no-commit-id -r ${FULL_SHA}`)).toBe(true);
+		expect(canReuseGitEvidenceWithoutExecuting(`git log -1 --format="%H%n%s" ${FULL_SHA}`)).toBe(true);
+		expect(canReuseGitEvidenceWithoutExecuting(`git log --max-count=1 --format="%H%n%s" ${FULL_SHA}`)).toBe(true);
+		expect(canReuseGitEvidenceWithoutExecuting(`git show ${SHORT_SHA}`)).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting("git status --short")).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting("git diff")).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting("git show HEAD")).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting(`git show ${SHORT_SHA} HEAD`)).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting(`git show ${SHORT_SHA} && git status --short`)).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting(`git show ${SHORT_SHA} | head -200`)).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting("git log --oneline -5")).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting("git log -1 HEAD")).toBe(false);
+		expect(canReuseGitEvidenceWithoutExecuting(`git log --oneline --all ${SHORT_SHA}`)).toBe(false);
+	});
+
+	it("classifies dynamic git evidence into current-state series", () => {
+		expect(getGitEvidenceSeriesKey("git status --short", "status", "dynamic")).toBe("working_tree:status");
+		expect(getGitEvidenceSeriesKey("git diff", "diff", "dynamic")).toBe("working_tree:diff:unstaged");
+		expect(getGitEvidenceSeriesKey("git diff --cached", "diff", "dynamic")).toBe("working_tree:diff:cached");
+		expect(getGitEvidenceSeriesKey("git diff HEAD", "diff", "dynamic")).toBe("working_tree:diff:head");
+		expect(getGitEvidenceSeriesKey("git show HEAD", "show", "dynamic")).toBe("head:show");
+		expect(getGitEvidenceSeriesKey("git log --oneline -5", "log", "dynamic")).toBe("head:log");
+		expect(getGitEvidenceSeriesKey("git diff -- src/a.ts", "diff", "dynamic")).toBeUndefined();
+		expect(getGitEvidenceSeriesKey("git status --short src/a.ts", "status", "dynamic")).toBeUndefined();
+		expect(getGitEvidenceSeriesKey("git show HEAD -- src/a.ts", "show", "dynamic")).toBeUndefined();
+		expect(getGitEvidenceSeriesKey("git diff --cached src/a.ts", "diff", "dynamic")).toBeUndefined();
+		expect(getGitEvidenceSeriesKey("git show HEAD src/a.ts", "show", "dynamic")).toBeUndefined();
+		expect(getGitEvidenceSeriesKey("git show abcdef1 && git status --short", "show", "dynamic")).toBeUndefined();
+	});
+});
+
+describe("big output evidence store", () => {
+	it("does not rewrite duplicate big output evidence", async () => {
+		const cwd = await makeTempDir();
+		const output = Array.from({ length: 120 }, (_, index) => `line ${index}`).join("\n");
+		const first = await tryStoreBigOutput(cwd, output, 0);
+		expect(first).toBeDefined();
+		const oldDate = new Date(Date.now() - 60_000);
+		await utimes(first!.rawPath, oldDate, oldDate);
+
+		const second = await tryStoreBigOutput(cwd, output, 0);
+		expect(second?.rawPath).toBe(first!.rawPath);
+		const fileStat = await stat(first!.rawPath);
+		expect(Math.abs(fileStat.mtimeMs - oldDate.getTime())).toBeLessThan(1000);
 	});
 });
 
 describe("createGitEvidenceResult", () => {
 	it("stores raw output and returns a compact digest", async () => {
 		const cwd = await makeTempDir();
-		const result = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
+		const result = await createGitEvidenceResult(`git show ${SHORT_SHA}`, cwd, DIFF_OUTPUT);
 
 		expect(result).toBeDefined();
 		expect(result?.text).toContain("Git evidence captured:");
@@ -251,9 +496,9 @@ describe("createGitEvidenceResult", () => {
 			"export const feature = true;\n",
 		);
 
-		expect(result?.text).toContain("Raw source snapshot captured");
-		expect(result?.text).toContain("Use git_evidence_read");
+		expect(result?.text).toContain("Parser note: structured diff metadata was not detected");
 		expect(result?.text).not.toContain("export const feature = true");
+		expect(result?.text).toContain("use git_evidence_read");
 	});
 
 	it("reuses a full output file when the visible bash output was truncated", async () => {
@@ -265,6 +510,41 @@ describe("createGitEvidenceResult", () => {
 
 		expect(result?.text).toContain("src/todo.ts");
 		expect(await readFile(result!.details.rawPath!, "utf-8")).toBe(DIFF_OUTPUT);
+	});
+
+	it("marks evidence incomplete when the full output file cannot be read", async () => {
+		const cwd = await makeTempDir();
+		const result = await createGitEvidenceResult(
+			`git show ${SHORT_SHA}`,
+			cwd,
+			"[Showing lines 1-10]",
+			join(cwd, "missing.log"),
+		);
+
+		expect(result?.details.rawIncomplete).toBe(true);
+		expect(result?.text).toContain("Raw warning: full bash output was unavailable");
+		expect(result?.text).toContain("exact raw output is not available");
+		expect(result?.text).toContain("Collect narrower git evidence");
+		expect(result?.text).not.toContain("use git_evidence_read");
+	});
+
+	it("does not present raw storage failures as exact readable evidence", async () => {
+		const cwd = await makeTempDir();
+		const blockedCwd = join(cwd, "not-a-directory");
+		await writeFile(blockedCwd, "file blocks evidence directory creation", "utf-8");
+
+		const result = await createGitEvidenceResult(
+			"git show abcdef1:src/feature.ts",
+			blockedCwd,
+			"export const feature = true;\n",
+		);
+
+		expect(result?.details.rawStorageFailed).toBe(true);
+		expect(result?.details.rawPath).toBeUndefined();
+		expect(result?.text).toContain("Raw warning: evidence storage failed");
+		expect(result?.text).toContain("exact raw output is not available");
+		expect(result?.text).toContain("Collect narrower git evidence");
+		expect(result?.text).not.toContain("use git_evidence_read");
 	});
 
 	it("extracts file summaries from --stat output", async () => {
@@ -355,11 +635,42 @@ describe("createGitEvidenceResult", () => {
 		const cwd = await makeTempDir();
 		for (let index = 0; index < 205; index++) {
 			const sha = index.toString(16).padStart(7, "0");
-			await createGitEvidenceResult("git log --oneline", cwd, `${sha} commit ${index}`);
+			await createGitEvidenceResult(`git show ${sha}`, cwd, `${sha} commit ${index}`);
+		}
+		const evidenceDir = join(cwd, ".pix", "session-evidence", "git");
+		const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000);
+		for (const file of await readdir(evidenceDir)) {
+			if (file.endsWith(".txt")) await utimes(join(evidenceDir, file), oldDate, oldDate);
+		}
+
+		await createGitEvidenceResult("git show fffffff", cwd, "fffffff trigger");
+
+		const files = await readdir(evidenceDir);
+		expect(files.filter((file) => file.endsWith(".txt")).length).toBe(161);
+	});
+
+	it("does not prune protected evidence files", async () => {
+		const cwd = await makeTempDir();
+		for (let index = 0; index < 205; index++) {
+			const sha = index.toString(16).padStart(7, "0");
+			await createGitEvidenceResult(`git show ${sha}`, cwd, `${sha} protected commit ${index}`);
 		}
 
 		const files = await readdir(join(cwd, ".pix", "session-evidence", "git"));
-		expect(files.filter((file) => file.endsWith(".txt")).length).toBeLessThanOrEqual(200);
+		expect(files.filter((file) => file.endsWith(".txt")).length).toBe(205);
+	});
+
+	it("does not split UTF-8 multi-byte characters at the truncation boundary", async () => {
+		const cwd = await makeTempDir();
+		const emoji = "\u2705";
+		const target = 20 * 1024 * 1024 + 1024;
+		const output = emoji.repeat(Math.ceil(target / emoji.length));
+
+		const result = await createGitEvidenceResult("git show abcdef1", cwd, output);
+
+		expect(result).toBeDefined();
+		const raw = await readFile(result!.details.rawPath!, "utf-8");
+		expect(raw).not.toContain("\uFFFD");
 	});
 });
 
@@ -368,7 +679,7 @@ describe("applyGitEvidenceTransform", () => {
 		const cwd = await makeTempDir();
 		const messages: AgentMessage[] = [assistantCall("c1", "git show abcdef1"), toolResult("c1", DIFF_OUTPUT)];
 
-		const result = await applyGitEvidenceTransform(messages, cwd);
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
 
 		expect(result).not.toBe(messages);
 		expect(resultText(result[1])).toContain("Git evidence captured:");
@@ -380,14 +691,14 @@ describe("applyGitEvidenceTransform", () => {
 		const cwd = await makeTempDir();
 		const messages: AgentMessage[] = [assistantCall("c1", "echo ok"), toolResult("c1", "ok")];
 
-		expect(await applyGitEvidenceTransform(messages, cwd)).toBe(messages);
+		expect(await applyGitEvidenceTransform(messages, cwd, {})).toBe(messages);
 	});
 
 	it("also compacts interactive bashExecution messages", async () => {
 		const cwd = await makeTempDir();
 		const message: BashExecutionMessage = {
 			role: "bashExecution",
-			command: "git show abcdef1",
+			command: `git show ${SHORT_SHA}`,
 			output: DIFF_OUTPUT,
 			exitCode: 0,
 			cancelled: false,
@@ -395,7 +706,7 @@ describe("applyGitEvidenceTransform", () => {
 			timestamp: 0,
 		};
 
-		const result = await applyGitEvidenceTransform([message], cwd);
+		const result = await applyGitEvidenceTransform([message], cwd, {});
 
 		expect(result[0].role).toBe("bashExecution");
 		expect((result[0] as BashExecutionMessage).output).toContain("Git evidence captured:");
@@ -406,7 +717,7 @@ describe("applyGitEvidenceTransform", () => {
 	it("keeps only the two latest git evidence results detailed in context", async () => {
 		const cwd = await makeTempDir();
 		const messages: AgentMessage[] = [
-			assistantCall("c1", "git show abcdef1"),
+			assistantCall("c1", `git show ${SHORT_SHA}`),
 			toolResult("c1", DIFF_OUTPUT),
 			assistantCall("c2", "git show abcdef2"),
 			toolResult("c2", DIFF_OUTPUT.replace("abcdef1234567890", "bbbbbbb1234567890")),
@@ -414,14 +725,151 @@ describe("applyGitEvidenceTransform", () => {
 			toolResult("c3", DIFF_OUTPUT.replace("abcdef1234567890", "ccccccc1234567890")),
 		];
 
-		const result = await applyGitEvidenceTransform(messages, cwd);
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
 
-		// All evidence results are now compact (includes key changed lines).
-		// The "keep latest 2 detailed" aging only triggers when text is larger
-		// than compactText, which doesn't apply since bash returns compact text.
+		// bash 返回的已经是 compactText，旧 evidence 只有比 compactText 更大时才会再次压缩。
 		expect(resultText(result[1])).toContain("+const nextValue = getNextValue();");
 		expect(resultText(result[3])).toContain("+const nextValue = getNextValue();");
 		expect(resultText(result[5])).toContain("+const nextValue = getNextValue();");
+	});
+
+	it("marks older dynamic git status evidence as superseded", async () => {
+		const cwd = await makeTempDir();
+		const messages: AgentMessage[] = [
+			assistantCall("s1", "git status --short"),
+			toolResult("s1", " M first.ts\n"),
+			assistantCall("s2", "git status --short"),
+			toolResult("s2", " M second.ts\n"),
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+		const firstText = resultText(result[1]);
+		const secondText = resultText(result[3]);
+		const firstDetails = (result[1] as ToolResultMessage).details?.gitEvidence;
+		const secondDetails = (result[3] as ToolResultMessage).details?.gitEvidence;
+
+		expect(firstText).toContain("Evidence superseded:");
+		expect(firstText).toContain("Do not use it as current repository state");
+		expect(firstText).toContain(`Superseded by: ${secondDetails?.id}`);
+		expect(firstText).toContain(`Use git_evidence_read with ${secondDetails?.id}`);
+		expect(firstText).not.toContain("first.ts");
+		expect(firstDetails?.supersededBy).toBe(secondDetails?.id);
+		expect(secondText).toContain("Git evidence captured:");
+		expect(secondText).toContain("second.ts");
+		expect(secondText).not.toContain("Evidence superseded:");
+	});
+
+	it("does not let superseded tombstones consume detailed evidence slots", async () => {
+		const cwd = await makeTempDir();
+		const show = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
+		const firstStatus = await createGitEvidenceResult("git status --short", cwd, " M first.ts\n");
+		const secondStatus = await createGitEvidenceResult("git status --short", cwd, " M second.ts\n");
+		const messages: AgentMessage[] = [
+			{
+				...toolResult("show", show!.details.detailedText),
+				details: { gitEvidence: show!.details },
+			},
+			{
+				...toolResult("status-1", firstStatus!.details.detailedText),
+				details: { gitEvidence: firstStatus!.details },
+			},
+			{
+				...toolResult("status-2", secondStatus!.details.detailedText),
+				details: { gitEvidence: secondStatus!.details },
+			},
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+
+		expect(resultText(result[0])).toContain("Prefer git_evidence_read/search");
+		expect(resultText(result[1])).toContain("Evidence superseded:");
+		expect(resultText(result[2])).toContain("Prefer git_evidence_read/search");
+	});
+
+	it("does not supersede dynamic git status evidence from different git contexts", async () => {
+		const cwd = await makeTempDir();
+		const repoA = await makeTempDir();
+		const repoB = await makeTempDir();
+		const messages: AgentMessage[] = [
+			assistantCall("s1", `git -C ${repoA} status --short`),
+			toolResult("s1", " M repo-a.ts\n"),
+			assistantCall("s2", `git -C ${repoB} status --short`),
+			toolResult("s2", " M repo-b.ts\n"),
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+
+		expect(resultText(result[1])).toContain("repo-a.ts");
+		expect(resultText(result[1])).not.toContain("Evidence superseded:");
+		expect(resultText(result[3])).toContain("repo-b.ts");
+		expect(resultText(result[3])).not.toContain("Evidence superseded:");
+	});
+
+	it("does not supersede path-limited dynamic git evidence", async () => {
+		const cwd = await makeTempDir();
+		const messages: AgentMessage[] = [
+			assistantCall("d1", "git diff -- src/a.ts"),
+			toolResult("d1", DIFF_OUTPUT.replace("src/todo.ts", "src/a.ts")),
+			assistantCall("d2", "git diff -- src/b.ts"),
+			toolResult("d2", DIFF_OUTPUT.replace("src/todo.ts", "src/b.ts")),
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+
+		expect(resultText(result[1])).toContain("src/a.ts");
+		expect(resultText(result[1])).not.toContain("Evidence superseded:");
+		expect(resultText(result[3])).toContain("src/b.ts");
+		expect(resultText(result[3])).not.toContain("Evidence superseded:");
+	});
+
+	it("does not treat historical truncated git output as complete evidence", async () => {
+		const cwd = await makeTempDir();
+		const truncatedResult = {
+			...toolResult("t1", "export const feature = true;\n"),
+			details: { truncation: { truncated: true } },
+		} satisfies ToolResultMessage & { details: { truncation: { truncated: boolean } } };
+		const messages: AgentMessage[] = [assistantCall("t1", "git show abcdef1:src/feature.ts"), truncatedResult];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+		const text = resultText(result[1]);
+
+		expect(text).toContain("Raw warning: full bash output was unavailable");
+		expect(text).toContain("exact raw output is not available");
+		expect(text).not.toContain("use git_evidence_read");
+	});
+
+	it("does not supersede different dynamic git diff series", async () => {
+		const cwd = await makeTempDir();
+		const messages: AgentMessage[] = [
+			assistantCall("d1", "git diff"),
+			toolResult("d1", DIFF_OUTPUT.replace("src/todo.ts", "src/unstaged.ts")),
+			assistantCall("d2", "git diff --cached"),
+			toolResult("d2", DIFF_OUTPUT.replace("src/todo.ts", "src/cached.ts")),
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+
+		expect(resultText(result[1])).toContain("Git evidence captured:");
+		expect(resultText(result[1])).not.toContain("Evidence superseded:");
+		expect(resultText(result[3])).toContain("Git evidence captured:");
+		expect(resultText(result[3])).not.toContain("Evidence superseded:");
+	});
+
+	it("does not supersede immutable git show evidence", async () => {
+		const cwd = await makeTempDir();
+		const messages: AgentMessage[] = [
+			assistantCall("i1", `git show ${SHORT_SHA}`),
+			toolResult("i1", DIFF_OUTPUT.replace("abcdef1234567890", "abcdef1111111111")),
+			assistantCall("i2", "git show abcdef2"),
+			toolResult("i2", DIFF_OUTPUT.replace("abcdef1234567890", "abcdef2222222222")),
+		];
+
+		const result = await applyGitEvidenceTransform(messages, cwd, {});
+
+		expect(resultText(result[1])).toContain("Git evidence captured:");
+		expect(resultText(result[1])).not.toContain("Evidence superseded:");
+		expect(resultText(result[3])).toContain("Git evidence captured:");
+		expect(resultText(result[3])).not.toContain("Evidence superseded:");
 	});
 });
 
@@ -638,7 +1086,7 @@ describe("git_evidence_findings tool", () => {
 						evidenceId: evidence!.details.id,
 						startLine: 11,
 						endLine: 13,
-						excerptHash: undefined, // Will be auto-resolved
+						excerptHash: undefined,
 					},
 				],
 				confidence: "medium",
@@ -693,6 +1141,10 @@ describe("git_evidence_findings tool", () => {
 		expect(text).toContain("basis:");
 		expect(text).toContain("metadata: commit subject");
 		expect(text).toContain("overview/summary/scope -> claimKind=inventory");
+		expect(JSON.stringify(tool.parameters)).toContain(
+			"Optional hash for validation; auto-computed when omitted, rejected when mismatched",
+		);
+		expect(JSON.stringify(tool.parameters)).not.toContain("auto-computed if not provided or incorrect");
 	});
 
 	it("normalizes common claimKind and basis aliases", async () => {
@@ -759,39 +1211,34 @@ describe("git_evidence_findings tool", () => {
 		expect(text).toContain("(no git evidence findings recorded)");
 	});
 
-	it("auto-corrects mismatched evidence span hashes", async () => {
+	it("rejects mismatched evidence span hashes", async () => {
 		const cwd = await makeTempDir();
 		const evidence = await createGitEvidenceResult("git show abcdef1", cwd, DIFF_OUTPUT);
 		const tool = createGitEvidenceFindingsToolDefinition(cwd);
 
-		// Wrong hash should be auto-corrected, not rejected.
-		const result = await tool.execute(
-			"add-mismatched-finding",
-			{
-				action: "add",
-				claimKind: "content",
-				basis: "raw_diff",
-				evidenceSpans: [
-					{
-						evidenceId: evidence!.details.id,
-						startLine: 11,
-						endLine: 13,
-						excerptHash: "0123456789ab",
-					},
-				],
-				title: "auto-corrected hash",
-				summary: "Hash was wrong but should be auto-corrected.",
-			},
-			undefined,
-			undefined,
-			{} as never,
-		);
-		const text = result.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map((block) => block.text)
-			.join("\n");
-		expect(text).toContain("Recorded finding");
-		expect(text).toContain("(hashes auto-resolved)");
+		await expect(
+			tool.execute(
+				"add-mismatched-finding",
+				{
+					action: "add",
+					claimKind: "content",
+					basis: "raw_diff",
+					evidenceSpans: [
+						{
+							evidenceId: evidence!.details.id,
+							startLine: 11,
+							endLine: 13,
+							excerptHash: "0123456789ab",
+						},
+					],
+					title: "mismatched hash",
+					summary: "Hash mismatch should be surfaced.",
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow("Git evidence span hash mismatch");
 	});
 
 	it("rejects content findings without raw evidence spans", async () => {

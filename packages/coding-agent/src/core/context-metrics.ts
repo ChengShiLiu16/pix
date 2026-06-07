@@ -94,7 +94,7 @@ function consoleSinkHuman(event: MetricsEvent): void {
 				`[${ts}] [ctx:${session}] quality: ratio=${e.compressionRatio.toFixed(2)} retention=${e.keyItemRetention.toFixed(2)} ` +
 					`structure=${e.structurePreservation.toFixed(2)} anchors=${e.anchorRetention.toFixed(2)} ` +
 					`constraints=${e.userConstraintRetention.toFixed(2)} next=${e.nextStepRetention.toFixed(2)} ` +
-					`lostAnchors=${e.lostCriticalAnchorCount}/${e.criticalAnchorCount} ` +
+					`lostAnchors=${e.lostCriticalAnchorCount}/${e.criticalAnchorCount} restored=${e.restoredCriticalAnchorCount} ` +
 					`template=${e.compactTemplateUsed} double=${e.doubleCompactTriggered}`,
 			);
 			break;
@@ -226,6 +226,7 @@ export function emitCompactionQuality(event: {
 	nextStepRetention: number;
 	criticalAnchorCount: number;
 	lostCriticalAnchorCount: number;
+	restoredCriticalAnchorCount: number;
 	compactTemplateUsed: boolean;
 	doubleCompactTriggered: boolean;
 }): void {

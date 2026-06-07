@@ -51,7 +51,9 @@ const evidenceSpanSchema = Type.Object({
 	startLine: Type.Number({ description: "Raw evidence start line, 1-indexed" }),
 	endLine: Type.Number({ description: "Raw evidence end line, 1-indexed" }),
 	excerptHash: Type.Optional(
-		Type.String({ description: "Optional hash for validation; auto-computed if not provided or incorrect" }),
+		Type.String({
+			description: "Optional hash for validation; auto-computed when omitted, rejected when mismatched",
+		}),
 	),
 });
 
@@ -275,9 +277,7 @@ function invalidBasisMessage(value: string): string {
 
 /**
  * Resolve evidence span hashes by reading raw evidence files.
- * Auto-computes the correct hash; does NOT reject on mismatch.
- * If the model provides a wrong/excerptHash, the correct hash is silently substituted.
- * Only rejects when the evidence file or span does not exist.
+ * Auto-computes missing hashes, but rejects mismatches so stale or wrong spans stay visible.
  */
 async function resolveEvidenceSpanHashes(
 	cwd: string,
@@ -299,7 +299,9 @@ async function resolveEvidenceSpanHashes(
 			}
 			const actualHash = hashText(lines.slice(span.startLine - 1, span.endLine).join("\n"));
 			if (span.excerptHash && span.excerptHash !== actualHash) {
-				// Hash was provided but wrong — silently correct it.
+				throw new Error(
+					`Git evidence span hash mismatch for ${span.evidenceId}:${span.startLine}-${span.endLine}; expected ${actualHash}, got ${span.excerptHash}`,
+				);
 			}
 			return { ...span, excerptHash: actualHash };
 		}),
@@ -450,7 +452,7 @@ export function createGitEvidenceFindingsToolDefinition(
 			"Accumulate compact, theme-level git evidence findings with explicit claim kind, basis, confidence, and raw/source spans.",
 		promptSnippet: "Record verified git evidence conclusions before final answers",
 		promptGuidelines: [
-			"For any final answer that includes non-inventory conclusions derived from git evidence, MUST record compact theme-level findings by calling git_evidence_findings action=list to review them before finalizing.",
+			"For any final answer that includes non-inventory conclusions derived from git evidence, MUST record compact theme-level findings and call git_evidence_findings action=list before finalizing.",
 			"Findings are scoped to the current session only and the list output is compact. Use at most 3-5 high-signal findings.",
 			"Use one finding per theme or issue, not one per commit; keep findings compact and cite only the strongest raw/source spans.",
 			`Allowed claimKind values: ${CLAIM_KIND_VALUES.join(", ")}. Use inventory for overview/scope/theme summaries.`,
@@ -493,7 +495,7 @@ export function createGitEvidenceFindingsToolDefinition(
 					content: [
 						{
 							type: "text",
-							text: `Recorded finding ${finding.id} (hashes auto-resolved).\n${formatFinding(finding)}`,
+							text: `Recorded finding ${finding.id} (hashes verified).\n${formatFinding(finding)}`,
 						},
 					],
 					details: { action: "add", count: 1 },

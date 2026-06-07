@@ -36,6 +36,7 @@ import {
 import { theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
+import { getShellEnv } from "../utils/shell.ts";
 import { sleep } from "../utils/sleep.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
@@ -1865,6 +1866,7 @@ export class AgentSession {
 			const provider = this.model?.provider ?? "";
 			const optimized = await optimizeOutgoingContextWithReport(messages, {
 				cwd: this._cwd,
+				env: getShellEnv(),
 				contextWindow,
 				provider,
 				sessionId: this.sessionId,

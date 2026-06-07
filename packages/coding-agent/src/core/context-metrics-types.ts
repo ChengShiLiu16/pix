@@ -41,6 +41,7 @@ export interface CompactionQualityEvent {
 	nextStepRetention: number; // 已保留下一步 / 旧下一步总数
 	criticalAnchorCount: number;
 	lostCriticalAnchorCount: number;
+	restoredCriticalAnchorCount: number;
 	compactTemplateUsed: boolean;
 	doubleCompactTriggered: boolean;
 }

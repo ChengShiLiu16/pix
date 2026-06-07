@@ -66,6 +66,7 @@ export interface OptimizeOutgoingContextOptions {
 	provider: string;
 	sessionId: string; // For metrics correlation
 	compactionSettings?: CompactionSettings; // User-configured compaction settings
+	env?: NodeJS.ProcessEnv;
 }
 
 export type ContextOptimizationStageName =
@@ -152,6 +153,10 @@ function contextOmittedCount(messages: AgentMessage[]): number {
 
 function estimateIfNeeded(messages: AgentMessage[], contextWindow: number, shouldEstimate: boolean): number {
 	return shouldEstimate && contextWindow > 0 ? estimateContextTokens(messages).tokens : 0;
+}
+
+function estimatePressureTokens(messages: AgentMessage[], contextWindow: number): number {
+	return contextWindow > 0 ? estimateContextTokens(messages).tokens : 0;
 }
 
 function createStageReport(args: {
@@ -280,7 +285,7 @@ async function optimizeOutgoingContextInternal(
 	// 先把大块 git 检查输出替换为结构化 evidence 摘要和原始 evidence 引用。
 	const gitStartTime = performance.now();
 	const beforeGit = next;
-	next = await applyGitEvidenceTransform(next, options.cwd);
+	next = await applyGitEvidenceTransform(next, options.cwd, options.env);
 	const afterGitTokens = estimateIfNeeded(next, options.contextWindow, shouldMeasureStages);
 	stages.push(
 		createStageReport({
@@ -309,12 +314,13 @@ async function optimizeOutgoingContextInternal(
 
 	// 在更具破坏性的 stale-read 剪枝前，先渐进压缩旧工具结果。
 	// 压力计算放在 git evidence 压缩后，避免大块 git 输出触发过度 aging。
-	const contextTokens = options.contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
-	const contextRatio = options.contextWindow > 0 ? contextTokens / options.contextWindow : 0;
+	const baselineTokens = shouldMeasureStages ? afterGitTokens : estimatePressureTokens(next, options.contextWindow);
+	let currentTokens = baselineTokens;
+	let currentRatio = ratioFor(currentTokens, options.contextWindow);
 
 	// Emit token estimation debug event (only if metrics enabled)
 	if (metricsEnabled) {
-		emitTokenEstimation(options.sessionId, options.contextWindow, contextTokens, messages.length, false);
+		emitTokenEstimation(options.sessionId, options.contextWindow, baselineTokens, messages.length, false);
 	}
 
 	// Compute effective heavy aging threshold with hysteresis gap from compaction.
@@ -326,11 +332,11 @@ async function optimizeOutgoingContextInternal(
 		clampedSettings.reserveTokens,
 	);
 
-	if (contextRatio >= AGING_START_RATIO) {
+	if (currentRatio >= AGING_START_RATIO) {
 		const agingStartTime = performance.now();
 		const beforeAging = next;
 		const reachability = computeReachability(next, 2, options.cwd);
-		next = ageToolResults(next, contextRatio, reachability, effectiveHeavyThreshold);
+		next = ageToolResults(next, currentRatio, reachability, effectiveHeavyThreshold);
 		const afterAgingTokens = estimateIfNeeded(next, options.contextWindow, shouldMeasureStages);
 		stages.push(
 			createStageReport({
@@ -341,7 +347,7 @@ async function optimizeOutgoingContextInternal(
 				tokensBefore: previousTokens,
 				tokensAfter: afterAgingTokens,
 				durationMs: performance.now() - agingStartTime,
-				destructiveLevel: contextRatio >= effectiveHeavyThreshold ? "high" : "medium",
+				destructiveLevel: currentRatio >= effectiveHeavyThreshold ? "high" : "medium",
 				cacheBreakRisk: "medium",
 			}),
 		);
@@ -356,6 +362,10 @@ async function optimizeOutgoingContextInternal(
 			);
 		}
 		previousTokens = afterAgingTokens;
+		if (next !== beforeAging) {
+			currentTokens = shouldMeasureStages ? afterAgingTokens : estimatePressureTokens(next, options.contextWindow);
+			currentRatio = ratioFor(currentTokens, options.contextWindow);
+		}
 	} else {
 		stages.push(
 			createStageReport({
@@ -375,8 +385,7 @@ async function optimizeOutgoingContextInternal(
 
 	// stale-read 剪枝会重写中段历史，并让 Anthropic 前缀缓存从该点失效。
 	// 仅在上下文足够高时执行，确保 token 节省能抵消一次性 cache miss.
-	const nextTokens = options.contextWindow > 0 ? estimateContextTokens(next).tokens : 0;
-	if (options.contextWindow > 0 && nextTokens > options.contextWindow * STALE_PRUNE_START_RATIO) {
+	if (options.contextWindow > 0 && currentTokens > options.contextWindow * STALE_PRUNE_START_RATIO) {
 		const pruneStartTime = performance.now();
 		const beforePrune = next;
 		next = pruneStaleReads(next, options.cwd);
@@ -405,6 +414,10 @@ async function optimizeOutgoingContextInternal(
 			);
 		}
 		previousTokens = afterPruneTokens;
+		if (next !== beforePrune) {
+			currentTokens = shouldMeasureStages ? afterPruneTokens : estimatePressureTokens(next, options.contextWindow);
+			currentRatio = ratioFor(currentTokens, options.contextWindow);
+		}
 	} else {
 		stages.push(
 			createStageReport({
@@ -441,15 +454,20 @@ async function optimizeOutgoingContextInternal(
 		}),
 	);
 	previousTokens = afterThinkingTokens;
+	if (beforeThinking !== next) {
+		currentTokens = shouldMeasureStages ? afterThinkingTokens : estimatePressureTokens(next, options.contextWindow);
+		currentRatio = ratioFor(currentTokens, options.contextWindow);
+	}
 
 	const editStartTime = performance.now();
 	const beforeEdit = next;
-	const result = compactEditArguments(next, contextRatio);
+	const editRatio = currentRatio;
+	const result = compactEditArguments(next, editRatio);
 	const afterEditTokens = estimateIfNeeded(result, options.contextWindow, shouldMeasureStages);
 	stages.push(
 		createStageReport({
 			name: "edit_compact",
-			ran: contextRatio >= EDIT_ARGS_COMPACT_RATIO,
+			ran: editRatio >= EDIT_ARGS_COMPACT_RATIO,
 			beforeMessages: beforeEdit,
 			afterMessages: result,
 			tokensBefore: previousTokens,
@@ -457,7 +475,7 @@ async function optimizeOutgoingContextInternal(
 			durationMs: performance.now() - editStartTime,
 			destructiveLevel: "low",
 			cacheBreakRisk: "medium",
-			reason: contextRatio < EDIT_ARGS_COMPACT_RATIO ? "below_threshold" : undefined,
+			reason: editRatio < EDIT_ARGS_COMPACT_RATIO ? "below_threshold" : undefined,
 		}),
 	);
 
@@ -466,13 +484,13 @@ async function optimizeOutgoingContextInternal(
 	// exactly when metrics are enabled (PIX_CONTEXT_DEBUG=1 also drives the
 	// CONTEXT_DEBUG log below, so no separate CONTEXT_DEBUG guard is needed).
 	const shouldMeasureFinalTokens = shouldMeasureStages;
-	const finalTokens = shouldMeasureFinalTokens ? estimateContextTokens(result).tokens : contextTokens;
+	const finalTokens = shouldMeasureFinalTokens ? afterEditTokens : currentTokens;
 	if (metricsEnabled) {
 		emitContextPhase(
 			options.sessionId,
 			options.contextWindow,
 			"optimize_end",
-			contextTokens,
+			baselineTokens,
 			finalTokens,
 			performance.now() - startTime,
 		);

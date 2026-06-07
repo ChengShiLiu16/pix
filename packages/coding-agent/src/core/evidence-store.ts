@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pruneEvidenceFiles } from "./context-evidence/evidence-prune.ts";
 
 /**
  * Generic evidence store for large bash outputs (test output, grep results, etc.).
@@ -36,9 +37,14 @@ export interface BigOutputResult {
 }
 
 /**
- * Check if output exceeds thresholds and save as evidence if so.
- * Returns a summary to replace the original output, or undefined if
- * the output is small enough to keep inline.
+ * 检查输出是否超过阈值并保存为 evidence。
+ *
+ * 使用 SHA256 的前 12 位作为文件名。虽然理论上存在碰撞可能，但：
+ * 1. 在写入前会先检查文件是否已存在（stat）
+ * 2. 如果文件已存在，说明内容相同（去重），直接复用
+ * 3. SHA256 前 12 位（48 bits）的碰撞概率极低，在典型 session 规模下可忽略
+ *
+ * 返回摘要以替换原始输出，或 undefined 表示输出足够小可以内联保留。
  */
 export async function tryStoreBigOutput(
 	cwd: string,
@@ -60,8 +66,18 @@ export async function tryStoreBigOutput(
 
 	try {
 		await mkdir(dir, { recursive: true });
-		await writeFile(rawPath, outputText, "utf-8");
-		await pruneEvidenceStore(dir);
+		try {
+			await stat(rawPath);
+			// 文件已存在，内容相同（基于 hash），直接复用
+		} catch {
+			await writeFile(rawPath, outputText, "utf-8");
+			await pruneEvidenceFiles(dir, {
+				maxFiles: MAX_FILES,
+				maxBytes: MAX_BYTES,
+				protectWindowMs: PROTECT_WINDOW_MS,
+				extension: ".txt",
+			});
+		}
 	} catch {
 		// best-effort
 		return undefined;
@@ -83,54 +99,4 @@ export async function tryStoreBigOutput(
 		rawBytes: bytes,
 		exitCode,
 	};
-}
-
-async function pruneEvidenceStore(dir: string): Promise<void> {
-	try {
-		const entries = await readdir(dir, { withFileTypes: true });
-		const now = Date.now();
-		const protectedFiles: Array<{ path: string; size: number; mtimeMs: number }> = [];
-		const evictableFiles: Array<{ path: string; size: number; mtimeMs: number }> = [];
-
-		for (const entry of entries) {
-			if (!entry.isFile() || !entry.name.endsWith(".txt")) continue;
-			const path = join(dir, entry.name);
-			const fileStat = await stat(path);
-			const file = { path, size: fileStat.size, mtimeMs: fileStat.mtimeMs };
-
-			if (now - fileStat.mtimeMs <= PROTECT_WINDOW_MS) {
-				protectedFiles.push(file);
-			} else {
-				evictableFiles.push(file);
-			}
-		}
-
-		if (evictableFiles.length <= MAX_FILES) {
-			const totalBytes = evictableFiles.reduce((s, f) => s + f.size, 0);
-			if (totalBytes <= MAX_BYTES) return;
-		}
-
-		evictableFiles.sort((a, b) => a.mtimeMs - b.mtimeMs);
-		const keepCount = Math.ceil(MAX_FILES * 0.8);
-		const toRemove = evictableFiles.length - keepCount;
-		for (let index = 0; index < toRemove; index++) {
-			await rm(evictableFiles[index].path, { force: true });
-		}
-
-		if (toRemove > 0) {
-			const remaining = evictableFiles.slice(toRemove);
-			const remainingBytes = remaining.reduce((s, f) => s + f.size, 0);
-			if (remainingBytes > MAX_BYTES) {
-				const overBytes = remainingBytes - MAX_BYTES;
-				let freedBytes = 0;
-				for (const file of remaining) {
-					if (freedBytes >= overBytes) break;
-					await rm(file.path, { force: true });
-					freedBytes += file.size;
-				}
-			}
-		}
-	} catch {
-		// best-effort
-	}
 }

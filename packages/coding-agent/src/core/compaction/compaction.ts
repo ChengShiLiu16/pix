@@ -16,6 +16,7 @@ import {
 	createCustomMessage,
 } from "../messages.ts";
 import { buildSessionContext, type CompactionEntry, type SessionEntry } from "../session-manager.ts";
+import { analyzeSummaryQuality, preserveCriticalAnchors } from "./summary-quality.ts";
 import {
 	computeFileLists,
 	createFileOps,
@@ -909,223 +910,6 @@ export function prepareCompaction(
 	};
 }
 
-/**
- * Word-set Jaccard similarity of two short strings, used to decide whether a
- * key item or anchor survived re-summarization. Naive substring matching
- * over-counts (a short item like "done" matches many lines); comparing the
- * normalized word sets is more robust to reordering and minor edits.
- */
-function itemSimilarity(a: string, b: string): number {
-	const words = (s: string): Set<string> =>
-		new Set(
-			s
-				.toLowerCase()
-				.split(/[^a-z0-9]+/)
-				.filter((w) => w.length > 0),
-		);
-	const wa = words(a);
-	const wb = words(b);
-	if (wa.size === 0 || wb.size === 0) return 0;
-	let intersection = 0;
-	for (const w of wa) {
-		if (wb.has(w)) intersection++;
-	}
-	return intersection / (wa.size + wb.size - intersection);
-}
-
-/** Two anchors are considered the same if equal or one contains the other (guarding tiny strings). */
-function anchorsMatch(a: string, b: string): boolean {
-	if (a === b) return true;
-	const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-	return short.length >= 4 && long.includes(short);
-}
-
-function parseSummarySections(text: string): Map<string, string> {
-	const result = new Map<string, string>();
-	const lines = text.split("\n");
-	let currentSection = "";
-	let currentContent: string[] = [];
-
-	for (const line of lines) {
-		const sectionMatch = line.match(/^##\s+(.+)$/);
-		if (sectionMatch) {
-			if (currentSection) {
-				result.set(currentSection, currentContent.join("\n"));
-			}
-			currentSection = sectionMatch[1].trim();
-			currentContent = [];
-		} else if (currentSection) {
-			currentContent.push(line);
-		}
-	}
-	if (currentSection) {
-		result.set(currentSection, currentContent.join("\n"));
-	}
-	return result;
-}
-
-function extractSummaryItems(sectionText: string): string[] {
-	return sectionText
-		.split("\n")
-		.map((line) => line.trim())
-		.filter((line) => line.startsWith("- ") || line.startsWith("- [") || /^\d+\./u.test(line))
-		.map((line) =>
-			line
-				.replace(/^[-*]\s*\[?[x\s]?\]?\s*/, "")
-				.replace(/^\d+\.\s*/, "")
-				.trim(),
-		)
-		.filter((line) => line.length > 0 && line !== "(none)" && line !== "(none recorded)");
-}
-
-function itemRetention(prevItems: string[], newItems: string[]): number {
-	if (prevItems.length === 0) return 1;
-	let keptItems = 0;
-	for (const prevItem of prevItems) {
-		if (newItems.some((item) => itemSimilarity(prevItem, item) >= 0.5)) {
-			keptItems++;
-		}
-	}
-	return keptItems / prevItems.length;
-}
-
-/**
- * Analyze summary quality by comparing previous and new summaries.
- * Returns metrics for compression ratio, key-item retention, structure
- * preservation, and anchor retention (all ratios in [0, 1] except
- * compressionRatio which is newTokens/prevTokens).
- */
-function analyzeSummaryQuality(
-	previousSummary: string,
-	newSummary: string,
-): {
-	compressionRatio: number;
-	keyItemRetention: number;
-	structurePreservation: number;
-	anchorRetention: number;
-	requiredSectionRetention: number;
-	userConstraintRetention: number;
-	nextStepRetention: number;
-	criticalAnchorCount: number;
-	lostCriticalAnchorCount: number;
-} {
-	const sections = [
-		"Goal",
-		"Constraints & Preferences",
-		"Progress",
-		"Key Decisions",
-		"Next Steps",
-		"Critical Context",
-	];
-
-	const prevSections = parseSummarySections(previousSummary);
-	const newSections = parseSummarySections(newSummary);
-
-	// Compression ratio: output tokens / input tokens
-	const prevTokens = estimateTextTokens(previousSummary);
-	const newTokens = estimateTextTokens(newSummary);
-	const compressionRatio = prevTokens > 0 ? newTokens / prevTokens : 1;
-
-	// Key-item retention: of the previous summary's key items, how many survive
-	// in the new one. Iterating over prev items keeps the ratio bounded to [0, 1]
-	// even when the new summary adds items.
-	let totalItems = 0;
-	let keptItems = 0;
-	for (const section of sections) {
-		const prevItems = extractSummaryItems(prevSections.get(section) ?? "");
-		const newItems = extractSummaryItems(newSections.get(section) ?? "");
-		totalItems += prevItems.length;
-		for (const prevItem of prevItems) {
-			if (newItems.some((n) => itemSimilarity(prevItem, n) >= 0.5)) {
-				keptItems++;
-			}
-		}
-	}
-	const keyItemRetention = totalItems > 0 ? keptItems / totalItems : 1;
-
-	// Structure preservation: sections preserved / total sections
-	const preservedSections = sections.filter((s) => newSections.has(s)).length;
-	const structurePreservation = sections.length > 0 ? preservedSections / sections.length : 1;
-
-	// Anchor retention: anchors preserved / total anchors
-	const prevAnchors = extractCriticalAnchors(previousSummary);
-	const newAnchors = extractCriticalAnchors(newSummary);
-	let keptAnchors = 0;
-	for (const a of prevAnchors) {
-		if (newAnchors.some((n) => anchorsMatch(a, n))) keptAnchors++;
-	}
-	const anchorRetention = prevAnchors.length > 0 ? keptAnchors / prevAnchors.length : 1;
-	const constraintRetention = itemRetention(
-		extractSummaryItems(prevSections.get("Constraints & Preferences") ?? ""),
-		extractSummaryItems(newSections.get("Constraints & Preferences") ?? ""),
-	);
-	const nextStepRetention = itemRetention(
-		extractSummaryItems(prevSections.get("Next Steps") ?? ""),
-		extractSummaryItems(newSections.get("Next Steps") ?? ""),
-	);
-
-	return {
-		compressionRatio,
-		keyItemRetention,
-		structurePreservation,
-		anchorRetention,
-		requiredSectionRetention: structurePreservation,
-		userConstraintRetention: constraintRetention,
-		nextStepRetention,
-		criticalAnchorCount: prevAnchors.length,
-		lostCriticalAnchorCount: prevAnchors.length - keptAnchors,
-	};
-}
-
-const REQUIRED_SUMMARY_SECTIONS = [
-	"Goal",
-	"Constraints & Preferences",
-	"Progress",
-	"Key Decisions",
-	"Next Steps",
-	"Critical Context",
-];
-
-function extractSummarySections(text: string): Set<string> {
-	const sections = new Set<string>();
-	for (const line of text.split("\n")) {
-		const match = /^##\s+(.+)$/u.exec(line);
-		if (match) sections.add(match[1].trim());
-	}
-	return sections;
-}
-
-function extractCriticalAnchors(text: string): string[] {
-	const anchors: string[] = [];
-	anchors.push(
-		...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/gu) ?? []),
-	);
-	anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/gu) ?? []));
-	anchors.push(...(text.match(/"[^"]{10,}"/gu) ?? []));
-	return [...new Set(anchors)].filter((anchor) => anchor.length >= 4);
-}
-
-function ensureSummaryQuality(summary: string, previousSummary: string | undefined): string {
-	let next = summary.trim();
-	const sections = extractSummarySections(next);
-	const missingSections = REQUIRED_SUMMARY_SECTIONS.filter((section) => !sections.has(section));
-	if (missingSections.length > 0) {
-		next += "\n\n";
-		next += missingSections.map((section) => `## ${section}\n- (none recorded)`).join("\n\n");
-	}
-
-	if (!previousSummary) return next;
-	const lostAnchors = extractCriticalAnchors(previousSummary).filter((anchor) => !next.includes(anchor));
-	if (lostAnchors.length === 0) return next;
-	const restored = lostAnchors.slice(0, 20);
-	next += "\n\n## Critical Context Anchors Preserved\n";
-	next += restored.map((anchor) => `- ${anchor}`).join("\n");
-	if (lostAnchors.length > restored.length) {
-		next += `\n- ... ${lostAnchors.length - restored.length} more anchors omitted`;
-	}
-	return next;
-}
-
 // ============================================================================
 // Main compaction function
 // ============================================================================
@@ -1227,10 +1011,12 @@ export async function compact(
 		);
 	}
 
+	const rawSummary = summary;
 	// Compute file lists and append to summary
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary += formatFileOperations(readFiles, modifiedFiles);
-	summary = ensureSummaryQuality(summary, previousSummary);
+	const preservedSummary = preserveCriticalAnchors(summary, previousSummary);
+	summary = preservedSummary.summary;
 
 	if (!firstKeptEntryId) {
 		throw new Error("First kept entry has no UUID - session may need migration");
@@ -1259,7 +1045,7 @@ export async function compact(
 
 		// Emit quality metrics if we have a previous summary
 		if (previousSummary) {
-			const quality = analyzeSummaryQuality(previousSummary, summary);
+			const quality = analyzeSummaryQuality(previousSummary, rawSummary, estimateTextTokens);
 			emitCompactionQuality({
 				sessionId,
 				compressionRatio: quality.compressionRatio,
@@ -1271,6 +1057,7 @@ export async function compact(
 				nextStepRetention: quality.nextStepRetention,
 				criticalAnchorCount: quality.criticalAnchorCount,
 				lostCriticalAnchorCount: quality.lostCriticalAnchorCount,
+				restoredCriticalAnchorCount: preservedSummary.restoredCriticalAnchorCount,
 				compactTemplateUsed,
 				doubleCompactTriggered,
 			});

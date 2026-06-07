@@ -3,6 +3,7 @@ import { Agent, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pix-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
+import { getShellEnv } from "../utils/shell.ts";
 import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
@@ -386,6 +387,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const provider = agent.state.model?.provider ?? "";
 			const next = await optimizeOutgoingContext(messages, {
 				cwd,
+				env: getShellEnv(),
 				contextWindow,
 				provider,
 				sessionId: sessionManager.getSessionId(),

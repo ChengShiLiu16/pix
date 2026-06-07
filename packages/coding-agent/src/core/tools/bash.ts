@@ -17,9 +17,11 @@ import {
 } from "../../utils/shell.ts";
 import {
 	gitEvidenceCache as borrowedGitEvidenceCache,
+	canReuseGitEvidenceWithoutExecuting,
 	createGitEvidenceResult,
 	detectGitInspection,
 	type GitEvidenceDetails,
+	getGitEvidenceCacheKey,
 	isGitEvidenceDisplayText,
 } from "../context-git-evidence.ts";
 import { tryStoreBigOutput } from "../evidence-store.ts";
@@ -327,26 +329,23 @@ export function createBashToolDefinition(
 				);
 			}
 
+			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
+
 			// Git command cache hit: skip execution entirely.
-			// The model often re-runs the same `git show`/`git log` commands;
+			// The model often re-runs the same immutable `git show` commands;
 			// we short-circuit to save time and avoid polluting the evidence store.
-			if (detectGitInspection(command)) {
-				const cachedKey = `${command
-					.replace(/\s+/g, " ")
-					.replace(/\b2>&1\b/g, "")
-					.trim()}\x00${cwd}`;
-				const cached = (
-					borrowedGitEvidenceCache as Map<string, { text: string; details: { gitEvidence?: GitEvidenceDetails } }>
-				).get(cachedKey);
+			if (canReuseGitEvidenceWithoutExecuting(spawnContext.command)) {
+				const cached = borrowedGitEvidenceCache.get(
+					getGitEvidenceCacheKey(spawnContext.command, spawnContext.cwd, spawnContext.env),
+				);
 				if (cached) {
 					return {
 						content: [{ type: "text", text: cached.text }],
-						details: cached.details,
+						details: { gitEvidence: cached.details },
 					};
 				}
 			}
-			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
-			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			const output = new OutputAccumulator({ tempFilePrefix: "pix-bash" });
 			let updateTimer: NodeJS.Timeout | undefined;
 			let updateDirty = false;
@@ -455,13 +454,15 @@ export function createBashToolDefinition(
 				const snapshot = await finishOutput();
 				const { text: outputText, details } = formatOutput(snapshot);
 				if (exitCode !== 0 && exitCode !== null) {
-					const inspection = detectGitInspection(command);
+					const inspection = detectGitInspection(spawnContext.command);
 					if (inspection?.kind === "grep" && exitCode === 1) {
 						const evidence = await createGitEvidenceResult(
-							command,
-							cwd,
+							spawnContext.command,
+							spawnContext.cwd,
 							snapshot.content,
 							details?.fullOutputPath,
+							spawnContext.env,
+							details?.truncation?.truncated === true && details.fullOutputPath === undefined,
 						);
 						if (evidence) {
 							return {
@@ -472,7 +473,14 @@ export function createBashToolDefinition(
 					}
 					throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
 				}
-				const evidence = await createGitEvidenceResult(command, cwd, outputText, details?.fullOutputPath);
+				const evidence = await createGitEvidenceResult(
+					spawnContext.command,
+					spawnContext.cwd,
+					outputText,
+					details?.fullOutputPath,
+					spawnContext.env,
+					details?.truncation?.truncated === true && details.fullOutputPath === undefined,
+				);
 				if (evidence) {
 					return {
 						content: [{ type: "text", text: evidence.text }],
@@ -481,7 +489,7 @@ export function createBashToolDefinition(
 				}
 
 				// Non-git big output: save to .pix/evidence/ and return compact summary.
-				const bigOutput = await tryStoreBigOutput(cwd, outputText, exitCode);
+				const bigOutput = await tryStoreBigOutput(spawnContext.cwd, outputText, exitCode);
 				if (bigOutput) {
 					return {
 						content: [{ type: "text", text: bigOutput.summary }],

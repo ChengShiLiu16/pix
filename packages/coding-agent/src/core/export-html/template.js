@@ -834,7 +834,7 @@
       }
 
       function isGitEvidenceOutput(text) {
-        return /(?:^|\n)(?:Git evidence captured:|==== (?:Evidence: )?git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12} ====|\[Evidence span git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}:)/u.test(text.trimStart());
+        return /(?:^|\n)(?:Git evidence captured:|==== (?:Evidence: |Evidence superseded: )?git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12} ====|\[Evidence span git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}:)/u.test(text.trimStart());
       }
 
       function formatExpandableOutput(text, maxLines, lang) {

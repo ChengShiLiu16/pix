@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pix-agent-core";
 import type { AssistantMessage, Model } from "@earendil-works/pix-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type CompactionPreparation, compact, generateSummary } from "../src/core/compaction/index.ts";
+import { type CompactionPreparation, compact, estimateTokens, generateSummary } from "../src/core/compaction/index.ts";
 
 const { completeSimpleMock, emitCompactionMock, emitCompactionQualityMock } = vi.hoisted(() => ({
 	completeSimpleMock: vi.fn(),
@@ -132,7 +132,11 @@ describe("generateSummary reasoning options", () => {
 			turnPrefixMessages: messages,
 			isSplitTurn: true,
 			tokensBefore: 600000,
-			fileOps: { read: new Set(), written: new Set(), edited: new Set() },
+			fileOps: {
+				read: new Set(["packages/coding-agent/src/core/context-optimizer.ts"]),
+				written: new Set(),
+				edited: new Set(),
+			},
 			settings: { enabled: true, reserveTokens: 500000, keepRecentTokens: 20000 },
 		};
 
@@ -141,7 +145,7 @@ describe("generateSummary reasoning options", () => {
 		expect(completeSimpleMock.mock.calls.map((call) => call[2]?.maxTokens)).toEqual([128000, 128000]);
 	});
 
-	it("preserves required sections and previous critical anchors in compacted summaries", async () => {
+	it("restores previous critical anchors without injecting empty sections", async () => {
 		completeSimpleMock.mockReset();
 		completeSimpleMock.mockResolvedValue({
 			...mockSummaryResponse,
@@ -161,12 +165,15 @@ describe("generateSummary reasoning options", () => {
 
 		const result = await compact(preparation, createModel(false), "test-key");
 
-		expect(result.summary).toContain("## Constraints & Preferences");
-		expect(result.summary).toContain("## Critical Context");
+		// 旧摘要中的关键锚点会被恢复，但恢复区明确要求后续重新验证。
 		expect(result.summary).toContain("## Critical Context Anchors Preserved");
+		expect(result.summary).toContain("re-verify before treating them as current facts");
 		expect(result.summary).toContain("packages/coding-agent/src/core/context-aging.ts");
 		expect(result.summary).toContain("restoreHint()");
 		expect(result.summary).toContain('"Context overflow recovery failed"');
+		// 模型没产出的章节不会用空壳补齐，否则会掩盖结构丢失。
+		expect(result.summary).not.toContain("## Constraints & Preferences");
+		expect(result.summary).not.toContain("(none recorded)");
 	});
 
 	it("emits quality metrics for constraint, next step, and critical anchor retention", async () => {
@@ -218,14 +225,24 @@ describe("generateSummary reasoning options", () => {
 		);
 
 		expect(emitCompactionQualityMock).toHaveBeenCalledTimes(1);
+		// 质量指标基于模型 raw summary 计算；后处理和文件清单都不能把丢失伪装成保留。
 		expect(emitCompactionQualityMock.mock.calls[0][0]).toMatchObject({
 			sessionId: "session-quality",
-			requiredSectionRetention: 1,
+			requiredSectionRetention: expect.closeTo(1 / 6),
 			userConstraintRetention: 0,
 			nextStepRetention: 0,
 			criticalAnchorCount: 2,
-			lostCriticalAnchorCount: 0,
+			lostCriticalAnchorCount: 2,
+			restoredCriticalAnchorCount: 2,
 		});
+	});
+
+	it("re-estimates token counts when a message object is mutated in place", () => {
+		const message = { role: "user" as const, content: "short", timestamp: Date.now() } satisfies AgentMessage;
+		const before = estimateTokens(message);
+		message.content = "x".repeat(1000);
+
+		expect(estimateTokens(message)).toBeGreaterThan(before + 100);
 	});
 });
 
@@ -262,7 +279,7 @@ describe("generateSummary growth bounding (P2-8)", () => {
 	});
 
 	it("switches to the compaction prompt once the previous summary exceeds the soft cap", async () => {
-		// reserveTokens=2000 → soft cap 1000 tokens. 6000 ASCII chars ≈ 1500 tokens.
+		// reserveTokens=2000 时软上限约 1000 tokens；6000 个 ASCII 字符约 1500 tokens。
 		const bigPrev = "x".repeat(6000);
 		await generateSummary(messages, createModel(false), 2000, "test-key", undefined, undefined, undefined, bigPrev);
 		expect(completeSimpleMock).toHaveBeenCalledTimes(1);
@@ -272,14 +289,14 @@ describe("generateSummary growth bounding (P2-8)", () => {
 	});
 
 	it("collapses the summary once when the produced output still exceeds the hard cap", async () => {
-		// reserveTokens=2000 → hard cap 1600 tokens. 7000 ASCII chars ≈ 1750 tokens.
+		// reserveTokens=2000 时硬上限约 1600 tokens；7000 个 ASCII 字符约 1750 tokens。
 		completeSimpleMock.mockReset();
 		completeSimpleMock.mockResolvedValueOnce(longSummaryResponse(7000)).mockResolvedValueOnce(mockSummaryResponse);
 
 		const result = await generateSummary(messages, createModel(false), 2000, "test-key");
 
 		expect(completeSimpleMock).toHaveBeenCalledTimes(2);
-		// The second (collapse) call re-summarizes from scratch: no previous-summary tag.
+		// 第二次 collapse 从头摘要，不携带 previous-summary。
 		const collapseText = promptTextOf(completeSimpleMock.mock.calls[1]);
 		expect(collapseText).toContain("The messages above are a conversation to summarize");
 		expect(collapseText).not.toContain("<previous-summary>");
