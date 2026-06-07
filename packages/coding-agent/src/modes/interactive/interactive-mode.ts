@@ -47,6 +47,7 @@ import {
 	TUI,
 	visibleWidth,
 } from "@earendil-works/pix-tui";
+import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
@@ -84,6 +85,7 @@ import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
+import { hasProjectTrustInputs, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
@@ -119,6 +121,7 @@ import { SettingsSelectorComponent } from "./components/settings-selector.ts";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
+import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import {
@@ -194,6 +197,28 @@ function isUnknownModel(model: Model<any> | undefined): boolean {
 	return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
 }
 
+function quoteIfNeeded(value: string): string {
+	if (value.length > 0 && !/[^a-zA-Z0-9_\-./~:@]/.test(value)) {
+		return value;
+	}
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+export function formatResumeCommand(sessionManager: SessionManager): string | undefined {
+	if (!process.stdout.isTTY) return undefined;
+	if (!sessionManager.isPersisted()) return undefined;
+
+	const sessionFile = sessionManager.getSessionFile();
+	if (!sessionFile || !fs.existsSync(sessionFile)) return undefined;
+
+	const args = [APP_NAME];
+	if (!sessionManager.usesDefaultSessionDir()) {
+		args.push("--session-dir", quoteIfNeeded(sessionManager.getSessionDir()));
+	}
+	args.push("--session", sessionManager.getSessionId());
+	return args.join(" ");
+}
+
 function hasDefaultModelProvider(providerId: string): providerId is keyof typeof defaultModelPerProvider {
 	return providerId in defaultModelPerProvider;
 }
@@ -254,6 +279,7 @@ export class InteractiveMode {
 	private version: string;
 	private isInitialized = false;
 	private onInputCallback?: (text: string) => void;
+	private pendingUserInputs: string[] = [];
 	private loadingAnimation: Loader | undefined = undefined;
 	private workingMessage: string | undefined = undefined;
 	private workingVisible = true;
@@ -1493,6 +1519,7 @@ export class InteractiveMode {
 		const uiContext = this.createExtensionUIContext();
 		await this.session.bindExtensions({
 			uiContext,
+			mode: "tui",
 			abortHandler: () => {
 				this.restoreQueuedMessagesToEditor({ abort: true });
 			},
@@ -1639,6 +1666,7 @@ export class InteractiveMode {
 		// Create a context for shortcut handlers
 		const createContext = (): ExtensionContext => ({
 			ui: this.createExtensionUIContext(),
+			mode: "tui",
 			hasUI: true,
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,
@@ -2586,6 +2614,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/trust") {
+				this.showTrustSelector();
+				this.editor.setText("");
+				return;
+			}
 			if (text === "/login") {
 				this.showOAuthSelector("login");
 				this.editor.setText("");
@@ -2690,6 +2723,8 @@ export class InteractiveMode {
 
 			if (this.onInputCallback) {
 				this.onInputCallback(text);
+			} else {
+				this.pendingUserInputs.push(text);
 			}
 			this.editor.addToHistory?.(text);
 		};
@@ -3131,6 +3166,7 @@ export class InteractiveMode {
 						this.chatContainer.addChild(component);
 						// Render user message separately if present
 						if (skillBlock.userMessage) {
+							this.chatContainer.addChild(new Spacer(1));
 							const userComponent = new UserMessageComponent(
 								skillBlock.userMessage,
 								this.getMarkdownThemeWithSettings(),
@@ -3250,6 +3286,7 @@ export class InteractiveMode {
 			updateFooter: true,
 			populateHistory: true,
 		});
+		this.renderProjectTrustWarningIfNeeded();
 
 		// Show compaction info if session was compacted
 		const allEntries = this.sessionManager.getEntries();
@@ -3260,7 +3297,32 @@ export class InteractiveMode {
 		}
 	}
 
+	private renderProjectTrustWarningIfNeeded(): void {
+		if (this.settingsManager.isProjectTrusted() || !hasProjectTrustInputs(this.sessionManager.getCwd())) {
+			return;
+		}
+
+		if (this.chatContainer.children.length > 0) {
+			this.chatContainer.addChild(new Spacer(1));
+		}
+		this.chatContainer.addChild(
+			new Text(
+				theme.fg(
+					"warning",
+					"This project is not trusted. Project instructions (AGENTS.md/CLAUDE.md), .pi resources, and project packages are ignored. Use /trust to save a trust decision, then restart pi.",
+				),
+				1,
+				0,
+			),
+		);
+	}
+
 	async getUserInput(): Promise<string> {
+		const queuedInput = this.pendingUserInputs.shift();
+		if (queuedInput !== undefined) {
+			return queuedInput;
+		}
+
 		return new Promise((resolve) => {
 			this.onInputCallback = (text: string) => {
 				this.onInputCallback = undefined;
@@ -3301,17 +3363,40 @@ export class InteractiveMode {
 	 */
 	private isShuttingDown = false;
 
-	private async shutdown(): Promise<void> {
+	private async shutdown(options?: { fromSignal?: boolean }): Promise<void> {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
 		this.unregisterSignalHandlers();
 
+		if (options?.fromSignal) {
+			// Signal-triggered shutdown (SIGTERM/SIGHUP). Emit extension cleanup
+			// (session_shutdown) BEFORE touching the terminal. Extension teardown
+			// such as removing sockets does not write to the tty, so it must not be
+			// skipped if a later terminal-restore write fails on a dead or stalled
+			// terminal. If the terminal is gone, the restore writes below emit EIO,
+			// which the stdout/stderr error handler turns into emergencyTerminalExit;
+			// the render loop is already idle, so this cannot hot-spin (see #4144).
+			await this.runtimeHost.dispose();
+			await this.ui.terminal.drainInput(1000);
+			this.stop();
+			process.exit(0);
+		}
+
+		// Interactive quit (Ctrl+D, Ctrl+C, /quit, extension shutdown()). Stop the
+		// TUI before emitting shutdown events so extension UI cleanup cannot repaint
+		// the final frame while the process is exiting.
 		// Drain any in-flight Kitty key release events before stopping.
 		// This prevents escape sequences from leaking to the parent shell over slow SSH.
 		await this.ui.terminal.drainInput(1000);
 
 		this.stop();
 		await this.runtimeHost.dispose();
+
+		const resumeCommand = formatResumeCommand(this.sessionManager);
+		if (resumeCommand) {
+			process.stdout.write(`${chalk.dim("To resume this session:")} ${resumeCommand}\n`);
+		}
+
 		process.exit(0);
 	}
 
@@ -3372,11 +3457,12 @@ export class InteractiveMode {
 
 		for (const signal of signals) {
 			const handler = () => {
-				if (signal === "SIGHUP") {
-					this.emergencyTerminalExit();
-				}
+				// SIGHUP no longer hard-exits: graceful shutdown emits session_shutdown
+				// first, then attempts terminal restore. A genuinely dead terminal
+				// surfaces as an EIO on the restore writes, which the stdout/stderr
+				// error handler converts into emergencyTerminalExit (see #4144, #5080).
 				killTrackedDetachedChildren();
-				void this.shutdown();
+				void this.shutdown({ fromSignal: true });
 			};
 			process.prependListener(signal, handler);
 			this.signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -4134,6 +4220,31 @@ export class InteractiveMode {
 		}
 	}
 
+	private showTrustSelector(): void {
+		const cwd = this.sessionManager.getCwd();
+		const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
+		const savedDecision = trustStore.get(cwd);
+		this.showSelector((done) => {
+			const selector = new TrustSelectorComponent({
+				cwd,
+				savedDecision,
+				projectTrusted: this.settingsManager.isProjectTrusted(),
+				onSelect: (trusted) => {
+					trustStore.set(cwd, trusted);
+					done();
+					this.showStatus(
+						`Saved trust decision: ${trusted ? "trusted" : "untrusted"}. Restart pi for this to take effect.`,
+					);
+				},
+				onCancel: () => {
+					done();
+					this.ui.requestRender();
+				},
+			});
+			return { component: selector, focus: selector };
+		});
+	}
+
 	private showModelSelector(initialSearchInput?: string): void {
 		this.showSelector((done) => {
 			const selector = new ModelSelectorComponent(
@@ -4440,7 +4551,10 @@ export class InteractiveMode {
 			const selector = new SessionSelectorComponent(
 				(onProgress) =>
 					SessionManager.list(this.sessionManager.getCwd(), this.sessionManager.getSessionDir(), onProgress),
-				SessionManager.listAll,
+				(onProgress) =>
+					this.sessionManager.usesDefaultSessionDir()
+						? SessionManager.listAll(onProgress)
+						: SessionManager.listAll(this.sessionManager.getSessionDir(), onProgress),
 				async (sessionPath) => {
 					done();
 					await this.handleResumeSession(sessionPath);

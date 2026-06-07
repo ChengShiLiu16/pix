@@ -33,7 +33,7 @@ If the user's instructions conflict with any rule in this document, ask for expl
 - Always ask before removing functionality or code that appears intentional
 - Do not preserve backward compatibility unless the user asks for it
 - Never hardcode key checks (e.g. `matchesKey(keyData, "ctrl+x")`). Add defaults to `DEFAULT_EDITOR_KEYBINDINGS` or `DEFAULT_APP_KEYBINDINGS` so they stay configurable
-- Never modify `packages/ai/src/models.generated.ts` directly; update `packages/ai/scripts/generate-models.ts` instead
+- Never modify `packages/ai/src/models.generated.ts` directly; update `packages/ai/scripts/generate-models.ts` instead, then regenerate. Including the resulting `models.generated.ts` diff is always OK, even if regeneration includes unrelated upstream model metadata changes.
 - Prefer existing utility functions and patterns in the project
 - Make only the minimum necessary change each time
 - Prefer the `Edit` tool over `Write` when modifying existing files
@@ -59,7 +59,7 @@ Committing:
 - Stage explicit paths (`git add <path1> <path2>`); never `git add -A` / `git add .`
 - Before committing, run `git status` and verify you are only staging your files
 - `packages/ai/src/models.generated.ts` may always be included alongside your files
-- Commit messages in Chinese, format: `type: 中文描述`
+- Commit messages in Chinese, format: `type: 中文描述` (or `{feat,fix,docs}[(ai,tui,agent,coding-agent)]: <message>` for scope-tagged messages)
 - Add `fixes #<number>` or `closes #<number>` for related issues
 - Never force push
 
@@ -130,23 +130,35 @@ Attribution:
    ```bash
    npm run release:local -- --out /tmp/pix-local-release --force
    cd /tmp
+
+   # Node package install smoke tests
    /tmp/pix-local-release/node/pix --help
    /tmp/pix-local-release/node/pix --version
    /tmp/pix-local-release/node/pix --list-models
    /tmp/pix-local-release/node/pix -p "Say exactly: ok"
    /tmp/pix-local-release/node/pix
+
+   # Bun binary smoke tests
    /tmp/pix-local-release/bun-install/pix --help
    /tmp/pix-local-release/bun-install/pix --version
    /tmp/pix-local-release/bun-install/pix --list-models
    /tmp/pix-local-release/bun-install/pix -p "Say exactly: ok"
    /tmp/pix-local-release/bun-install/pix
    ```
+   Verify both Node and Bun startup, model/account listing, interactive startup, and at least one real prompt with the intended default provider. The bare commands `/tmp/pix-local-release/node/pix` and `/tmp/pix-local-release/bun-install/pix` start interactive mode; run each in tmux, submit a prompt, and wait for the model reply before considering the interactive smoke test passed. Failures are release blockers unless the user explicitly accepts the risk.
 
-3. **Verify npm authentication**: run `npm whoami` before starting the release script. If it fails, stop and tell the user to run `npm login` manually first
+3. **Run the release script**:
+   ```bash
+   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:patch    # fixes + additions
+   PI_ALLOW_LOCKFILE_CHANGE=1 npm_config_min_release_age=0 npm run release:minor    # breaking changes
+   ```
+   Use `npm_config_min_release_age=0` only for the release command. The repo's normal npm age gate can otherwise block the release lockfile refresh when the current workspace package version was published recently. Review any lockfile or shrinkwrap diffs the release creates before push.
 
-4. **Brief the user on the WebAuthn flow before running anything**. Print the standard warning message and stop and wait for the user to confirm
+   The release script bumps all package versions, updates changelogs, regenerates release artifacts, runs `npm run check`, commits `Release vX.Y.Z`, tags `vX.Y.Z`, adds fresh `## [Unreleased]` changelog sections, commits `Add [Unreleased] section for next cycle`, then pushes `main` and the tag. Do not rerun the release script after a tag was pushed.
 
-5. **Run the release script**: `npm run release:patch` for fixes + additions, `npm run release:minor` for breaking changes
+4. **CI publishes npm packages**: pushing the `vX.Y.Z` tag triggers `.github/workflows/build-binaries.yml`. The `publish-npm` job uses npm trusted publishing through GitHub Actions OIDC with environment `npm-publish`; no local `npm publish`, `npm whoami`, OTP, or WebAuthn flow is required.
+
+5. **If CI publish fails**: inspect the failed `publish-npm` job. The publish helper is idempotent and skips package versions already present on npm, so rerun the tag workflow after fixing CI or transient npm issues. Do not rerun `npm run release:patch` or `npm run release:minor` for the same version.
 
 6. **After publish succeeds**: add fresh `## [Unreleased]` sections to package changelogs, commit with `Add [Unreleased] section for next cycle`, push `main` and the release tag
 

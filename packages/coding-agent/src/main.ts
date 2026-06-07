@@ -40,6 +40,7 @@ import {
 import { assertValidSessionId, SessionManager } from "./core/session-manager.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { printTimings, resetTimings, time } from "./core/timings.ts";
+import { hasProjectTrustInputs, ProjectTrustStore } from "./core/trust-manager.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
 import { InteractiveMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import { ExtensionSelectorComponent } from "./modes/interactive/components/extension-selector.ts";
@@ -171,7 +172,7 @@ async function resolveSessionPath(sessionArg: string, cwd: string, sessionDir?: 
 	}
 
 	// Try global search across all projects
-	const allSessions = await SessionManager.listAll();
+	const allSessions = await SessionManager.listAll(sessionDir);
 	const globalMatch =
 		allSessions.find((s) => s.id === sessionArg) ?? allSessions.find((s) => s.id.startsWith(sessionArg));
 
@@ -309,7 +310,7 @@ async function createSessionManager(
 		try {
 			const selectedPath = await selectSession(
 				(onProgress) => SessionManager.list(cwd, sessionDir, onProgress),
-				SessionManager.listAll,
+				(onProgress) => SessionManager.listAll(sessionDir, onProgress),
 			);
 			if (!selectedPath) {
 				console.log(chalk.dim("No session selected"));
@@ -425,6 +426,9 @@ function buildSessionOptions(
 	if (parsed.tools) {
 		options.tools = [...parsed.tools];
 	}
+	if (parsed.excludeTools) {
+		options.excludeTools = [...parsed.excludeTools];
+	}
 
 	return { options, cliThinkingFromModel, diagnostics };
 }
@@ -433,10 +437,11 @@ function resolveCliPaths(cwd: string, paths: string[] | undefined): string[] | u
 	return paths?.map((value) => (isLocalPath(value) ? resolvePath(value, cwd) : value));
 }
 
-async function promptForMissingSessionCwd(
-	issue: SessionCwdIssue,
+async function showStartupSelector<T>(
 	settingsManager: SettingsManager,
-): Promise<string | undefined> {
+	title: string,
+	options: Array<{ label: string; value: T }>,
+): Promise<T | undefined> {
 	initTheme(settingsManager.getTheme());
 	setKeybindings(KeybindingsManager.create());
 
@@ -445,7 +450,7 @@ async function promptForMissingSessionCwd(
 		ui.setClearOnShrink(settingsManager.getClearOnShrink());
 
 		let settled = false;
-		const finish = (result: string | undefined) => {
+		const finish = (result: T | undefined) => {
 			if (settled) {
 				return;
 			}
@@ -455,9 +460,9 @@ async function promptForMissingSessionCwd(
 		};
 
 		const selector = new ExtensionSelectorComponent(
-			formatMissingSessionCwdPrompt(issue),
-			["Continue", "Cancel"],
-			(option) => finish(option === "Continue" ? issue.fallbackCwd : undefined),
+			title,
+			options.map((option) => option.label),
+			(option) => finish(options.find((entry) => entry.label === option)?.value),
 			() => finish(undefined),
 			{ tui: ui },
 		);
@@ -465,6 +470,69 @@ async function promptForMissingSessionCwd(
 		ui.setFocus(selector);
 		ui.start();
 	});
+}
+
+async function promptForMissingSessionCwd(
+	issue: SessionCwdIssue,
+	settingsManager: SettingsManager,
+): Promise<string | undefined> {
+	return showStartupSelector(settingsManager, formatMissingSessionCwdPrompt(issue), [
+		{ label: "Continue", value: issue.fallbackCwd },
+		{ label: "Cancel", value: undefined },
+	]);
+}
+
+interface ProjectTrustPromptResult {
+	trusted: boolean;
+	remember: boolean;
+}
+
+async function promptForProjectTrust(
+	cwd: string,
+	settingsManager: SettingsManager,
+): Promise<ProjectTrustPromptResult | undefined> {
+	return showStartupSelector(
+		settingsManager,
+		`Trust project folder?\n${cwd}\n\nThis allows pi to read project instructions (AGENTS.md/CLAUDE.md), load .pi settings and resources, install missing project packages, and execute project extensions.`,
+		[
+			{ label: "Trust", value: { trusted: true, remember: true } },
+			{ label: "Trust (this session only)", value: { trusted: true, remember: false } },
+			{ label: "Do not trust", value: { trusted: false, remember: true } },
+			{ label: "Do not trust (this session only)", value: { trusted: false, remember: false } },
+		],
+	);
+}
+
+async function resolveProjectTrusted(options: {
+	cwd: string;
+	trustStore: ProjectTrustStore;
+	trustOverride?: boolean;
+	appMode: AppMode;
+	settingsManagerForPrompt: SettingsManager;
+}): Promise<boolean> {
+	if (options.trustOverride !== undefined) {
+		return options.trustOverride;
+	}
+	if (!hasProjectTrustInputs(options.cwd)) {
+		return true;
+	}
+
+	const decision = options.trustStore.get(options.cwd);
+	if (decision !== null) {
+		return decision;
+	}
+	if (options.appMode !== "interactive") {
+		return false;
+	}
+
+	const selected = await promptForProjectTrust(options.cwd, options.settingsManagerForPrompt);
+	if (selected !== undefined) {
+		if (selected.remember) {
+			options.trustStore.set(options.cwd, selected.trusted);
+		}
+		return selected.trusted;
+	}
+	return false;
 }
 
 export interface MainOptions {
@@ -568,7 +636,25 @@ export async function main(args: string[], options?: MainOptions) {
 			process.exit(1);
 		}
 	}
+	if (parsed.name !== undefined) {
+		const name = parsed.name.trim();
+		if (!name) {
+			console.error(chalk.red("Error: --name requires a non-empty value"));
+			process.exit(1);
+		}
+		sessionManager.appendSessionInfo(name);
+	}
 	time("createSessionManager");
+
+	const trustStore = new ProjectTrustStore(agentDir);
+	const trustPromptMode: AppMode = parsed.help || parsed.listModels !== undefined ? "print" : appMode;
+	const projectTrustedForSession = await resolveProjectTrusted({
+		cwd: sessionManager.getCwd(),
+		trustStore,
+		trustOverride: parsed.projectTrustOverride,
+		appMode: trustPromptMode,
+		settingsManagerForPrompt: startupSettingsManager,
+	});
 
 	const resolvedExtensionPaths = resolveCliPaths(cwd, parsed.extensions);
 	const resolvedSkillPaths = resolveCliPaths(cwd, parsed.skills);
@@ -581,10 +667,16 @@ export async function main(args: string[], options?: MainOptions) {
 		sessionManager,
 		sessionStartEvent,
 	}) => {
+		const projectTrusted =
+			cwd === sessionManager.getCwd()
+				? projectTrustedForSession
+				: (parsed.projectTrustOverride ?? (!hasProjectTrustInputs(cwd) || trustStore.get(cwd) === true));
+		const runtimeSettingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
 		const services = await createAgentSessionServices({
 			cwd,
 			agentDir,
 			authStorage,
+			settingsManager: runtimeSettingsManager,
 			extensionFlagValues: parsed.unknownFlags,
 			resourceLoaderOptions: {
 				additionalExtensionPaths: resolvedExtensionPaths,
@@ -646,6 +738,7 @@ export async function main(args: string[], options?: MainOptions) {
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
 			tools: sessionOptions.tools,
+			excludeTools: sessionOptions.excludeTools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,
 		});
@@ -666,6 +759,7 @@ export async function main(args: string[], options?: MainOptions) {
 		agentDir,
 		sessionManager,
 	});
+	time("createAgentSessionRuntime");
 	const { services, session, modelFallbackMessage } = runtime;
 	const { settingsManager, modelRegistry, resourceLoader } = services;
 	configureHttpDispatcher(settingsManager.getHttpIdleTimeoutMs());

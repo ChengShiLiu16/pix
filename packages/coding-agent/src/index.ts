@@ -1,5 +1,7 @@
 // Core session management
 
+export { type Args, parseArgs } from "./cli/args.ts";
+
 // Config paths
 export { getAgentDir, VERSION } from "./config.ts";
 export {
@@ -217,6 +219,7 @@ export {
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,
+	type SettingsManagerCreateOptions,
 } from "./core/settings-manager.ts";
 // Skills
 export {
@@ -279,6 +282,7 @@ export {
 	type WriteToolOptions,
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
+export { hasProjectTrustInputs, type ProjectTrustDecision, ProjectTrustStore } from "./core/trust-manager.ts";
 // Main entry point
 export { type MainOptions, main } from "./main.ts";
 // Run modes for programmatic SDK usage
@@ -349,6 +353,7 @@ export {
 // Clipboard utilities
 export { copyToClipboard } from "./utils/clipboard.ts";
 export { parseFrontmatter, stripFrontmatter } from "./utils/frontmatter.ts";
+export { convertToPng } from "./utils/image-convert.ts";
 export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
 // Shell utilities
 export { getShellConfig } from "./utils/shell.ts";

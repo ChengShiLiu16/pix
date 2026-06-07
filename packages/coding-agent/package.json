@@ -1,6 +1,6 @@
 {
 	"name": "@earendil-works/pix-coding-agent",
-	"version": "0.76.0",
+	"version": "0.78.1",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
 	"piConfig": {
@@ -26,6 +26,7 @@
 		"dist",
 		"docs",
 		"examples",
+		"containerization.md",
 		"CHANGELOG.md",
 		"npm-shrinkwrap.json"
 	],
@@ -40,9 +41,9 @@
 		"prepublishOnly": "npm run clean && npm run build && npm run shrinkwrap"
 	},
 	"dependencies": {
-		"@earendil-works/pix-agent-core": "^0.76.0",
-		"@earendil-works/pix-ai": "^0.76.0",
-		"@earendil-works/pix-tui": "^0.76.0",
+		"@earendil-works/pix-agent-core": "^0.78.1",
+		"@earendil-works/pix-ai": "^0.78.1",
+		"@earendil-works/pix-tui": "^0.78.1",
 		"@ff-labs/fff-node": "0.8.4",
 		"@mozilla/readability": "0.6.0",
 		"@silvia-odwyer/photon-node": "0.3.4",
@@ -70,7 +71,7 @@
 		}
 	},
 	"optionalDependencies": {
-		"@mariozechner/clipboard": "0.3.6"
+		"@mariozechner/clipboard": "0.3.9"
 	},
 	"devDependencies": {
 		"@types/cross-spawn": "6.0.6",
@@ -95,7 +96,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi-mono.git",
+		"url": "git+https://github.com/earendil-works/pi.git",
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
