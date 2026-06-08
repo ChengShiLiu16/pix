@@ -2,7 +2,7 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
+import { type AgentMessage, safeJsonStringifyForTokens } from "@earendil-works/pix-agent-core";
 import type { Message } from "@earendil-works/pix-ai";
 
 // ============================================================================
@@ -163,7 +163,7 @@ export function serializeConversation(messages: Message[]): string {
 				} else if (block.type === "toolCall") {
 					const args = block.arguments as Record<string, unknown>;
 					const argsStr = Object.entries(args)
-						.map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+						.map(([k, v]) => `${k}=${safeJsonStringifyForTokens(v)}`)
 						.join(", ");
 					toolCalls.push(`${block.name}(${argsStr})`);
 				}

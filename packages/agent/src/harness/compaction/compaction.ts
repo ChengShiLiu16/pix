@@ -15,6 +15,7 @@ import {
 	extractFileOpsFromMessage,
 	type FileOperations,
 	formatFileOperations,
+	safeJsonStringifyForTokens,
 	serializeConversation,
 } from "./utils.ts";
 
@@ -24,61 +25,6 @@ export interface CompactionDetails {
 	readFiles: string[];
 	/** Files modified in the compacted history. */
 	modifiedFiles: string[];
-}
-
-/**
- * Stringify a value for token estimation, tolerating circular references.
- * Includes depth tracking and type/length info for better token estimates.
- */
-function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
-	const seen = new WeakSet<object>();
-	let truncated = false;
-
-	function stringify(v: unknown, depth: number): string {
-		if (v === null) return "null";
-		if (typeof v !== "object") return JSON.stringify(v);
-		if (depth >= maxDepth) {
-			truncated = true;
-			return typeTag(v);
-		}
-		if (seen.has(v)) {
-			truncated = true;
-			return `[Circular ${typeTag(v)}]`;
-		}
-		seen.add(v);
-		try {
-			if (Array.isArray(v)) {
-				if (v.length === 0) return "[]";
-				const items = v.slice(0, 50).map((x) => stringify(x, depth + 1));
-				if (v.length > 50) {
-					truncated = true;
-					items.push("...");
-				}
-				return `[${items.join(",")}]`;
-			}
-			const keys = Object.keys(v);
-			if (keys.length === 0) return "{}";
-			const entries = keys
-				.slice(0, 30)
-				.map((k) => `${JSON.stringify(k)}:${stringify((v as Record<string, unknown>)[k], depth + 1)}`);
-			if (keys.length > 30) {
-				truncated = true;
-				entries.push("...");
-			}
-			return `{${entries.join(",")}}`;
-		} finally {
-			seen.delete(v);
-		}
-	}
-
-	const result = stringify(value, 0);
-	return truncated ? `${result}⟪truncated⟫` : result;
-}
-
-function typeTag(v: object): string {
-	const ctor = v.constructor?.name ?? "Object";
-	if (Array.isArray(v)) return `Array[${v.length}]`;
-	return ctor;
 }
 
 function extractFileOperations(
@@ -790,7 +736,7 @@ Summarize the prefix to provide context for the retained suffix:
 
 Be concise. Focus on what's needed to understand the kept suffix.`;
 
-export { serializeConversation } from "./utils.ts";
+export { safeJsonStringifyForTokens, serializeConversation } from "./utils.ts";
 
 /** Generate compaction summary data from prepared session history. */
 export async function compact(

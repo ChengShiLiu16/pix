@@ -22,6 +22,7 @@ export {
 	generateSummary,
 	getLastAssistantUsage,
 	prepareCompaction,
+	safeJsonStringifyForTokens,
 	serializeConversation,
 	shouldCompact,
 } from "./harness/compaction/compaction.ts";
