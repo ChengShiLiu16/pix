@@ -400,7 +400,7 @@ describe("ModelRegistry", () => {
 			}
 		});
 
-		test("model schema accepts thinkingLevelMap and compat schema accepts supportsStrictMode and cacheControlFormat", () => {
+		test("model schema accepts thinkingLevelMap and OpenAI completions compat fields", () => {
 			writeRawModelsJson({
 				demo: {
 					baseUrl: "https://example.com/v1",
@@ -421,6 +421,7 @@ describe("ModelRegistry", () => {
 							compat: {
 								supportsStrictMode: false,
 								cacheControlFormat: "anthropic",
+								contentThinkingTags: "xml",
 							},
 						},
 					],
@@ -435,6 +436,7 @@ describe("ModelRegistry", () => {
 			expect(model?.thinkingLevelMap).toEqual({ minimal: null, high: "max" });
 			expect(compat?.supportsStrictMode).toBe(false);
 			expect(compat?.cacheControlFormat).toBe("anthropic");
+			expect(compat?.contentThinkingTags).toBe("xml");
 		});
 
 		test("compat schema accepts Anthropic eager tool input streaming flag", () => {

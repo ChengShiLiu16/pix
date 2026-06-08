@@ -108,6 +108,99 @@ function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention 
 	return "short";
 }
 
+const CONTENT_THINKING_OPEN_TAG = "<thinking>";
+const CONTENT_THINKING_CLOSE_TAG = "</thinking>";
+const CONTENT_THINKING_SIGNATURE = "content_thinking_tags";
+
+interface ContentThinkingTagParserState {
+	inThinking: boolean;
+	buffer: string;
+}
+
+type ContentThinkingTagEvent =
+	| { type: "text"; delta: string }
+	| { type: "thinking_enter" }
+	| { type: "thinking"; delta: string }
+	| { type: "thinking_exit" };
+
+function createContentThinkingTagParserState(): ContentThinkingTagParserState {
+	return { inThinking: false, buffer: "" };
+}
+
+function parseContentThinkingTags(state: ContentThinkingTagParserState, content: string): ContentThinkingTagEvent[] {
+	state.buffer += content;
+	return drainContentThinkingTagParser(state, false);
+}
+
+function flushContentThinkingTagParser(state: ContentThinkingTagParserState): ContentThinkingTagEvent[] {
+	const events = drainContentThinkingTagParser(state, true);
+	state.buffer = "";
+	return events;
+}
+
+function drainContentThinkingTagParser(
+	state: ContentThinkingTagParserState,
+	flush: boolean,
+): ContentThinkingTagEvent[] {
+	const events: ContentThinkingTagEvent[] = [];
+	while (state.buffer.length > 0) {
+		if (!state.inThinking) {
+			const openIndex = state.buffer.indexOf(CONTENT_THINKING_OPEN_TAG);
+			if (openIndex !== -1) {
+				pushContentThinkingTagDelta(events, "text", state.buffer.slice(0, openIndex));
+				state.buffer = state.buffer.slice(openIndex + CONTENT_THINKING_OPEN_TAG.length);
+				state.inThinking = true;
+				events.push({ type: "thinking_enter" });
+				continue;
+			}
+
+			const safeLength = flush ? state.buffer.length : getSafePrefixLength(state.buffer, CONTENT_THINKING_OPEN_TAG);
+			if (safeLength === 0) break;
+			pushContentThinkingTagDelta(events, "text", state.buffer.slice(0, safeLength));
+			state.buffer = state.buffer.slice(safeLength);
+			continue;
+		}
+
+		const closeIndex = state.buffer.indexOf(CONTENT_THINKING_CLOSE_TAG);
+		if (closeIndex !== -1) {
+			pushContentThinkingTagDelta(events, "thinking", state.buffer.slice(0, closeIndex));
+			state.buffer = state.buffer.slice(closeIndex + CONTENT_THINKING_CLOSE_TAG.length);
+			state.inThinking = false;
+			events.push({ type: "thinking_exit" });
+			continue;
+		}
+
+		const safeLength = flush ? state.buffer.length : getSafePrefixLength(state.buffer, CONTENT_THINKING_CLOSE_TAG);
+		if (safeLength === 0) break;
+		pushContentThinkingTagDelta(events, "thinking", state.buffer.slice(0, safeLength));
+		state.buffer = state.buffer.slice(safeLength);
+	}
+	return events;
+}
+
+function getSafePrefixLength(buffer: string, tag: string): number {
+	for (let length = Math.min(buffer.length, tag.length - 1); length > 0; length--) {
+		if (tag.startsWith(buffer.slice(buffer.length - length))) {
+			return buffer.length - length;
+		}
+	}
+	return buffer.length;
+}
+
+function pushContentThinkingTagDelta(
+	events: ContentThinkingTagEvent[],
+	type: "text" | "thinking",
+	delta: string,
+): void {
+	if (delta.length > 0) {
+		if (type === "text") {
+			events.push({ type: "text", delta });
+		} else {
+			events.push({ type: "thinking", delta });
+		}
+	}
+}
+
 export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenAICompletionsOptions> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -168,6 +261,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 
 			let textBlock: TextContent | null = null;
 			let thinkingBlock: ThinkingContent | null = null;
+			const contentThinkingTagState = createContentThinkingTagParserState();
 			let hasFinishReason = false;
 			const toolCallBlocksByIndex = new Map<number, StreamingToolCallBlock>();
 			const toolCallBlocksById = new Map<string, StreamingToolCallBlock>();
@@ -215,7 +309,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				return textBlock;
 			};
 			const ensureThinkingBlock = (thinkingSignature: string) => {
-				if (!thinkingBlock) {
+				if (!thinkingBlock || thinkingBlock.thinkingSignature !== thinkingSignature) {
 					thinkingBlock = {
 						type: "thinking",
 						thinking: "",
@@ -225,6 +319,48 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 					stream.push({ type: "thinking_start", contentIndex: getContentIndex(thinkingBlock), partial: output });
 				}
 				return thinkingBlock;
+			};
+			const emitTextDelta = (delta: string) => {
+				const block = ensureTextBlock();
+				block.text += delta;
+				stream.push({
+					type: "text_delta",
+					contentIndex: getContentIndex(block),
+					delta,
+					partial: output,
+				});
+			};
+			const emitThinkingDelta = (delta: string, thinkingSignature: string) => {
+				const block = ensureThinkingBlock(thinkingSignature);
+				block.thinking += delta;
+				stream.push({
+					type: "thinking_delta",
+					contentIndex: getContentIndex(block),
+					delta,
+					partial: output,
+				});
+			};
+			const emitContentThinkingTagEvent = (event: ContentThinkingTagEvent) => {
+				if (event.type === "text") {
+					emitTextDelta(event.delta);
+				} else if (event.type === "thinking_enter") {
+					textBlock = null;
+					thinkingBlock = null;
+				} else if (event.type === "thinking") {
+					textBlock = null;
+					emitThinkingDelta(event.delta, CONTENT_THINKING_SIGNATURE);
+				} else {
+					thinkingBlock = null;
+				}
+			};
+			const emitContentDelta = (delta: string) => {
+				if (compat.contentThinkingTags !== "xml") {
+					emitTextDelta(delta);
+					return;
+				}
+				for (const event of parseContentThinkingTags(contentThinkingTagState, delta)) {
+					emitContentThinkingTagEvent(event);
+				}
 			};
 			const ensureToolCallBlock = (toolCall: StreamingToolCallDelta) => {
 				const streamIndex = typeof toolCall.index === "number" ? toolCall.index : undefined;
@@ -301,14 +437,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 						choice.delta.content !== undefined &&
 						choice.delta.content.length > 0
 					) {
-						const block = ensureTextBlock();
-						block.text += choice.delta.content;
-						stream.push({
-							type: "text_delta",
-							contentIndex: getContentIndex(block),
-							delta: choice.delta.content,
-							partial: output,
-						});
+						emitContentDelta(choice.delta.content);
 					}
 
 					// Some endpoints return reasoning in reasoning_content (llama.cpp),
@@ -333,14 +462,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 								model.provider === "opencode-go" && foundReasoningField === "reasoning"
 									? "reasoning_content"
 									: foundReasoningField;
-							const block = ensureThinkingBlock(thinkingSignature);
-							block.thinking += delta;
-							stream.push({
-								type: "thinking_delta",
-								contentIndex: getContentIndex(block),
-								delta,
-								partial: output,
-							});
+							emitThinkingDelta(delta, thinkingSignature);
 						}
 					}
 
@@ -383,6 +505,12 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 							}
 						}
 					}
+				}
+			}
+
+			if (compat.contentThinkingTags === "xml") {
+				for (const event of flushContentThinkingTagParser(contentThinkingTagState)) {
+					emitContentThinkingTagEvent(event);
 				}
 			}
 
@@ -1126,6 +1254,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		requiresToolResultName: false,
 		requiresAssistantAfterToolResult: false,
 		requiresThinkingAsText: false,
+		contentThinkingTags: "none",
 		requiresReasoningContentOnAssistantMessages: isDeepSeek,
 		thinkingFormat: isDeepSeek
 			? "deepseek"
@@ -1172,6 +1301,7 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		requiresAssistantAfterToolResult:
 			model.compat.requiresAssistantAfterToolResult ?? detected.requiresAssistantAfterToolResult,
 		requiresThinkingAsText: model.compat.requiresThinkingAsText ?? detected.requiresThinkingAsText,
+		contentThinkingTags: model.compat.contentThinkingTags ?? detected.contentThinkingTags,
 		requiresReasoningContentOnAssistantMessages:
 			model.compat.requiresReasoningContentOnAssistantMessages ??
 			detected.requiresReasoningContentOnAssistantMessages,

@@ -30,6 +30,7 @@ const compat = {
 	requiresToolResultName: false,
 	requiresAssistantAfterToolResult: false,
 	requiresThinkingAsText: true,
+	contentThinkingTags: "none",
 	requiresReasoningContentOnAssistantMessages: false,
 	thinkingFormat: "openai",
 	openRouterRouting: {},
