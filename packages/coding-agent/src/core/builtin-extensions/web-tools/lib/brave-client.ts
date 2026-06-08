@@ -1,5 +1,6 @@
 import { WebToolsError } from "./errors.ts";
 import { createTimeoutSignal, defaultFetch } from "./http.ts";
+import { normalizePotentiallyPublicHttpUrl } from "./safety.ts";
 import type { FetchLike, WebSearchResultItem } from "./types.ts";
 
 type BraveSearchRequest = {
@@ -12,6 +13,8 @@ type BraveSearchRequest = {
 	fetchFn?: FetchLike;
 	signal?: AbortSignal;
 };
+
+const ERROR_BODY_MAX_CHARS = 2000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -26,13 +29,20 @@ function braveResultFromUnknown(value: unknown, rank: number): WebSearchResultIt
 	const title = stringValue(value.title) ?? "Untitled";
 	const url = stringValue(value.url);
 	if (!url) return undefined;
+	const safeUrl = normalizePotentiallyPublicHttpUrl(url);
+	if (!safeUrl) return undefined;
 	return {
 		rank,
 		title,
-		url,
+		url: safeUrl,
 		snippet: stringValue(value.description) ?? "",
 		age: stringValue(value.age) ?? stringValue(value.page_age),
 	};
+}
+
+function truncateErrorText(text: string): string {
+	if (text.length <= ERROR_BODY_MAX_CHARS) return text;
+	return `${text.slice(0, ERROR_BODY_MAX_CHARS)}\n[... ${text.length - ERROR_BODY_MAX_CHARS} more characters truncated]`;
 }
 
 export async function fetchBraveSearchResults(request: BraveSearchRequest): Promise<WebSearchResultItem[]> {
@@ -58,7 +68,7 @@ export async function fetchBraveSearchResults(request: BraveSearchRequest): Prom
 		);
 
 		if (!response.ok) {
-			const errorText = await response.text();
+			const errorText = truncateErrorText(await response.text());
 			throw new WebToolsError(
 				`Brave Search request failed: HTTP ${response.status} ${response.statusText}${errorText ? `\n${errorText}` : ""}`,
 			);
@@ -67,10 +77,14 @@ export async function fetchBraveSearchResults(request: BraveSearchRequest): Prom
 		const data: unknown = await response.json();
 		const web = isRecord(data) && isRecord(data.web) ? data.web : undefined;
 		const rawResults = Array.isArray(web?.results) ? web.results : [];
-		return rawResults
-			.map((item, index) => braveResultFromUnknown(item, index + 1))
-			.filter((item): item is WebSearchResultItem => item !== undefined)
-			.slice(0, request.count);
+		const results: WebSearchResultItem[] = [];
+		for (const item of rawResults) {
+			const result = braveResultFromUnknown(item, results.length + 1);
+			if (!result) continue;
+			results.push(result);
+			if (results.length >= request.count) break;
+		}
+		return results;
 	} finally {
 		timeout.cleanup();
 	}

@@ -1,3 +1,6 @@
+import type { Dispatcher } from "undici";
+import type { ResolveHost } from "./safety.ts";
+
 export type WebToolsEnv = Record<string, string | undefined>;
 
 export type WebToolsConfig = {
@@ -61,5 +64,7 @@ export type WebSearchOptions = {
 export type WebFetchOptions = {
 	config?: WebToolsConfig;
 	fetchFn?: FetchLike;
+	resolveHost?: ResolveHost;
+	dispatcherFactory?: (url: URL, addresses: string[]) => Dispatcher;
 	signal?: AbortSignal;
 };

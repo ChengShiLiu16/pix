@@ -1,17 +1,38 @@
+import { buildConnector, type Dispatcher, Pool, fetch as undiciFetch } from "undici";
 import { getWebToolsConfig, normalizeMaxChars } from "./config.ts";
 import { WebToolsError } from "./errors.ts";
-import { createTimeoutSignal, defaultFetch } from "./http.ts";
+import { createTimeoutSignal } from "./http.ts";
 import { extractReadableContent, plainContent, truncateContent } from "./markdown.ts";
-import { assertPublicHttpUrl } from "./safety.ts";
+import { parseHttpUrl, resolvePublicHttpUrl } from "./safety.ts";
 import type { FetchLike, WebFetchInput, WebFetchOptions, WebFetchResult } from "./types.ts";
 
 type FetchResponse = {
 	response: Response;
 	finalUrl: string;
+	cleanup?: () => Promise<void>;
+};
+
+type FetchWithPinningOptions = {
+	fetchFn?: FetchLike;
+	resolveHost?: WebFetchOptions["resolveHost"];
+	dispatcherFactory?: WebFetchOptions["dispatcherFactory"];
+};
+
+type FetchPinnedResponse = {
+	response: Response;
+	cleanup?: () => Promise<void>;
 };
 
 const MAX_REDIRECTS = 5;
 const STREAM_BYTE_LIMIT = 1024 * 1024; // 1MB — 防止撑爆内存
+
+async function cancelResponseBody(response: Response): Promise<void> {
+	try {
+		await response.body?.cancel();
+	} catch {
+		/* ignore */
+	}
+}
 
 /**
  * 流式读取响应体，最多读 STREAM_BYTE_LIMIT 字节后取消连接。
@@ -21,6 +42,7 @@ async function readBodyWithLimit(response: Response): Promise<{ text: string; tr
 	// Quick check: content-length 明显超限，不等 stream 直接拒绝
 	const contentLength = response.headers.get("content-length");
 	if (contentLength && Number.parseInt(contentLength, 10) > STREAM_BYTE_LIMIT) {
+		await cancelResponseBody(response);
 		throw new WebToolsError(`Response too large (${contentLength} bytes, limit ${STREAM_BYTE_LIMIT})`);
 	}
 
@@ -53,7 +75,7 @@ async function readBodyWithLimit(response: Response): Promise<{ text: string; tr
 	const truncated = totalBytes >= STREAM_BYTE_LIMIT;
 	if (truncated) {
 		try {
-			reader.cancel();
+			await reader.cancel();
 		} catch {
 			/* ignore */
 		}
@@ -83,26 +105,94 @@ function isHtmlContent(contentType: string | undefined): boolean {
 	);
 }
 
-async function fetchWithRedirects(url: URL, fetchFn: FetchLike, signal: AbortSignal): Promise<FetchResponse> {
+function isTextualContent(contentType: string | undefined): boolean {
+	if (!contentType) return true;
+	const mediaType = contentType.split(";", 1)[0]?.trim().toLowerCase();
+	if (!mediaType) return true;
+	if (mediaType.startsWith("text/")) return true;
+	if (mediaType.endsWith("+json") || mediaType.endsWith("+xml")) return true;
+	return (
+		mediaType === "application/json" ||
+		mediaType === "application/javascript" ||
+		mediaType === "application/ecmascript" ||
+		mediaType === "application/xml" ||
+		mediaType === "application/xhtml+xml" ||
+		mediaType === "image/svg+xml"
+	);
+}
+
+function createPinnedDispatcher(url: URL, addresses: string[]): Dispatcher {
+	let nextAddress = 0;
+	const connector = buildConnector({
+		allowH2: false,
+		servername: url.hostname,
+	});
+	return new Pool(url.origin, {
+		connections: 1,
+		connect(connectOptions, callback) {
+			const address = addresses[nextAddress % addresses.length];
+			nextAddress++;
+			connector({ ...connectOptions, hostname: address, servername: url.hostname }, callback);
+		},
+	});
+}
+
+async function fetchPinnedUrl(
+	url: URL,
+	addresses: string[],
+	signal: AbortSignal,
+	options: FetchWithPinningOptions,
+): Promise<FetchPinnedResponse> {
+	const headers = {
+		"User-Agent": "Pi-Web-Tools/0.1 (+https://github.com/badlogic/pi-skills)",
+		Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8",
+	};
+	if (options.fetchFn) {
+		return {
+			response: await options.fetchFn(url, {
+				redirect: "manual",
+				headers,
+				signal,
+			}),
+		};
+	}
+	const dispatcher = options.dispatcherFactory?.(url, addresses) ?? createPinnedDispatcher(url, addresses);
+	try {
+		const response = (await undiciFetch(url, {
+			redirect: "manual",
+			headers,
+			signal,
+			dispatcher,
+		})) as unknown as Response;
+		return {
+			response,
+			cleanup: () => dispatcher.close(),
+		};
+	} catch (error) {
+		await dispatcher.close();
+		throw error;
+	}
+}
+
+async function fetchWithRedirects(
+	url: URL,
+	signal: AbortSignal,
+	options: FetchWithPinningOptions,
+): Promise<FetchResponse> {
 	let current = url;
 	for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-		await assertPublicHttpUrl(current.toString());
-		const response = await fetchFn(current, {
-			redirect: "manual",
-			headers: {
-				"User-Agent": "Pi-Web-Tools/0.1 (+https://github.com/badlogic/pi-skills)",
-				Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8",
-			},
-			signal,
-		});
+		const publicUrl = await resolvePublicHttpUrl(current.toString(), options.resolveHost);
+		const { response, cleanup } = await fetchPinnedUrl(publicUrl.url, publicUrl.addresses, signal, options);
 
 		const location = response.headers.get("location");
 		if (response.status >= 300 && response.status < 400 && location) {
-			current = await assertPublicHttpUrl(new URL(location, current).toString());
+			await cancelResponseBody(response);
+			await cleanup?.();
+			current = new URL(location, current);
 			continue;
 		}
 
-		return { response, finalUrl: current.toString() };
+		return { response, finalUrl: current.toString(), cleanup };
 	}
 
 	throw new WebToolsError(`Too many redirects while fetching ${url.toString()}`);
@@ -110,22 +200,30 @@ async function fetchWithRedirects(url: URL, fetchFn: FetchLike, signal: AbortSig
 
 export async function webFetch(input: WebFetchInput, options: WebFetchOptions = {}): Promise<WebFetchResult> {
 	const config = options.config ?? getWebToolsConfig();
-	const initialUrl = await assertPublicHttpUrl(input.url.trim());
+	const initialUrl = parseHttpUrl(input.url.trim());
 	const maxChars = normalizeMaxChars(input.maxChars, config.defaultFetchMaxChars, config.maxFetchMaxChars);
 	const format = normalizeFormat(input.format);
 	const timeout = createTimeoutSignal(options.signal, config.fetchTimeoutMs);
+	let cleanup: (() => Promise<void>) | undefined;
 
 	try {
-		const { response, finalUrl } = await fetchWithRedirects(
-			initialUrl,
-			options.fetchFn ?? defaultFetch(),
-			timeout.signal,
-		);
+		const fetched = await fetchWithRedirects(initialUrl, timeout.signal, {
+			fetchFn: options.fetchFn,
+			resolveHost: options.resolveHost,
+			dispatcherFactory: options.dispatcherFactory,
+		});
+		const { response, finalUrl } = fetched;
+		cleanup = fetched.cleanup;
 		if (!response.ok) {
+			await cancelResponseBody(response);
 			throw new WebToolsError(`/web failed to fetch page: HTTP ${response.status} ${response.statusText}`);
 		}
 
 		const contentType = response.headers.get("content-type") ?? undefined;
+		if (!isTextualContent(contentType)) {
+			await cancelResponseBody(response);
+			throw new WebToolsError(`/web only supports textual responses, got ${contentType}.`);
+		}
 		const { text: raw, truncated: bodyTruncated } = await readBodyWithLimit(response);
 		if (!isHtmlContent(contentType)) {
 			const plain = plainContent(raw, maxChars);
@@ -149,6 +247,7 @@ export async function webFetch(input: WebFetchInput, options: WebFetchOptions = 
 			truncated: truncated.truncated || bodyTruncated,
 		};
 	} finally {
+		await cleanup?.();
 		timeout.cleanup();
 	}
 }
