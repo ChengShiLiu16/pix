@@ -13,6 +13,7 @@ import { Text } from "@earendil-works/pix-tui";
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import {
+	ASK_USER_QUESTION_CUSTOM_INPUT_OPTION,
 	ASK_USER_QUESTION_PROMPT_GUIDELINES,
 	ASK_USER_QUESTION_STATE_FILE,
 	ASK_USER_QUESTION_TOOL_NAME,
@@ -20,8 +21,10 @@ import {
 	type AskUserQuestionInput,
 	askUserQuestionStatusText,
 	buildAskUserQuestionLabel,
+	buildAskUserQuestionOptions,
 	DEFAULT_ASK_USER_QUESTION_ENABLED,
 	disabledToolMessage,
+	formatAskUserQuestionResultText,
 	normalizeAskUserQuestionInput,
 	parseAskUserQuestionCommand,
 } from "./lib/ask-user-question.ts";
@@ -130,7 +133,7 @@ export function builtin(pi: ExtensionAPI) {
 				}
 				const details = result.details;
 				if (!details) return EMPTY;
-				return renderToolText(details.cancelled ? "用户已取消选择" : `用户选择：${details.selected}`, theme);
+				return renderToolText(formatAskUserQuestionResultText(details), theme);
 			},
 			async execute(
 				_toolCallId: string,
@@ -167,17 +170,32 @@ export function builtin(pi: ExtensionAPI) {
 				}
 
 				const { question, details, options } = normalized.value;
-				const selected = await ctx.ui.select(buildAskUserQuestionLabel(question, details), options);
+				const presented = buildAskUserQuestionOptions(options);
+				const selectedOption = await ctx.ui.select(buildAskUserQuestionLabel(question, details), presented.options);
+				// 按位置识别自定义输入入口，避免依赖选项文案内容；展示文案可自由调整而不影响判定。
+				const choseCustomInput =
+					selectedOption !== undefined && presented.options.indexOf(selectedOption) === presented.customInputIndex;
+				let selected = selectedOption;
+
+				if (choseCustomInput) {
+					const customValue = await ctx.ui.input(ASK_USER_QUESTION_CUSTOM_INPUT_OPTION, "输入你的回复");
+					const trimmed = customValue?.trim();
+					selected = trimmed && trimmed.length > 0 ? trimmed : undefined;
+				}
+
 				const cancelled = !selected;
 				const toolDetails: AskUserQuestionDetails = {
 					question,
-					options,
+					options: presented.options,
 					selected,
 					cancelled,
 				};
+				if (choseCustomInput && !cancelled) {
+					toolDetails.customInput = true;
+				}
 
 				return {
-					content: [{ type: "text", text: cancelled ? "用户已取消选择" : `用户选择：${selected}` }],
+					content: [{ type: "text", text: formatAskUserQuestionResultText(toolDetails) }],
 					details: toolDetails,
 				};
 			},

@@ -2,6 +2,7 @@ export const ASK_USER_QUESTION_TOOL_NAME = "ask_user_question";
 export const ASK_USER_QUESTION_STATE_FILE = "ask-user-question.json";
 export const DEFAULT_ASK_USER_QUESTION_ENABLED = true;
 export const MAX_QUESTION_OPTIONS = 8;
+export const ASK_USER_QUESTION_CUSTOM_INPUT_OPTION = "自定义输入";
 
 export interface AskUserQuestionInput {
 	question: string;
@@ -20,6 +21,7 @@ export interface AskUserQuestionDetails {
 	options: string[];
 	selected?: string;
 	cancelled: boolean;
+	customInput?: boolean;
 }
 
 export type AskUserQuestionCommandAction = "on" | "off" | "status";
@@ -30,6 +32,7 @@ export const ASK_USER_QUESTION_PROMPT_GUIDELINES = [
 	"典型不触发：只读查看、搜索、diff/status、低风险且用户已明确授权的实现细节、常规测试或格式化。",
 	"调用 ask_user_question 的同一轮 assistant 消息不得调用任何其他工具；先问一个问题，等待工具结果，再继续。",
 	"选项应简短、互斥、可执行，通常 2-5 个；如果用户可以拒绝，提供“取消”或“不执行”选项。",
+	"不要手动添加“自定义输入”选项；Pi UI 会自动在取消类选项前提供用户自定义输入入口。",
 	"拿到工具结果后，只有当 selected 明确授权后才能继续；cancelled=true 或未选择时必须停止并说明已取消。",
 ];
 
@@ -65,6 +68,37 @@ export function normalizeAskUserQuestionInput(
 			details,
 		},
 	};
+}
+
+// 取消类选项关键字：自定义输入入口会插在第一个取消类选项之前，使“取消”保持在末尾。
+// 集中维护、可扩展；采用精确匹配（规范化后全等），避免前缀匹配带来的中英文口径不一致与误判。
+export const CANCEL_OPTION_KEYWORDS: readonly string[] = ["cancel", "abort", "取消", "不执行", "不继续", "停止"];
+
+function isCancelOption(option: string): boolean {
+	return CANCEL_OPTION_KEYWORDS.includes(option.trim().toLowerCase());
+}
+
+export function isAskUserQuestionCustomInputOption(option: string): boolean {
+	return option.trim() === ASK_USER_QUESTION_CUSTOM_INPUT_OPTION;
+}
+
+export interface PresentedAskUserQuestionOptions {
+	options: string[];
+	customInputIndex: number;
+}
+
+export function buildAskUserQuestionOptions(options: string[]): PresentedAskUserQuestionOptions {
+	const withoutCustomInput = options.filter((option) => !isAskUserQuestionCustomInputOption(option));
+	const cancelIndex = withoutCustomInput.findIndex(isCancelOption);
+	const customInputIndex = cancelIndex === -1 ? withoutCustomInput.length : cancelIndex;
+	const result = [...withoutCustomInput];
+	result.splice(customInputIndex, 0, ASK_USER_QUESTION_CUSTOM_INPUT_OPTION);
+	return { options: result, customInputIndex };
+}
+
+export function formatAskUserQuestionResultText(details: AskUserQuestionDetails): string {
+	if (details.cancelled) return "用户已取消选择";
+	return details.customInput ? `用户自定义输入：${details.selected}` : `用户选择：${details.selected}`;
 }
 
 export function buildAskUserQuestionLabel(question: string, details?: string): string {
