@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from "fs";
+import { readFileSync, writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
@@ -190,6 +190,14 @@ const OPENAI_RESPONSES_NONE_REASONING_MODELS = new Set([
 
 function mergeThinkingLevelMap(model: Model<any>, map: NonNullable<Model<any>["thinkingLevelMap"]>): void {
 	model.thinkingLevelMap = { ...model.thinkingLevelMap, ...map };
+}
+
+function formatGeneratedNumber(value: number): string {
+	if (!Number.isFinite(value)) {
+		return "0";
+	}
+	const rounded = Math.round((value + Number.EPSILON) * 1_000_000_000_000) / 1_000_000_000_000;
+	return String(Object.is(rounded, -0) ? 0 : rounded);
 }
 
 function getTogetherCompat(modelId: string, reasoning: boolean): OpenAICompletionsCompat {
@@ -2168,13 +2176,13 @@ export const MODELS = {
 			}
 			output += `\t\t\tinput: [${model.input.map(i => `"${i}"`).join(", ")}],\n`;
 			output += `\t\t\tcost: {\n`;
-			output += `\t\t\t\tinput: ${model.cost.input},\n`;
-			output += `\t\t\t\toutput: ${model.cost.output},\n`;
-			output += `\t\t\t\tcacheRead: ${model.cost.cacheRead},\n`;
-			output += `\t\t\t\tcacheWrite: ${model.cost.cacheWrite},\n`;
+			output += `\t\t\t\tinput: ${formatGeneratedNumber(model.cost.input)},\n`;
+			output += `\t\t\t\toutput: ${formatGeneratedNumber(model.cost.output)},\n`;
+			output += `\t\t\t\tcacheRead: ${formatGeneratedNumber(model.cost.cacheRead)},\n`;
+			output += `\t\t\t\tcacheWrite: ${formatGeneratedNumber(model.cost.cacheWrite)},\n`;
 			output += `\t\t\t},\n`;
-			output += `\t\t\tcontextWindow: ${model.contextWindow},\n`;
-			output += `\t\t\tmaxTokens: ${model.maxTokens},\n`;
+			output += `\t\t\tcontextWindow: ${formatGeneratedNumber(model.contextWindow)},\n`;
+			output += `\t\t\tmaxTokens: ${formatGeneratedNumber(model.maxTokens)},\n`;
 			output += `\t\t} satisfies Model<"${model.api}">,\n`;
 		}
 
@@ -2184,9 +2192,19 @@ export const MODELS = {
 	output += `} as const;
 `;
 
-	// Write file
-	writeFileSync(join(packageRoot, "src/models.generated.ts"), output);
-	console.log("Generated src/models.generated.ts");
+	const outputPath = join(packageRoot, "src/models.generated.ts");
+	if (process.argv.includes("--check")) {
+		const current = readFileSync(outputPath, "utf-8");
+		if (current !== output) {
+			console.error("src/models.generated.ts is out of date. Run 'npm run generate-models' to update.");
+			process.exitCode = 1;
+			return;
+		}
+		console.log("src/models.generated.ts is up to date");
+	} else {
+		writeFileSync(outputPath, output);
+		console.log("Generated src/models.generated.ts");
+	}
 
 	// Print statistics
 	const totalModels = allModels.length;

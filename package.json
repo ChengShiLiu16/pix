@@ -25,7 +25,7 @@
 		"version:minor": "npm version minor -ws --no-git-tag-version && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts",
 		"version:major": "npm version major -ws --no-git-tag-version && node scripts/sync-versions.js && npm install --package-lock-only --ignore-scripts",
 		"version:set": "npm version -ws",
-		"prepublishOnly": "npm run clean && npm run build && npm run check",
+		"prepublishOnly": "npm run clean && npm --prefix packages/ai run generate && npm run build && npm run check",
 		"publish": "npm run prepublishOnly && node scripts/publish.mjs",
 		"publish:dry": "npm run prepublishOnly && node scripts/publish.mjs --dry-run",
 		"release:local": "node scripts/local-release.mjs",

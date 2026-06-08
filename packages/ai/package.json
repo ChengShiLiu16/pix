@@ -62,9 +62,12 @@
 		"clean": "shx rm -rf dist",
 		"generate-models": "node scripts/generate-models.ts",
 		"generate-image-models": "node scripts/generate-image-models.ts",
-		"build": "npm run generate-models && npm run generate-image-models && tsgo -p tsconfig.build.json",
+		"generate-models:check": "node scripts/generate-models.ts --check",
+		"generate": "npm run generate-models && npm run generate-image-models",
+		"build": "tsgo -p tsconfig.build.json",
+		"build:refresh-models": "npm run generate && npm run build",
 		"test": "vitest --run",
-		"prepublishOnly": "npm run clean && npm run build"
+		"prepublishOnly": "npm run clean && npm run generate && npm run build"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "0.91.1",

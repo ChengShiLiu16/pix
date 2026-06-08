@@ -201,6 +201,8 @@ if (!options.skipCheck) {
 	run("npm", ["run", "check"], { cwd: repoRoot });
 }
 
+run("npm", ["run", "generate"], { cwd: join(repoRoot, "packages/ai") });
+
 for (const pkg of packages) {
 	run("npm", ["run", "clean"], { cwd: pkg.directory });
 	run("npm", ["run", "build"], { cwd: pkg.directory });
