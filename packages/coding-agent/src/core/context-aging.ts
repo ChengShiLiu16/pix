@@ -11,10 +11,10 @@
  * session entries — the original messages are preserved in the session file.
  *
  * Aging levels by context ratio (used / window):
- *   < 50% : no aging
- *   50-70%: light aging — results older than 10 user turns
- *   70-80%: medium aging — results older than 5 user turns
- *   >= 80%: heavy aging — results older than 3 user turns
+ *   < AGING_START_RATIO: no aging
+ *   AGING_START_RATIO-AGING_MEDIUM_RATIO: light aging — results older than 10 user turns
+ *   AGING_MEDIUM_RATIO-effective heavy threshold: medium aging — results older than 5 user turns
+ *   >= effective heavy threshold: heavy aging — results older than 3 user turns
  *
  * Error results and mutation results (edit/write) are never aged.
  */

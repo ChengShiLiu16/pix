@@ -50,8 +50,6 @@ export const AGING_MEDIUM_RATIO = ratio(0.68);
 /** Context ratio at/above which large edit/write arguments are compacted. */
 export const EDIT_ARGS_COMPACT_RATIO = ratio(0.7);
 /** Context ratio at/above which aging escalates from medium to heavy. */
-// Changed from 0.80 to 0.70 to ensure heavy aging triggers BEFORE compaction
-// threshold (>=0.75), with hysteresis gap.
 export const AGING_HEAVY_RATIO = ratio(0.7);
 
 /** Gap between heavy aging threshold and compaction threshold to prevent thrashing. */
