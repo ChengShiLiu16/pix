@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pix-ai";
-import { Container, Text, type TUI } from "@earendil-works/pix-tui";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, ToolResultMessage, Usage } from "@chengshiliu16/pix-ai";
+import { Container, Text, type TUI } from "@chengshiliu16/pix-tui";
 import { beforeAll, describe, expect, test, vi } from "vitest";
 import type { AgentSessionEvent } from "../../../src/core/agent-session.ts";
 import type { SessionContext } from "../../../src/core/session-manager.ts";

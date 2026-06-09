@@ -1,5 +1,5 @@
-import { Agent } from "@earendil-works/pix-agent-core";
-import { type AssistantMessage, getModel, type Usage } from "@earendil-works/pix-ai";
+import { Agent } from "@chengshiliu16/pix-agent-core";
+import { type AssistantMessage, getModel, type Usage } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";

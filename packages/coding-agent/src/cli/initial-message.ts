@@ -1,4 +1,4 @@
-import type { ImageContent } from "@earendil-works/pix-ai";
+import type { ImageContent } from "@chengshiliu16/pix-ai";
 import type { Args } from "./args.ts";
 
 export interface InitialMessageInput {

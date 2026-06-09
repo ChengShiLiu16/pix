@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pix-ai";
+import type { Message } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import { serializeConversation } from "../src/core/compaction/utils.ts";
 

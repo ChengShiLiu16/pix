@@ -17,9 +17,9 @@
  * separate variables. Only the agent cursor is ever exposed to the agent.
  */
 
-import { StringEnum } from "@earendil-works/pix-ai";
-import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@earendil-works/pix-coding-agent";
-import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
+import { StringEnum } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@chengshiliu16/pix-coding-agent";
+import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 
 // Thrown from the tool on illegal actions. The agent runtime surfaces thrown

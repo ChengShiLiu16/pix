@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pix-ai";
+import type { Api, Model } from "@chengshiliu16/pix-ai";
 import type { SettingsManager } from "./settings-manager.ts";
 import { isInstallTelemetryEnabled } from "./telemetry.ts";
 

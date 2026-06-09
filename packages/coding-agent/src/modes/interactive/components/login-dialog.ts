@@ -1,5 +1,5 @@
-import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@earendil-works/pix-ai/oauth";
-import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pix-tui";
+import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@chengshiliu16/pix-ai/oauth";
+import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@chengshiliu16/pix-tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

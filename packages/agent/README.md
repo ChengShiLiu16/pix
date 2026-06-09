@@ -1,18 +1,18 @@
-# @earendil-works/pix-agent-core
+# @chengshiliu16/pix-agent-core
 
-Stateful agent with tool execution and event streaming. Built on `@earendil-works/pix-ai`.
+Stateful agent with tool execution and event streaming. Built on `@chengshiliu16/pix-ai`.
 
 ## Installation
 
 ```bash
-npm install @earendil-works/pix-agent-core
+npm install @chengshiliu16/pix-agent-core
 ```
 
 ## Quick Start
 
 ```typescript
-import { Agent } from "@earendil-works/pix-agent-core";
-import { getModel } from "@earendil-works/pix-ai";
+import { Agent } from "@chengshiliu16/pix-agent-core";
+import { getModel } from "@chengshiliu16/pix-ai";
 
 const agent = new Agent({
   initialState: {
@@ -355,7 +355,7 @@ Follow-up messages are checked only when there are no more tool calls and no ste
 Extend `AgentMessage` via declaration merging:
 
 ```typescript
-declare module "@earendil-works/pix-agent-core" {
+declare module "@chengshiliu16/pix-agent-core" {
   interface CustomAgentMessages {
     notification: { role: "notification"; text: string; timestamp: number };
   }
@@ -436,7 +436,7 @@ Return `terminate: true` from `execute()` or `afterToolCall` to hint that the ag
 For browser apps that proxy through a backend:
 
 ```typescript
-import { Agent, streamProxy } from "@earendil-works/pix-agent-core";
+import { Agent, streamProxy } from "@chengshiliu16/pix-agent-core";
 
 const agent = new Agent({
   streamFn: (model, context, options) =>
@@ -453,7 +453,7 @@ const agent = new Agent({
 For direct control without the Agent class:
 
 ```typescript
-import { agentLoop, agentLoopContinue } from "@earendil-works/pix-agent-core";
+import { agentLoop, agentLoopContinue } from "@chengshiliu16/pix-agent-core";
 
 const context: AgentContext = {
   systemPrompt: "You are helpful.",

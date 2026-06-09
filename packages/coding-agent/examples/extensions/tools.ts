@@ -9,9 +9,9 @@
  * 2. Use /tools to open the tool selector
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pix-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pix-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@earendil-works/pix-tui";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@chengshiliu16/pix-coding-agent";
+import { getSettingsListTheme } from "@chengshiliu16/pix-coding-agent";
+import { Container, type SettingItem, SettingsList } from "@chengshiliu16/pix-tui";
 
 // State persisted to session
 interface ToolsState {

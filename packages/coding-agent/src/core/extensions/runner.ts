@@ -2,9 +2,9 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { ImageContent, Model } from "@earendil-works/pix-ai";
-import type { KeyId } from "@earendil-works/pix-tui";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { ImageContent, Model } from "@chengshiliu16/pix-ai";
+import type { KeyId } from "@chengshiliu16/pix-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";

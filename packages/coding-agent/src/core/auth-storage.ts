@@ -12,8 +12,8 @@ import {
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type OAuthProviderId,
-} from "@earendil-works/pix-ai";
-import { getOAuthApiKey, getOAuthProvider, getOAuthProviders } from "@earendil-works/pix-ai/oauth";
+} from "@chengshiliu16/pix-ai";
+import { getOAuthApiKey, getOAuthProvider, getOAuthProviders } from "@chengshiliu16/pix-ai/oauth";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";

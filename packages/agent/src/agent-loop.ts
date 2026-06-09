@@ -10,7 +10,7 @@ import {
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-ai";
 import type {
 	AgentContext,
 	AgentEvent,

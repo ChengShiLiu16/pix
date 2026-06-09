@@ -22,8 +22,8 @@ import type {
 	AgentState,
 	AgentTool,
 	ThinkingLevel,
-} from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@chengshiliu16/pix-ai";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -32,7 +32,7 @@ import {
 	modelsAreEqual,
 	resetApiProviders,
 	streamSimple,
-} from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-ai";
 import { theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";

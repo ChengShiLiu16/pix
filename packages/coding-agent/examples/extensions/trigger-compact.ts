@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
 
 const COMPACT_THRESHOLD_TOKENS = 100_000;
 

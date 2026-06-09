@@ -1,4 +1,4 @@
-import type { Component } from "@earendil-works/pix-tui";
+import type { Component } from "@chengshiliu16/pix-tui";
 import { theme } from "../theme/theme.ts";
 
 /**

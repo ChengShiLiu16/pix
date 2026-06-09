@@ -1,5 +1,5 @@
-import type { ThinkingLevel } from "@earendil-works/pix-agent-core";
-import type { Transport } from "@earendil-works/pix-ai";
+import type { ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import type { Transport } from "@chengshiliu16/pix-ai";
 import {
 	Container,
 	getCapabilities,
@@ -10,7 +10,7 @@ import {
 	SettingsList,
 	Spacer,
 	Text,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type { WarningSettings } from "../../../core/settings-manager.ts";
 import { getSelectListTheme, getSettingsListTheme, theme } from "../theme/theme.ts";

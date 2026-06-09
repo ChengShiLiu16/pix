@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pix-ai";
-import { getModel } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, Usage } from "@chengshiliu16/pix-ai";
+import { getModel } from "@chengshiliu16/pix-ai";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { beforeEach, describe, expect, it } from "vitest";

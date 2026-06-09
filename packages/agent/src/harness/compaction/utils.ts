@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pix-ai";
+import type { Message } from "@chengshiliu16/pix-ai";
 import type { AgentMessage } from "../../types.ts";
 
 /** File paths touched by a session branch or compaction range. */

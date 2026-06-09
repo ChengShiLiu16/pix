@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { TextContent } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { TextContent } from "@chengshiliu16/pix-ai";
 import {
 	type CompactionSettings,
 	DEFAULT_COMPACTION_SETTINGS,

@@ -5,7 +5,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { type Component, Container, truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
+import { type Component, Container, truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 
 export type ThemeLike = {
 	fg(name: string, text: string): string;

@@ -3,8 +3,8 @@
 	"compilerOptions": {
 		"outDir": "./dist",
 		"paths": {
-			"@earendil-works/pix-ai": ["../ai/dist/index.d.ts"],
-			"@earendil-works/pix-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+			"@chengshiliu16/pix-ai": ["../ai/dist/index.d.ts"],
+			"@chengshiliu16/pix-ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
 		},
 		"rootDir": "./src"
 	},

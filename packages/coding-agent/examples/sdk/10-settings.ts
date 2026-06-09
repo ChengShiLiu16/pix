@@ -4,7 +4,7 @@
  * Override settings using SettingsManager.
  */
 
-import { createAgentSession, SessionManager, SettingsManager } from "@earendil-works/pix-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager } from "@chengshiliu16/pix-coding-agent";
 
 const cwd = process.cwd();
 

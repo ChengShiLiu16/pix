@@ -4,7 +4,7 @@ import {
 	type Model,
 	streamSimple,
 	type UserMessage,
-} from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-ai";
 import { runAgentLoop } from "../agent-loop.ts";
 import type {
 	AgentContext,

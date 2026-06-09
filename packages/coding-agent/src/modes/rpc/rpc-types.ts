@@ -5,8 +5,8 @@
  * Responses and events are emitted as JSON lines on stdout.
  */
 
-import type { AgentMessage, ThinkingLevel } from "@earendil-works/pix-agent-core";
-import type { ImageContent, Model } from "@earendil-works/pix-ai";
+import type { AgentMessage, ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import type { ImageContent, Model } from "@chengshiliu16/pix-ai";
 import type { SessionStats } from "../../core/agent-session.ts";
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";

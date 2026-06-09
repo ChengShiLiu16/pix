@@ -3,9 +3,9 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	type KeybindingsManager,
-} from "@earendil-works/pix-coding-agent";
-import type { Component, EditorTheme, TUI } from "@earendil-works/pix-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-coding-agent";
+import type { Component, EditorTheme, TUI } from "@chengshiliu16/pix-tui";
+import { truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 
 function fitBorder(
 	left: string,

@@ -16,7 +16,7 @@
  * Then use ctrl+o to toggle between minimal (collapsed) and full (expanded) views.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import {
 	createBashTool,
 	createEditTool,
@@ -25,8 +25,8 @@ import {
 	createLsTool,
 	createReadTool,
 	createWriteTool,
-} from "@earendil-works/pix-coding-agent";
-import { Text } from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-coding-agent";
+import { Text } from "@chengshiliu16/pix-tui";
 import { homedir } from "os";
 
 /**

@@ -235,7 +235,7 @@ describe("package commands", () => {
 	it("uses global npmCommand and current package name for forced self updates without checking the api", async () => {
 		const globalPrefix = join(tempDir, "global-prefix");
 		const projectPrefix = join(tempDir, "project-prefix");
-		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@earendil-works", "pix-coding-agent");
+		const selfPackageDir = join(globalPrefix, "lib", "node_modules", "@chengshiliu16", "pix-coding-agent");
 		const fakeNpmPath = join(tempDir, "fake-npm.cjs");
 		const recordPath = join(tempDir, "self-update.json");
 		mkdirSync(selfPackageDir, { recursive: true });

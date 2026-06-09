@@ -1,4 +1,4 @@
-import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@earendil-works/pix-tui";
+import { Box, Markdown, type MarkdownTheme, Spacer, Text } from "@chengshiliu16/pix-tui";
 import type { BranchSummaryMessage } from "../../../core/messages.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 import { keyText } from "./keybinding-hints.ts";

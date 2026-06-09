@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/pix-agent-core";
-import type { Model } from "@earendil-works/pix-ai";
+import type { ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import type { Model } from "@chengshiliu16/pix-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { AuthStorage } from "./auth-storage.ts";

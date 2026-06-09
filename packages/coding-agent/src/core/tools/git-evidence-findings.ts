@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Text } from "@chengshiliu16/pix-tui";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";

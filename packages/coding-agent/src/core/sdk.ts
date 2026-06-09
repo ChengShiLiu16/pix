@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { Agent, type AgentMessage, type ThinkingLevel } from "@earendil-works/pix-agent-core";
-import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pix-ai";
+import { Agent, type AgentMessage, type ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import { clampThinkingLevel, type Message, type Model, streamSimple } from "@chengshiliu16/pix-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { getShellEnv } from "../utils/shell.ts";
@@ -139,7 +139,7 @@ function getDefaultAgentDir(): string {
  * const { session } = await createAgentSession();
  *
  * // With explicit model
- * import { getModel } from '@earendil-works/pix-ai';
+ * import { getModel } from '@chengshiliu16/pix-ai';
  * const { session } = await createAgentSession({
  *   model: getModel('anthropic', 'claude-opus-4-5'),
  *   thinkingLevel: 'high',

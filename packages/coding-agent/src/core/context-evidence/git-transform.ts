@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, TextContent, ToolResultMessage } from "@chengshiliu16/pix-ai";
 import type { BashExecutionMessage } from "../messages.ts";
 import { formatSupersededEvidence } from "./git-format.ts";
 import { createGitEvidenceResult, type GitEvidenceDetails } from "./git-store.ts";

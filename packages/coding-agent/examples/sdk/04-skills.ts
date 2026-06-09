@@ -12,7 +12,7 @@ import {
 	getAgentDir,
 	SessionManager,
 	type Skill,
-} from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-coding-agent";
 
 // Or define custom skills inline
 const customSkill: Skill = {

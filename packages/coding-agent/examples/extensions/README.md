@@ -139,7 +139,7 @@ cp permission-gate.ts ~/.pix/agent/extensions/
 See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { Type } from "typebox";
 
 export default function (pi: ExtensionAPI) {
@@ -181,7 +181,7 @@ export default function (pi: ExtensionAPI) {
 
 **Use StringEnum for string parameters** (required for Google API compatibility):
 ```typescript
-import { StringEnum } from "@earendil-works/pix-ai";
+import { StringEnum } from "@chengshiliu16/pix-ai";
 
 // Good
 action: StringEnum(["list", "add"] as const)

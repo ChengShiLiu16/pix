@@ -25,9 +25,9 @@
  *   pix -e ./built-in-tool-renderer.ts
  */
 
-import type { BashToolDetails, EditToolDetails, ExtensionAPI, ReadToolDetails } from "@earendil-works/pix-coding-agent";
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pix-coding-agent";
-import { Text } from "@earendil-works/pix-tui";
+import type { BashToolDetails, EditToolDetails, ExtensionAPI, ReadToolDetails } from "@chengshiliu16/pix-coding-agent";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@chengshiliu16/pix-coding-agent";
+import { Text } from "@chengshiliu16/pix-tui";
 
 export default function (pi: ExtensionAPI) {
 	const cwd = process.cwd();

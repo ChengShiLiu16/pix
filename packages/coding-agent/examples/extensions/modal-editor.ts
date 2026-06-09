@@ -9,8 +9,8 @@
  * - ctrl+c, ctrl+d, etc. work in both modes
  */
 
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pix-coding-agent";
-import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
+import { CustomEditor, type ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
+import { matchesKey, truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 
 // Normal mode key mappings: key -> escape sequence (or null for mode switch)
 const NORMAL_KEYS: Record<string, string | null> = {

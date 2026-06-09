@@ -15,7 +15,7 @@
  */
 
 import { mkdtemp, writeFile } from "node:fs/promises";
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
@@ -23,8 +23,8 @@ import {
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
-} from "@earendil-works/pix-coding-agent";
-import { Text } from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-coding-agent";
+import { Text } from "@chengshiliu16/pix-tui";
 import { execSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";

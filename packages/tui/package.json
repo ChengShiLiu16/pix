@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pix-tui",
+	"name": "@chengshiliu16/pix-tui",
 	"version": "0.78.1",
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"type": "module",
@@ -29,7 +29,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/ChengShiLiu16/pix.git",
 		"directory": "packages/tui"
 	},
 	"engines": {

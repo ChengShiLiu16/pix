@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
 import { afterEach } from "vitest";
 
 export function createUserMessage(text: string): AgentMessage {

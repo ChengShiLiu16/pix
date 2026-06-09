@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pix-ai",
+	"name": "@chengshiliu16/pix-ai",
 	"version": "0.78.1",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
@@ -95,7 +95,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/ChengShiLiu16/pix.git",
 		"directory": "packages/ai"
 	},
 	"engines": {

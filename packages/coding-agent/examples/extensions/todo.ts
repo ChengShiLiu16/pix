@@ -10,9 +10,9 @@
  * correct for that point in history.
  */
 
-import { StringEnum } from "@earendil-works/pix-ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pix-coding-agent";
-import { matchesKey, Text, truncateToWidth } from "@earendil-works/pix-tui";
+import { StringEnum } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@chengshiliu16/pix-coding-agent";
+import { matchesKey, Text, truncateToWidth } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 
 interface Todo {

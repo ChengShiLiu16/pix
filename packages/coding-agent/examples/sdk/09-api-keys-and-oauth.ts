@@ -4,7 +4,7 @@
  * Configure API key resolution via AuthStorage and ModelRegistry.
  */
 
-import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@earendil-works/pix-coding-agent";
+import { AuthStorage, createAgentSession, ModelRegistry, SessionManager } from "@chengshiliu16/pix-coding-agent";
 
 // Default: AuthStorage uses ~/.pix/agent/auth.json
 // ModelRegistry loads built-in + custom models from ~/.pix/agent/models.json

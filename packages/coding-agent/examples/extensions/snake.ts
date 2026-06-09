@@ -2,8 +2,8 @@
  * Snake game extension - play snake with /snake command
  */
 
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
-import { matchesKey, visibleWidth } from "@earendil-works/pix-tui";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
+import { matchesKey, visibleWidth } from "@chengshiliu16/pix-tui";
 
 const GAME_WIDTH = 40;
 const GAME_HEIGHT = 15;

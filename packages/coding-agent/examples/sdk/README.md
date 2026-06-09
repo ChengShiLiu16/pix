@@ -32,7 +32,7 @@ npx tsx examples/sdk/01-minimal.ts
 ## Quick Reference
 
 ```typescript
-import { getModel } from "@earendil-works/pix-ai";
+import { getModel } from "@chengshiliu16/pix-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -40,7 +40,7 @@ import {
   ModelRegistry,
   SessionManager,
   SettingsManager,
-} from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-coding-agent";
 
 // Auth and models setup
 const authStorage = AuthStorage.create();

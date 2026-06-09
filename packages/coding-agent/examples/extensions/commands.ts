@@ -10,7 +10,7 @@
  * 3. Use /commands extensions to filter by source
  */
 
-import type { ExtensionAPI, SlashCommandInfo } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI, SlashCommandInfo } from "@chengshiliu16/pix-coding-agent";
 
 export default function commandsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("commands", {

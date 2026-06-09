@@ -21,8 +21,8 @@ import {
 	streamSimpleAnthropic,
 	streamSimpleOpenAIResponses,
 	type ThinkingLevelMap,
-} from "@earendil-works/pix-ai";
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
 // =============================================================================
 // Constants

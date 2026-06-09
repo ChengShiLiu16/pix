@@ -19,8 +19,8 @@
  * Error results and mutation results (edit/write) are never aged.
  */
 
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, TextContent, ToolResultMessage } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, TextContent, ToolResultMessage } from "@chengshiliu16/pix-ai";
 import type { ReachabilityLevel } from "./context-reachability.ts";
 import {
 	AGING_HEAVY_RATIO,

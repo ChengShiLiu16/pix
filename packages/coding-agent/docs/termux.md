@@ -17,7 +17,7 @@ pkg update && pkg upgrade
 pkg install nodejs termux-api git
 
 # Install pix
-npm install -g --ignore-scripts @earendil-works/pix-coding-agent
+npm install -g --ignore-scripts @chengshiliu16/pix-coding-agent
 
 # Create config directory
 mkdir -p ~/.pix/agent

@@ -1,7 +1,7 @@
 import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pix-ai";
-import { Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import type { Api, ImageContent, Model, TextContent } from "@chengshiliu16/pix-ai";
+import { Text } from "@chengshiliu16/pix-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
 import { type Static, Type } from "typebox";

@@ -1,5 +1,5 @@
-import type { AgentTool, ThinkingLevel } from "@earendil-works/pix-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pix-ai";
+import type { AgentTool, ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import { fauxAssistantMessage, fauxToolCall, type Model } from "@chengshiliu16/pix-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";

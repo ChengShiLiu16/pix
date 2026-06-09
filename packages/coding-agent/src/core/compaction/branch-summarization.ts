@@ -5,9 +5,9 @@
  * a summary of the branch being left so context isn't lost.
  */
 
-import type { AgentMessage, StreamFn } from "@earendil-works/pix-agent-core";
-import type { Model, SimpleStreamOptions } from "@earendil-works/pix-ai";
-import { completeSimple } from "@earendil-works/pix-ai";
+import type { AgentMessage, StreamFn } from "@chengshiliu16/pix-agent-core";
+import type { Model, SimpleStreamOptions } from "@chengshiliu16/pix-ai";
+import { completeSimple } from "@chengshiliu16/pix-ai";
 import {
 	convertToLlm,
 	createBranchSummaryMessage,

@@ -2,8 +2,8 @@
  * Model resolution, scoping, and initial selection
  */
 
-import type { ThinkingLevel } from "@earendil-works/pix-agent-core";
-import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@earendil-works/pix-ai";
+import type { ThinkingLevel } from "@chengshiliu16/pix-agent-core";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@chengshiliu16/pix-ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";

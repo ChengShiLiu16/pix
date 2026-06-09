@@ -1,4 +1,4 @@
-import { Container, Text } from "@earendil-works/pix-tui";
+import { Container, Text } from "@chengshiliu16/pix-tui";
 import { DynamicBorder, type ExtensionAPI, type ExtensionContext } from "../../index.ts";
 
 const PR_PROMPT_PATTERN = /^\s*You are given one or more GitHub PR URLs:\s*(\S+)/im;

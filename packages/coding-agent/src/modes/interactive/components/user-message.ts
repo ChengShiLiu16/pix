@@ -1,4 +1,4 @@
-import { Box, Container, Markdown, type MarkdownTheme } from "@earendil-works/pix-tui";
+import { Box, Container, Markdown, type MarkdownTheme } from "@chengshiliu16/pix-tui";
 import { formatUserMessageCardLines } from "../../../core/builtin-extensions/lib/user-message-style.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 

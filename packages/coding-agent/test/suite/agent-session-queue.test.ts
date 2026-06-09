@@ -1,6 +1,6 @@
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pix-ai";
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.ts";

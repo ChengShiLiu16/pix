@@ -1,4 +1,4 @@
-import { Container, getKeybindings, Spacer, Text } from "@earendil-works/pix-tui";
+import { Container, getKeybindings, Spacer, Text } from "@chengshiliu16/pix-tui";
 import type { ProjectTrustDecision } from "../../../core/trust-manager.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

@@ -16,11 +16,11 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentToolResult } from "@earendil-works/pix-agent-core";
-import type { Message } from "@earendil-works/pix-ai";
-import { StringEnum } from "@earendil-works/pix-ai";
-import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@earendil-works/pix-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@earendil-works/pix-tui";
+import type { AgentToolResult } from "@chengshiliu16/pix-agent-core";
+import type { Message } from "@chengshiliu16/pix-ai";
+import { StringEnum } from "@chengshiliu16/pix-ai";
+import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@chengshiliu16/pix-coding-agent";
+import { Container, Markdown, Spacer, Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
 

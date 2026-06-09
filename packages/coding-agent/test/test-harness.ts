@@ -10,8 +10,8 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Agent } from "@earendil-works/pix-agent-core";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Agent } from "@chengshiliu16/pix-agent-core";
 import type {
 	AssistantMessage,
 	AssistantMessageEvent,
@@ -24,8 +24,8 @@ import type {
 	ThinkingContent,
 	ToolCall,
 	Usage,
-} from "@earendil-works/pix-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-ai";
+import { createAssistantMessageEventStream } from "@chengshiliu16/pix-ai";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";

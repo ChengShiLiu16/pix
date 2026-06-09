@@ -6,10 +6,10 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const packages = [
-	{ directory: "packages/ai", name: "@earendil-works/pix-ai" },
-	{ directory: "packages/tui", name: "@earendil-works/pix-tui" },
-	{ directory: "packages/agent", name: "@earendil-works/pix-agent-core" },
-	{ directory: "packages/coding-agent", name: "@earendil-works/pix-coding-agent" },
+	{ directory: "packages/ai", name: "@chengshiliu16/pix-ai" },
+	{ directory: "packages/tui", name: "@chengshiliu16/pix-tui" },
+	{ directory: "packages/agent", name: "@chengshiliu16/pix-agent-core" },
+	{ directory: "packages/coding-agent", name: "@chengshiliu16/pix-coding-agent" },
 ];
 
 function printUsage() {

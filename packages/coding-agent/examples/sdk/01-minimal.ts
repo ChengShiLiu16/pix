@@ -5,7 +5,7 @@
  * from cwd and ~/.pix/agent. Model chosen from settings or first available.
  */
 
-import { createAgentSession } from "@earendil-works/pix-coding-agent";
+import { createAgentSession } from "@chengshiliu16/pix-coding-agent";
 
 const { session } = await createAgentSession();
 

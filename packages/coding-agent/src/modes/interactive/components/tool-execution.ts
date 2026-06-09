@@ -1,13 +1,4 @@
-import {
-	Box,
-	type Component,
-	Container,
-	getCapabilities,
-	Image,
-	Spacer,
-	Text,
-	type TUI,
-} from "@earendil-works/pix-tui";
+import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@chengshiliu16/pix-tui";
 import { logBatchDebug } from "../../../core/builtin-extensions/lib/batch-debug.ts";
 import {
 	buildFallbackCall,

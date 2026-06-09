@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pix-ai";
+import type { AssistantMessage } from "@chengshiliu16/pix-ai";
 import type { ExtensionAPI } from "../../index.ts";
 
 function isAssistantMessage(message: unknown): message is AssistantMessage {

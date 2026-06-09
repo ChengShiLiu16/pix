@@ -20,9 +20,9 @@
 
 This is the home of the pi agent harness project including our self extensible coding agent.
 
-* **[@earendil-works/pix-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
-* **[@earendil-works/pix-agent-core](packages/agent)**: Agent runtime with tool calling and state management
-* **[@earendil-works/pix-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
+* **[@chengshiliu16/pix-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
+* **[@chengshiliu16/pix-agent-core](packages/agent)**: Agent runtime with tool calling and state management
+* **[@chengshiliu16/pix-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
 
 To learn more about pi:
 
@@ -49,12 +49,12 @@ I regularly publish my own `pi-mono` work sessions here:
 
 | Package | Description |
 |---------|-------------|
-| **[@earendil-works/pix-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pix-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pix-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pix-tui](packages/tui)** | Terminal UI library with differential rendering |
+| **[@chengshiliu16/pix-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
+| **[@chengshiliu16/pix-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
+| **[@chengshiliu16/pix-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
+| **[@chengshiliu16/pix-tui](packages/tui)** | Terminal UI library with differential rendering |
 
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
+For Slack/chat automation and workflows see [ChengShiLiu16/pix](https://github.com/ChengShiLiu16/pix).
 
 ## Permissions & Containerization
 

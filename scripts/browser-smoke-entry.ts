@@ -1,4 +1,4 @@
-import { complete, createAssistantMessageEventStream, getModel, getProviders, Type } from "@earendil-works/pix-ai";
+import { complete, createAssistantMessageEventStream, getModel, getProviders, Type } from "@chengshiliu16/pix-ai";
 import {
 	Agent,
 	bashExecutionToText,
@@ -15,7 +15,7 @@ import {
 	streamProxy,
 	toError,
 	truncateHead,
-} from "@earendil-works/pix-agent-core";
+} from "@chengshiliu16/pix-agent-core";
 
 // Keep this entry browser-safe. It is bundled by scripts/check-browser-smoke.mjs
 // to catch accidental Node-only runtime imports in browser-facing package exports.

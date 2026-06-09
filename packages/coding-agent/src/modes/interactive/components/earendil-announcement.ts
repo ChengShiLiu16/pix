@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { Container, Image, Spacer, Text } from "@earendil-works/pix-tui";
+import { Container, Image, Spacer, Text } from "@chengshiliu16/pix-tui";
 import { getBundledInteractiveAssetPath } from "../../../config.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

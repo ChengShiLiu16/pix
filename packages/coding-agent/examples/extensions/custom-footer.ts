@@ -8,9 +8,9 @@
  * Token stats come from ctx.sessionManager/ctx.model (already accessible).
  */
 
-import type { AssistantMessage } from "@earendil-works/pix-ai";
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pix-tui";
+import type { AssistantMessage } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
+import { truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 
 export default function (pi: ExtensionAPI) {
 	let enabled = false;

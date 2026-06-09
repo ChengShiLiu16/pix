@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pix-ai";
+import type { AssistantMessage } from "@chengshiliu16/pix-ai";
 import {
 	type AnsiStyleSegment,
 	probeAnsiStyle,
@@ -6,7 +6,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 	wrapWithScopedStyle,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 
 export type MarkdownTheme = unknown;
 

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdir as fsReaddir, readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Text } from "@chengshiliu16/pix-tui";
 import { type Static, Type } from "typebox";
 import { isGitEvidenceDisplayText } from "../context-git-evidence.ts";
 import type { ToolDefinition } from "../extensions/types.ts";

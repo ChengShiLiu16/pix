@@ -4,7 +4,7 @@
  * Usage: pix --extension ./examples/extensions/rainbow-editor.ts
  */
 
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import { CustomEditor, type ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
 // Base colors (coral → yellow → green → teal → blue → purple → pink)
 const COLORS: [number, number, number][] = [

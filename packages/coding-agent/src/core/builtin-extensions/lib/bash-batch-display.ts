@@ -4,7 +4,7 @@
  * Group assignment happens ONLY via recordBashToolCall (activity-widget tool_call).
  * renderCall is read-only for grouping; updateDisplay patch renders aggregated batches.
  */
-import { type Container, Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@chengshiliu16/pix-tui";
 import {
 	bindCategoryContentBreak,
 	registerBatchInvalidator,

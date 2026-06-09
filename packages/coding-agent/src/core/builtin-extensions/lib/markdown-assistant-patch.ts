@@ -4,8 +4,8 @@
  */
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { AssistantMessage } from "@earendil-works/pix-ai";
-import { Markdown, Spacer, Text } from "@earendil-works/pix-tui";
+import type { AssistantMessage } from "@chengshiliu16/pix-ai";
+import { Markdown, Spacer, Text } from "@chengshiliu16/pix-tui";
 import {
 	isAssistantMessagePartial,
 	type MarkdownTheme,
@@ -48,7 +48,7 @@ function getPackageRoot(packageName: string): string {
 }
 
 function resolveInternalModuleUrl(relativePath: string): string {
-	const packageRoot = getPackageRoot("@earendil-works/pix-coding-agent");
+	const packageRoot = getPackageRoot("@chengshiliu16/pix-coding-agent");
 	return pathToFileURL(join(packageRoot, relativePath)).href;
 }
 

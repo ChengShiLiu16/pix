@@ -5,7 +5,7 @@ import {
 	type KeyId,
 	TUI_KEYBINDINGS,
 	KeybindingsManager as TuiKeybindingsManager,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "../config.ts";
@@ -56,7 +56,7 @@ export interface AppKeybindings {
 
 export type AppKeybinding = keyof AppKeybindings;
 
-declare module "@earendil-works/pix-tui" {
+declare module "@chengshiliu16/pix-tui" {
 	interface Keybindings extends AppKeybindings {}
 }
 

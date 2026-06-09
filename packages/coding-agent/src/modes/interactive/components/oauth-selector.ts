@@ -6,7 +6,7 @@ import {
 	Input,
 	Spacer,
 	TruncatedText,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 import type { AuthStatus, AuthStorage } from "../../../core/auth-storage.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

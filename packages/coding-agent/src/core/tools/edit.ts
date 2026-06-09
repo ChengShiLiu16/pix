@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Box, Container, Spacer, Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Box, Container, Spacer, Text } from "@chengshiliu16/pix-tui";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 import { type Static, Type } from "typebox";

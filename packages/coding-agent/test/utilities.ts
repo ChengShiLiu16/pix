@@ -5,9 +5,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { Agent } from "@earendil-works/pix-agent-core";
-import { getModel, type OAuthCredentials, type OAuthProvider } from "@earendil-works/pix-ai";
-import { getOAuthApiKey } from "@earendil-works/pix-ai/oauth";
+import { Agent } from "@chengshiliu16/pix-agent-core";
+import { getModel, type OAuthCredentials, type OAuthProvider } from "@chengshiliu16/pix-ai";
+import { getOAuthApiKey } from "@chengshiliu16/pix-ai/oauth";
 import { AgentSession } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { createEventBus } from "../src/core/event-bus.ts";

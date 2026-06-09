@@ -6,8 +6,8 @@
  */
 
 import { createInterface } from "node:readline";
-import { type ImageContent, modelsAreEqual } from "@earendil-works/pix-ai";
-import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pix-tui";
+import { type ImageContent, modelsAreEqual } from "@chengshiliu16/pix-ai";
+import { ProcessTerminal, setKeybindings, TUI } from "@chengshiliu16/pix-tui";
 import chalk from "chalk";
 import { type Args, type Mode, parseArgs, printHelp } from "./cli/args.ts";
 import { processFileArguments } from "./cli/file-processor.ts";

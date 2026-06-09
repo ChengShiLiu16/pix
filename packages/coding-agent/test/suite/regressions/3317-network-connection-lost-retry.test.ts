@@ -1,4 +1,4 @@
-import { fauxAssistantMessage } from "@earendil-works/pix-ai";
+import { fauxAssistantMessage } from "@chengshiliu16/pix-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, type Harness } from "../harness.ts";
 

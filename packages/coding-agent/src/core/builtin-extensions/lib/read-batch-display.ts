@@ -7,7 +7,7 @@
  */
 import { homedir } from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
-import { type Container, Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@chengshiliu16/pix-tui";
 import {
 	bindCategoryContentBreak,
 	registerBatchInvalidator,

@@ -17,8 +17,8 @@ import {
 	registerApiProvider,
 	resetApiProviders,
 	type SimpleStreamOptions,
-} from "@earendil-works/pix-ai";
-import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pix-ai/oauth";
+} from "@chengshiliu16/pix-ai";
+import { registerOAuthProvider, resetOAuthProviders } from "@chengshiliu16/pix-ai/oauth";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { type Static, Type } from "typebox";

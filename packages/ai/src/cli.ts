@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
 	if (!command || command === "help" || command === "--help" || command === "-h") {
 		const providerList = PROVIDERS.map((p) => `  ${p.id.padEnd(20)} ${p.name}`).join("\n");
-		console.log(`Usage: npx @earendil-works/pix-ai <command> [provider]
+		console.log(`Usage: npx @chengshiliu16/pix-ai <command> [provider]
 
 Commands:
   login [provider]  Login to an OAuth provider
@@ -88,9 +88,9 @@ Providers:
 ${providerList}
 
 Examples:
-  npx @earendil-works/pix-ai login              # interactive provider selection
-  npx @earendil-works/pix-ai login anthropic    # login to specific provider
-  npx @earendil-works/pix-ai list               # list providers
+  npx @chengshiliu16/pix-ai login              # interactive provider selection
+  npx @chengshiliu16/pix-ai login anthropic    # login to specific provider
+  npx @chengshiliu16/pix-ai list               # list providers
 `);
 		return;
 	}
@@ -127,7 +127,7 @@ Examples:
 
 		if (!PROVIDERS.some((p) => p.id === provider)) {
 			console.error(`Unknown provider: ${provider}`);
-			console.error(`Use 'npx @earendil-works/pix-ai list' to see available providers`);
+			console.error(`Use 'npx @chengshiliu16/pix-ai list' to see available providers`);
 			process.exit(1);
 		}
 
@@ -137,7 +137,7 @@ Examples:
 	}
 
 	console.error(`Unknown command: ${command}`);
-	console.error(`Use 'npx @earendil-works/pix-ai --help' for usage`);
+	console.error(`Use 'npx @chengshiliu16/pix-ai --help' for usage`);
 	process.exit(1);
 }
 

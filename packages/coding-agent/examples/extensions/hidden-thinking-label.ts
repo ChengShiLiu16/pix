@@ -18,7 +18,7 @@
  *   /thinking-label          Reset to the default label
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
 
 const DEFAULT_LABEL = "Pondering...";
 

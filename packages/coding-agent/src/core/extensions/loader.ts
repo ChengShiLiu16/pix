@@ -7,11 +7,11 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledPiAgentCore from "@earendil-works/pix-agent-core";
-import * as _bundledPiAi from "@earendil-works/pix-ai";
-import * as _bundledPiAiOauth from "@earendil-works/pix-ai/oauth";
-import type { KeyId } from "@earendil-works/pix-tui";
-import * as _bundledPiTui from "@earendil-works/pix-tui";
+import * as _bundledPiAgentCore from "@chengshiliu16/pix-agent-core";
+import * as _bundledPiAi from "@chengshiliu16/pix-ai";
+import * as _bundledPiAiOauth from "@chengshiliu16/pix-ai/oauth";
+import type { KeyId } from "@chengshiliu16/pix-tui";
+import * as _bundledPiTui from "@chengshiliu16/pix-tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -21,7 +21,7 @@ import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
 import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.ts";
 // NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @earendil-works/pix-coding-agent.
+// avoiding a circular dependency. Extensions can import from @chengshiliu16/pix-coding-agent.
 import * as _bundledPiCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
@@ -48,11 +48,11 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@earendil-works/pix-agent-core": _bundledPiAgentCore,
-	"@earendil-works/pix-tui": _bundledPiTui,
-	"@earendil-works/pix-ai": _bundledPiAi,
-	"@earendil-works/pix-ai/oauth": _bundledPiAiOauth,
-	"@earendil-works/pix-coding-agent": _bundledPiCodingAgent,
+	"@chengshiliu16/pix-agent-core": _bundledPiAgentCore,
+	"@chengshiliu16/pix-tui": _bundledPiTui,
+	"@chengshiliu16/pix-ai": _bundledPiAi,
+	"@chengshiliu16/pix-ai/oauth": _bundledPiAiOauth,
+	"@chengshiliu16/pix-coding-agent": _bundledPiCodingAgent,
 	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
 	"@mariozechner/pi-tui": _bundledPiTui,
 	"@mariozechner/pi-ai": _bundledPiAi,
@@ -88,17 +88,17 @@ function getAliases(): Record<string, string> {
 	};
 
 	const piCodingAgentEntry = packageIndex;
-	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/pix-agent-core");
-	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/pix-tui");
-	const piAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "@earendil-works/pix-ai");
-	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/pix-ai/oauth");
+	const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@chengshiliu16/pix-agent-core");
+	const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@chengshiliu16/pix-tui");
+	const piAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "@chengshiliu16/pix-ai");
+	const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@chengshiliu16/pix-ai/oauth");
 
 	_aliases = {
-		"@earendil-works/pix-coding-agent": piCodingAgentEntry,
-		"@earendil-works/pix-agent-core": piAgentCoreEntry,
-		"@earendil-works/pix-tui": piTuiEntry,
-		"@earendil-works/pix-ai": piAiEntry,
-		"@earendil-works/pix-ai/oauth": piAiOauthEntry,
+		"@chengshiliu16/pix-coding-agent": piCodingAgentEntry,
+		"@chengshiliu16/pix-agent-core": piAgentCoreEntry,
+		"@chengshiliu16/pix-tui": piTuiEntry,
+		"@chengshiliu16/pix-ai": piAiEntry,
+		"@chengshiliu16/pix-ai/oauth": piAiOauthEntry,
 		"@mariozechner/pi-coding-agent": piCodingAgentEntry,
 		"@mariozechner/pi-agent-core": piAgentCoreEntry,
 		"@mariozechner/pi-tui": piTuiEntry,

@@ -1,4 +1,4 @@
-import { Text } from "@earendil-works/pix-tui";
+import { Text } from "@chengshiliu16/pix-tui";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import { createReadToolDefinition, type ReadToolDetails } from "../../index.ts";

@@ -1,7 +1,7 @@
 import { readFile as fsReadFile, stat as fsStat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Text } from "@chengshiliu16/pix-tui";
 import { spawn } from "child_process";
 import path from "path";
 import { type Static, Type } from "typebox";

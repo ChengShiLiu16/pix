@@ -20,8 +20,8 @@
  *   pix -e ./tool-override.ts
  */
 
-import type { TextContent } from "@earendil-works/pix-ai";
-import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@earendil-works/pix-coding-agent";
+import type { TextContent } from "@chengshiliu16/pix-ai";
+import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@chengshiliu16/pix-coding-agent";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";

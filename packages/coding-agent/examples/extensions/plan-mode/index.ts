@@ -12,10 +12,10 @@
  * - Progress tracking widget during execution
  */
 
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, TextContent } from "@earendil-works/pix-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
-import { Key } from "@earendil-works/pix-tui";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, TextContent } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
+import { Key } from "@chengshiliu16/pix-tui";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.ts";
 
 // Tools

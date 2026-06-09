@@ -1,4 +1,4 @@
-import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@earendil-works/pix-tui";
+import { type Component, Container, getKeybindings, Spacer, Text, truncateToWidth } from "@chengshiliu16/pix-tui";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 

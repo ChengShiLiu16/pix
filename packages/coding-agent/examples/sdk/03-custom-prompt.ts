@@ -9,7 +9,7 @@ import {
 	DefaultResourceLoader,
 	getAgentDir,
 	SessionManager,
-} from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-coding-agent";
 
 const cwd = process.cwd();
 const agentDir = getAgentDir();

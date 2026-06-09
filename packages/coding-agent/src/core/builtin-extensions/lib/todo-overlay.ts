@@ -1,4 +1,4 @@
-import { type TUI, truncateToWidth } from "@earendil-works/pix-tui";
+import { type TUI, truncateToWidth } from "@chengshiliu16/pix-tui";
 import type { Theme } from "../../../modes/interactive/theme/theme.ts";
 import type { ExtensionUIContext } from "../../index.ts";
 import { countByStatus, type TodoItem, type TodoState } from "./todo-state.ts";

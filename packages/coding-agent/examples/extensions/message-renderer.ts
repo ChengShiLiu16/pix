@@ -7,8 +7,8 @@
  * Usage: /status [message] - sends a status message with custom rendering
  */
 
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
-import { Box, Text } from "@earendil-works/pix-tui";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
+import { Box, Text } from "@chengshiliu16/pix-tui";
 
 export default function (pi: ExtensionAPI) {
 	// Register custom renderer for "status-update" messages

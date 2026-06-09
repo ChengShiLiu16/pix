@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, ToolResultMessage } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import { pruneStaleReads, pruneThinkingForNonAnthropic } from "../src/core/context-prune.ts";
 

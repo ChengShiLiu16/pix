@@ -1,4 +1,4 @@
-import { fuzzyMatch } from "@earendil-works/pix-tui";
+import { fuzzyMatch } from "@chengshiliu16/pix-tui";
 import type { SessionInfo } from "../../../core/session-manager.ts";
 
 export type SortMode = "threaded" | "recent" | "relevance";

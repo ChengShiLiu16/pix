@@ -1,4 +1,4 @@
-import { type Model, modelsAreEqual } from "@earendil-works/pix-ai";
+import { type Model, modelsAreEqual } from "@chengshiliu16/pix-ai";
 import {
 	Container,
 	type Focusable,
@@ -8,7 +8,7 @@ import {
 	Spacer,
 	Text,
 	type TUI,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 import type { ModelRegistry } from "../../../core/model-registry.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
 import { theme } from "../theme/theme.ts";

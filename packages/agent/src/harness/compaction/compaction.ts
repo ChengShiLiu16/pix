@@ -1,5 +1,5 @@
-import type { AssistantMessage, ImageContent, Model, TextContent, Usage } from "@earendil-works/pix-ai";
-import { completeSimple } from "@earendil-works/pix-ai";
+import type { AssistantMessage, ImageContent, Model, TextContent, Usage } from "@chengshiliu16/pix-ai";
+import { completeSimple } from "@chengshiliu16/pix-ai";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
 import {
 	convertToLlm,

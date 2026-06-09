@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@earendil-works/pix-ai";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { fauxAssistantMessage, fauxThinking, fauxToolCall } from "@chengshiliu16/pix-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, type Harness } from "./harness.ts";

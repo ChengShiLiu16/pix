@@ -1,4 +1,4 @@
-import { resetCapabilitiesCache, setCapabilities } from "@earendil-works/pix-tui";
+import { resetCapabilitiesCache, setCapabilities } from "@chengshiliu16/pix-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	detectTerminalBackground,

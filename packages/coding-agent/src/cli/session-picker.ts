@@ -2,7 +2,7 @@
  * TUI session selector for --resume flag
  */
 
-import { ProcessTerminal, setKeybindings, TUI } from "@earendil-works/pix-tui";
+import { ProcessTerminal, setKeybindings, TUI } from "@chengshiliu16/pix-tui";
 import { KeybindingsManager } from "../core/keybindings.ts";
 import type { SessionInfo, SessionListProgress } from "../core/session-manager.ts";
 import { SessionSelectorComponent } from "../modes/interactive/components/session-selector.ts";

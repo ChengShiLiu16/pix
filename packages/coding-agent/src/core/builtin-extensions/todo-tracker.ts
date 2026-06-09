@@ -12,8 +12,8 @@
  *   todo_manage      — LLM 可调用的 todo 管理工具
  */
 
-import { StringEnum } from "@earendil-works/pix-ai";
-import { Text } from "@earendil-works/pix-tui";
+import { StringEnum } from "@chengshiliu16/pix-ai";
+import { Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "../../index.ts";
 import { TodoOverlay } from "./lib/todo-overlay.ts";

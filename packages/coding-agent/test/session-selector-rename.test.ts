@@ -1,4 +1,4 @@
-import { setKeybindings } from "@earendil-works/pix-tui";
+import { setKeybindings } from "@chengshiliu16/pix-tui";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import type { SessionInfo } from "../src/core/session-manager.ts";

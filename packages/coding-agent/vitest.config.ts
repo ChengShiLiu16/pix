@@ -19,10 +19,10 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/pix-ai$/, replacement: aiSrcIndex },
-			{ find: /^@earendil-works\/pix-ai\/oauth$/, replacement: aiSrcOAuth },
-			{ find: /^@earendil-works\/pix-agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@earendil-works\/pix-tui$/, replacement: tuiSrcIndex },
+			{ find: /^@chengshiliu16\/pix-ai$/, replacement: aiSrcIndex },
+			{ find: /^@chengshiliu16\/pix-ai\/oauth$/, replacement: aiSrcOAuth },
+			{ find: /^@chengshiliu16\/pix-agent-core$/, replacement: agentSrcIndex },
+			{ find: /^@chengshiliu16\/pix-tui$/, replacement: tuiSrcIndex },
 			{ find: /^@mariozechner\/pix-ai$/, replacement: aiSrcIndex },
 			{ find: /^@mariozechner\/pix-ai\/oauth$/, replacement: aiSrcOAuth },
 			{ find: /^@mariozechner\/pix-agent-core$/, replacement: agentSrcIndex },

@@ -5,10 +5,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const packages = [
-	{ directory: "packages/ai", name: "@earendil-works/pix-ai" },
-	{ directory: "packages/agent", name: "@earendil-works/pix-agent-core" },
-	{ directory: "packages/tui", name: "@earendil-works/pix-tui" },
-	{ directory: "packages/coding-agent", name: "@earendil-works/pix-coding-agent" },
+	{ directory: "packages/ai", name: "@chengshiliu16/pix-ai" },
+	{ directory: "packages/agent", name: "@chengshiliu16/pix-agent-core" },
+	{ directory: "packages/tui", name: "@chengshiliu16/pix-tui" },
+	{ directory: "packages/coding-agent", name: "@chengshiliu16/pix-coding-agent" },
 ];
 
 const dryRun = process.argv.includes("--dry-run");

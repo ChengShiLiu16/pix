@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, ToolResultMessage } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import { ageToolResults, compactEditArguments } from "../src/core/context-aging.ts";
 

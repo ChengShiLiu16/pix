@@ -1,4 +1,4 @@
-import { type Container, Text } from "@earendil-works/pix-tui";
+import { type Container, Text } from "@chengshiliu16/pix-tui";
 import { type Static, Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import { createGrepToolDefinition, type GrepToolDetails } from "../../index.ts";

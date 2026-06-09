@@ -4,7 +4,7 @@
  * todo_manage is hidden entirely (shown in aboveEditor widget).
  * Non-anchor calls are hidden; anchors render aggregated content via updateDisplay.
  *
- * ## Pi upgrade checklist (verify after bumping @earendil-works/pix-coding-agent)
+ * ## Pi upgrade checklist (verify after bumping @chengshiliu16/pix-coding-agent)
  * 1. ToolExecutionComponent is exported from the package entry and prototype.updateDisplay exists.
  * 2. Batch anchor fields unchanged: hideComponent, argsComplete, getRenderShell,
  *    selfRenderContainer, contentBox.
@@ -155,7 +155,7 @@ export type SimulateUpdateDisplayResult = {
 };
 
 function getPackageRoot(): string {
-	const entryUrl = import.meta.resolve("@earendil-works/pix-coding-agent");
+	const entryUrl = import.meta.resolve("@chengshiliu16/pix-coding-agent");
 	const entryPath = fileURLToPath(entryUrl);
 	return dirname(dirname(entryPath));
 }
@@ -555,7 +555,7 @@ export async function installToolVisibilityPatch(): Promise<void> {
 		setPatchState(undefined);
 	}
 
-	const piMod = (await import("@earendil-works/pix-coding-agent")) as unknown as {
+	const piMod = (await import("@chengshiliu16/pix-coding-agent")) as unknown as {
 		ToolExecutionComponent?: { prototype: ToolExecutionPrototype };
 	};
 	const ToolExecutionClass = piMod.ToolExecutionComponent;

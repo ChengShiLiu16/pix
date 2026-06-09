@@ -40,10 +40,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Api, Model } from "@earendil-works/pix-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
-import { DynamicBorder, getAgentDir } from "@earendil-works/pix-coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text } from "@earendil-works/pix-tui";
+import type { Api, Model } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
+import { DynamicBorder, getAgentDir } from "@chengshiliu16/pix-coding-agent";
+import { Container, Key, type SelectItem, SelectList, Text } from "@chengshiliu16/pix-tui";
 
 // Preset configuration
 interface Preset {

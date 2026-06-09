@@ -4,8 +4,8 @@
  * Shows how to select a specific model and thinking level.
  */
 
-import { getModel } from "@earendil-works/pix-ai";
-import { AuthStorage, createAgentSession, ModelRegistry } from "@earendil-works/pix-coding-agent";
+import { getModel } from "@chengshiliu16/pix-ai";
+import { AuthStorage, createAgentSession, ModelRegistry } from "@chengshiliu16/pix-coding-agent";
 
 // Set up auth storage and model registry
 const authStorage = AuthStorage.create();

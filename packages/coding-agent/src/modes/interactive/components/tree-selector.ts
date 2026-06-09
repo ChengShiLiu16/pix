@@ -8,7 +8,7 @@ import {
 	Text,
 	TruncatedText,
 	truncateToWidth,
-} from "@earendil-works/pix-tui";
+} from "@chengshiliu16/pix-tui";
 import type { SessionTreeNode } from "../../../core/session-manager.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";

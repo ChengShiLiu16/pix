@@ -3,7 +3,7 @@
  *
  * Demonstrates ctx.getSystemPrompt() for accessing the effective system prompt.
  */
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("agent_start", (_event, ctx) => {

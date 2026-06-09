@@ -42,8 +42,8 @@ import {
 	type Tool,
 	type ToolCall,
 	type ToolResultMessage,
-} from "@earendil-works/pix-ai";
-import type { ExtensionAPI } from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
 // =============================================================================
 // OAuth Implementation (copied from packages/ai/src/utils/oauth/anthropic.ts)

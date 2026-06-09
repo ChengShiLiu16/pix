@@ -10,9 +10,9 @@ import {
 	type StreamFn,
 	safeJsonStringifyForTokens,
 	type ThinkingLevel,
-} from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@earendil-works/pix-ai";
-import { completeSimple } from "@earendil-works/pix-ai";
+} from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@chengshiliu16/pix-ai";
+import { completeSimple } from "@chengshiliu16/pix-ai";
 import { emitCompaction, emitCompactionQuality } from "../context-metrics.ts";
 import {
 	convertToLlm,

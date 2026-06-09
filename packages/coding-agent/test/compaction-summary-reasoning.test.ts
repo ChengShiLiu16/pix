@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { AssistantMessage, Model } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { AssistantMessage, Model } from "@chengshiliu16/pix-ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { type CompactionPreparation, compact, estimateTokens, generateSummary } from "../src/core/compaction/index.ts";
 
@@ -9,8 +9,8 @@ const { completeSimpleMock, emitCompactionMock, emitCompactionQualityMock } = vi
 	emitCompactionQualityMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pix-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@earendil-works/pix-ai")>();
+vi.mock("@chengshiliu16/pix-ai", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@chengshiliu16/pix-ai")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,

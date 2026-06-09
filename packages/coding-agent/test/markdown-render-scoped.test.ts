@@ -1,4 +1,4 @@
-import { applyScopedStyle, probeAnsiStyle, wrapWithScopedStyle } from "@earendil-works/pix-tui";
+import { applyScopedStyle, probeAnsiStyle, wrapWithScopedStyle } from "@chengshiliu16/pix-tui";
 import { describe, expect, it } from "vitest";
 import { formatMarkdownForTerminalText } from "../src/core/builtin-extensions/lib/markdown-render.ts";
 

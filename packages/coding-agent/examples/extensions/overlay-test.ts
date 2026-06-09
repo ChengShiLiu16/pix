@@ -8,8 +8,8 @@
  * - Edge case tests (wide chars, styled text, emoji)
  */
 
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-works/pix-coding-agent";
-import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "@earendil-works/pix-tui";
+import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@chengshiliu16/pix-coding-agent";
+import { CURSOR_MARKER, type Focusable, matchesKey, visibleWidth } from "@chengshiliu16/pix-tui";
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("overlay-test", {

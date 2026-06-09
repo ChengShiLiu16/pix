@@ -1,4 +1,4 @@
-import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@earendil-works/pix-tui";
+import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@chengshiliu16/pix-tui";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 

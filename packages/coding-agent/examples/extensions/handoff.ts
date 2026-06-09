@@ -12,10 +12,10 @@
  * The generated prompt appears as a draft in the editor for review/editing.
  */
 
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import { complete, type Message } from "@earendil-works/pix-ai";
-import type { ExtensionAPI, SessionEntry } from "@earendil-works/pix-coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pix-coding-agent";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import { complete, type Message } from "@chengshiliu16/pix-ai";
+import type { ExtensionAPI, SessionEntry } from "@chengshiliu16/pix-coding-agent";
+import { BorderedLoader, convertToLlm, serializeConversation } from "@chengshiliu16/pix-coding-agent";
 
 const SYSTEM_PROMPT = `You are a context transfer assistant. Given a conversation history and the user's goal for a new thread, generate a focused prompt that:
 

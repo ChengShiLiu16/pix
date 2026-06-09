@@ -1,5 +1,5 @@
-import type { AgentTool } from "@earendil-works/pix-agent-core";
-import { Container, Text } from "@earendil-works/pix-tui";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { Container, Text } from "@chengshiliu16/pix-tui";
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
 import { dirname } from "path";
 import { type Static, Type } from "typebox";

@@ -20,8 +20,7 @@
  */
 
 import path from "node:path";
-import { RealFSProvider, VM } from "@earendil-works/gondolin";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pix-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
 import {
 	type BashOperations,
 	createBashTool,
@@ -42,7 +41,8 @@ import {
 	truncateHead,
 	truncateLine,
 	type WriteOperations,
-} from "@earendil-works/pix-coding-agent";
+} from "@chengshiliu16/pix-coding-agent";
+import { RealFSProvider, VM } from "@earendil-works/gondolin";
 
 const GUEST_WORKSPACE = "/workspace";
 const DEFAULT_GREP_LIMIT = 100;

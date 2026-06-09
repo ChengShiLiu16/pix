@@ -10,7 +10,7 @@
  * extensions system using pi.registerTool().
  */
 
-import { createAgentSession, SessionManager } from "@earendil-works/pix-coding-agent";
+import { createAgentSession, SessionManager } from "@chengshiliu16/pix-coding-agent";
 
 // Read-only mode (no edit/write)
 const { session: readOnlySession } = await createAgentSession({

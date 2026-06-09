@@ -1,4 +1,4 @@
-import { setKeybindings } from "@earendil-works/pix-tui";
+import { setKeybindings } from "@chengshiliu16/pix-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";

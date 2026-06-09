@@ -1,5 +1,5 @@
-import type { AgentMessage } from "@earendil-works/pix-agent-core";
-import type { ToolResultMessage } from "@earendil-works/pix-ai";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import type { ToolResultMessage } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import {
 	type OptimizationReport,

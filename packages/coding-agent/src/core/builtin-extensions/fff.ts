@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { type AutocompleteItem, Text } from "@earendil-works/pix-tui";
+import { type AutocompleteItem, Text } from "@chengshiliu16/pix-tui";
 import { FileFinder, type GrepCursor, type GrepMode, type GrepResult } from "@ff-labs/fff-node";
 import { Type } from "typebox";
 import { getAgentDir } from "../../config.ts";

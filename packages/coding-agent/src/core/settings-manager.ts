@@ -1,4 +1,4 @@
-import type { Transport } from "@earendil-works/pix-ai";
+import type { Transport } from "@chengshiliu16/pix-ai";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";

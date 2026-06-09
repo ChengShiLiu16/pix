@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { AutocompleteItem, AutocompleteProvider } from "@earendil-works/pix-tui";
+import type { AutocompleteItem, AutocompleteProvider } from "@chengshiliu16/pix-tui";
 import type { GrepResult, MixedItem, SearchResult } from "@ff-labs/fff-node";
 
 export type FffMode = "tools-and-ui" | "tools-only" | "override";

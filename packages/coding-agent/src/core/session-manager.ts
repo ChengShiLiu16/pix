@@ -1,5 +1,5 @@
-import { type AgentMessage, uuidv7 } from "@earendil-works/pix-agent-core";
-import type { ImageContent, Message, TextContent } from "@earendil-works/pix-ai";
+import { type AgentMessage, uuidv7 } from "@chengshiliu16/pix-agent-core";
+import type { ImageContent, Message, TextContent } from "@chengshiliu16/pix-ai";
 import { randomUUID } from "crypto";
 import {
 	appendFileSync,

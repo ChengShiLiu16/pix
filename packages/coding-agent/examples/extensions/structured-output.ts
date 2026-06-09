@@ -5,8 +5,8 @@
  * without paying for an extra follow-up LLM turn.
  */
 
-import { defineTool, type ExtensionAPI } from "@earendil-works/pix-coding-agent";
-import { Text } from "@earendil-works/pix-tui";
+import { defineTool, type ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
+import { Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 
 interface StructuredOutputDetails {

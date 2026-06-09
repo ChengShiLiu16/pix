@@ -2,8 +2,8 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import { type AgentMessage, safeJsonStringifyForTokens } from "@earendil-works/pix-agent-core";
-import type { Message } from "@earendil-works/pix-ai";
+import { type AgentMessage, safeJsonStringifyForTokens } from "@chengshiliu16/pix-agent-core";
+import type { Message } from "@chengshiliu16/pix-ai";
 
 // ============================================================================
 // File Operation Tracking
