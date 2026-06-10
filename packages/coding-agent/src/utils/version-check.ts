@@ -1,6 +1,4 @@
-import { getPixUserAgent } from "./pix-user-agent.ts";
-
-const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+const LATEST_VERSION_URL = "https://api.github.com/repos/ChengShiLiu16/pix/releases/latest";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
 export interface LatestPiRelease {
@@ -62,7 +60,7 @@ export async function getLatestPiRelease(
 
 	const response = await fetch(LATEST_VERSION_URL, {
 		headers: {
-			"User-Agent": getPixUserAgent(currentVersion),
+			"User-Agent": "pix-coding-agent",
 			accept: "application/json",
 		},
 		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS),
@@ -70,19 +68,17 @@ export async function getLatestPiRelease(
 	if (!response.ok) return undefined;
 
 	const data = (await response.json()) as {
-		packageName?: unknown;
-		version?: unknown;
-		note?: unknown;
+		tag_name?: unknown;
+		body?: unknown;
 	};
-	if (typeof data.version !== "string" || !data.version.trim()) {
+	if (typeof data.tag_name !== "string" || !data.tag_name.trim()) {
 		return undefined;
 	}
-	const packageName =
-		typeof data.packageName === "string" && data.packageName.trim() ? data.packageName.trim() : undefined;
-	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
+	const version = data.tag_name.trim().replace(/^v/, "");
+	const note = typeof data.body === "string" ? data.body.trim().slice(0, 500) : undefined;
 	return {
-		version: data.version.trim(),
-		packageName,
+		version,
+		packageName: "@chengshiliu16/pix-coding-agent",
 		...(note ? { note } : {}),
 	};
 }
