@@ -131,11 +131,12 @@ Agents are markdown files with YAML frontmatter:
 name: my-agent
 description: What this agent does
 tools: read, grep, find, ls
-model: claude-haiku-4-5
 ---
 
 System prompt for the agent goes here.
 ```
+
+The optional `model:` field overrides the model for that agent. When omitted (the default), the subagent inherits the same model as the main process, so it works with whatever provider you've configured.
 
 **Locations:**
 - `~/.pix/agent/agents/*.md` - User-level (always loaded)
@@ -145,12 +146,14 @@ Project agents override user agents with the same name when `agentScope: "both"`
 
 ## Sample Agents
 
+All sample agents inherit the main process model (no `model:` override), so they use whatever provider you've configured.
+
 | Agent | Purpose | Model | Tools |
 |-------|---------|-------|-------|
-| `scout` | Fast codebase recon | Haiku | read, grep, find, ls, bash |
-| `planner` | Implementation plans | Sonnet | read, grep, find, ls |
-| `reviewer` | Code review | Sonnet | read, grep, find, ls, bash |
-| `worker` | General-purpose | Sonnet | (all default) |
+| `scout` | Fast codebase recon | inherits main | read, grep, find, ls, bash |
+| `planner` | Implementation plans | inherits main | read, grep, find, ls |
+| `reviewer` | Code review | inherits main | read, grep, find, ls, bash |
+| `worker` | General-purpose | inherits main | (all default) |
 
 ## Workflow Prompts
 

@@ -423,13 +423,17 @@ async function runSingleAgent(
 }
 
 const TaskItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
+	agent: Type.String({
+		description: "Name of the agent to invoke (must be one of the available agents listed in the tool description)",
+	}),
 	task: Type.String({ description: "Task to delegate to the agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
 const ChainItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
+	agent: Type.String({
+		description: "Name of the agent to invoke (must be one of the available agents listed in the tool description)",
+	}),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
@@ -440,7 +444,12 @@ const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 });
 
 const SubagentParams = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
+	agent: Type.Optional(
+		Type.String({
+			description:
+				"Name of the agent to invoke (single mode). Must be one of the available agents listed in the tool description.",
+		}),
+	),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
@@ -452,11 +461,26 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pix: ExtensionAPI) {
+	// Discover user-level agents at registration so the tool description can list
+	// the valid agent names. Without this the model has to guess the name (and
+	// only learns the real options from an error after a failed call).
+	let knownAgents: string[] = [];
+	try {
+		knownAgents = discoverAgents(process.cwd(), "user").agents.map((a) => a.name);
+	} catch {
+		knownAgents = [];
+	}
+	const availableLine =
+		knownAgents.length > 0
+			? `Available agents: ${knownAgents.join(", ")}.`
+			: "No user agents found in ~/.pix/agent/agents (add agent .md files there).";
+
 	pix.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
+			availableLine,
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			'Default agent scope is "user" (from ~/.pix/agent/agents).',
 			'To enable project-local agents in .pix/agents, set agentScope: "both" (or "project").',
