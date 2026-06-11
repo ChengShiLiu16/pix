@@ -13,7 +13,7 @@ import {
 	syncAssistantMarkdownStreamingState,
 } from "./markdown-render.ts";
 
-const PI_INTERNAL_MODULES = {
+const PIX_INTERNAL_MODULES = {
 	assistantMessageComponent: "dist/modes/interactive/components/assistant-message.js",
 	theme: "dist/modes/interactive/theme/theme.js",
 } as const;
@@ -86,9 +86,9 @@ export async function installMarkdownAssistantPatch(): Promise<void> {
 
 	const [{ AssistantMessageComponent }, { theme }] = await Promise.all([
 		importInternal<{ AssistantMessageComponent: { prototype: AssistantMessagePrototype } }>(
-			PI_INTERNAL_MODULES.assistantMessageComponent,
+			PIX_INTERNAL_MODULES.assistantMessageComponent,
 		),
-		importInternal<{ theme: ThemeLike }>(PI_INTERNAL_MODULES.theme),
+		importInternal<{ theme: ThemeLike }>(PIX_INTERNAL_MODULES.theme),
 	]);
 
 	const prototype = AssistantMessageComponent.prototype;

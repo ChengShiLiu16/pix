@@ -440,13 +440,13 @@ export function getBundledInteractiveAssetPath(name: string): string {
 }
 
 // =============================================================================
-// App Config (from package.json piConfig)
+// App Config (from package.json pixConfig)
 // =============================================================================
 
 interface PackageJson {
 	name?: string;
 	version?: string;
-	piConfig?: {
+	pixConfig?: {
 		name?: string;
 		configDir?: string;
 	};
@@ -460,11 +460,11 @@ try {
 	if (err.code !== "ENOENT") throw e;
 }
 
-const piConfigName: string | undefined = pkg.piConfig?.name;
+const pixConfigName: string | undefined = pkg.pixConfig?.name;
 export const PACKAGE_NAME: string = pkg.name || "@chengshiliu16/pix-coding-agent";
-export const APP_NAME: string = piConfigName || "pix";
-export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
-export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pix";
+export const APP_NAME: string = pixConfigName || "pix";
+export const APP_TITLE: string = pixConfigName ? APP_NAME : "Pix";
+export const CONFIG_DIR_NAME: string = pkg.pixConfig?.configDir || ".pix";
 export const VERSION: string = pkg.version || "0.0.0";
 
 // e.g., PIX_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
@@ -475,12 +475,13 @@ export function expandTildePath(path: string): string {
 	return normalizePath(path);
 }
 
-const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
-
-/** Get the share viewer URL for a gist ID */
+/** Get the share URL for a gist ID */
 export function getShareViewerUrl(gistId: string): string {
-	const baseUrl = process.env.PIX_SHARE_VIEWER_URL || DEFAULT_SHARE_VIEWER_URL;
-	return `${baseUrl}#${gistId}`;
+	const baseUrl = process.env.PIX_SHARE_VIEWER_URL;
+	if (baseUrl) {
+		return `${baseUrl}#${gistId}`;
+	}
+	return `https://gist.github.com/${gistId}`;
 }
 
 // =============================================================================

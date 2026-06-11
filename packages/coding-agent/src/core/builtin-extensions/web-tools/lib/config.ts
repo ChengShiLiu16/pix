@@ -19,10 +19,10 @@ function readInteger(env: WebToolsEnv, key: string, fallback: number, min: numbe
 }
 
 export function getWebToolsConfig(env: WebToolsEnv = process.env): WebToolsConfig {
-	const maxSearchCount = readInteger(env, "PI_WEB_SEARCH_MAX_COUNT", DEFAULT_WEB_TOOLS_CONFIG.maxSearchCount, 1, 20);
+	const maxSearchCount = readInteger(env, "PIX_WEB_SEARCH_MAX_COUNT", DEFAULT_WEB_TOOLS_CONFIG.maxSearchCount, 1, 20);
 	const maxFetchMaxChars = readInteger(
 		env,
-		"PI_WEB_FETCH_MAX_CHARS",
+		"PIX_WEB_FETCH_MAX_CHARS",
 		DEFAULT_WEB_TOOLS_CONFIG.maxFetchMaxChars,
 		1000,
 		100000,
@@ -30,10 +30,10 @@ export function getWebToolsConfig(env: WebToolsEnv = process.env): WebToolsConfi
 
 	return {
 		braveApiKey: env.BRAVE_API_KEY?.trim() || env.BRAVE_SEARCH_API_KEY?.trim() || undefined,
-		defaultCountry: (env.PI_WEB_SEARCH_COUNTRY?.trim() || DEFAULT_WEB_TOOLS_CONFIG.defaultCountry).toUpperCase(),
+		defaultCountry: (env.PIX_WEB_SEARCH_COUNTRY?.trim() || DEFAULT_WEB_TOOLS_CONFIG.defaultCountry).toUpperCase(),
 		defaultSearchCount: readInteger(
 			env,
-			"PI_WEB_SEARCH_DEFAULT_COUNT",
+			"PIX_WEB_SEARCH_DEFAULT_COUNT",
 			DEFAULT_WEB_TOOLS_CONFIG.defaultSearchCount,
 			1,
 			maxSearchCount,
@@ -41,15 +41,21 @@ export function getWebToolsConfig(env: WebToolsEnv = process.env): WebToolsConfi
 		maxSearchCount,
 		searchTimeoutMs: readInteger(
 			env,
-			"PI_WEB_SEARCH_TIMEOUT_MS",
+			"PIX_WEB_SEARCH_TIMEOUT_MS",
 			DEFAULT_WEB_TOOLS_CONFIG.searchTimeoutMs,
 			1000,
 			60000,
 		),
-		fetchTimeoutMs: readInteger(env, "PI_WEB_FETCH_TIMEOUT_MS", DEFAULT_WEB_TOOLS_CONFIG.fetchTimeoutMs, 1000, 60000),
+		fetchTimeoutMs: readInteger(
+			env,
+			"PIX_WEB_FETCH_TIMEOUT_MS",
+			DEFAULT_WEB_TOOLS_CONFIG.fetchTimeoutMs,
+			1000,
+			60000,
+		),
 		defaultFetchMaxChars: readInteger(
 			env,
-			"PI_WEB_FETCH_DEFAULT_MAX_CHARS",
+			"PIX_WEB_FETCH_DEFAULT_MAX_CHARS",
 			DEFAULT_WEB_TOOLS_CONFIG.defaultFetchMaxChars,
 			1000,
 			maxFetchMaxChars,

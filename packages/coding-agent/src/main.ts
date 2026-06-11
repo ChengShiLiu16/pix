@@ -493,7 +493,7 @@ async function promptForProjectTrust(
 ): Promise<ProjectTrustPromptResult | undefined> {
 	return showStartupSelector(
 		settingsManager,
-		`Trust project folder?\n${cwd}\n\nThis allows pi to read project instructions (AGENTS.md/CLAUDE.md), load .pi settings and resources, install missing project packages, and execute project extensions.`,
+		`Trust project folder?\n${cwd}\n\nThis allows pix to read project instructions (AGENTS.md/CLAUDE.md), load .pix settings and resources, install missing project packages, and execute project extensions.`,
 		[
 			{ label: "Trust", value: { trusted: true, remember: true } },
 			{ label: "Trust (this session only)", value: { trusted: true, remember: false } },

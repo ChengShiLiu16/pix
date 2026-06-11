@@ -154,7 +154,7 @@ export function builtin(pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: "ask_user_question 需要 Pi 交互 UI。请用普通文本提问并停止，等待用户回复。",
+								text: "ask_user_question 需要 Pix 交互 UI。请用普通文本提问并停止，等待用户回复。",
 							},
 						],
 						isError: true,
@@ -230,7 +230,7 @@ export function builtin(pi: ExtensionAPI) {
 			const removed = unregisterToolIfPossible(pi);
 			const suffix = removed
 				? "工具已从当前注册表移除。"
-				: "当前 Pi 版本未暴露 unregister API；本会话内残留调用会被拒绝，执行 /reload 后会从工具列表彻底移除。";
+				: "当前 Pix 版本未暴露 unregister API；本会话内残留调用会被拒绝，执行 /reload 后会从工具列表彻底移除。";
 			ctx.ui.notify(`ask_user_question 已关闭。${suffix}`, "info");
 		},
 	});

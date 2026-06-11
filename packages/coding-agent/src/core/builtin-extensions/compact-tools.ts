@@ -170,7 +170,7 @@ export function builtin(pi: ExtensionAPI) {
 		setReadBatchCwd(ctx.cwd);
 		const cwd = ctx.cwd;
 		if (cwd === lastRegisteredCwd) {
-			// Same cwd but still register — /reload clears Pi's tool registry.
+			// Same cwd but still register — /reload clears Pix's tool registry.
 		} else {
 			lastRegisteredCwd = cwd;
 		}

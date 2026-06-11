@@ -6,7 +6,7 @@ See [AGENTS.md](https://github.com/ChengShiLiu16/pix/blob/main/AGENTS.md) for ad
 
 ```bash
 git clone https://github.com/ChengShiLiu16/pix
-cd pi-mono
+cd pix
 npm install
 npm run build
 ```
@@ -14,7 +14,7 @@ npm run build
 Run from source:
 
 ```bash
-/path/to/pi-mono/pix-test.sh
+/path/to/pix/pix-test.sh
 ```
 
 The script can be run from any directory. Pix keeps the caller's current working directory.
@@ -25,7 +25,7 @@ Configure via `package.json`:
 
 ```json
 {
-  "piConfig": {
+  "pixConfig": {
     "name": "pix",
     "configDir": ".pix"
   }
@@ -48,7 +48,7 @@ Never use `__dirname` directly for package assets.
 
 ## Debug Command
 
-`/debug` (hidden) writes to `~/.pix/agent/pi-debug.log`:
+`/debug` (hidden) writes to `~/.pix/agent/pix-debug.log`:
 - Rendered TUI lines with ANSI codes
 - Last messages sent to the LLM
 

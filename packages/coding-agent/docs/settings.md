@@ -11,13 +11,13 @@ Edit directly or use `/settings` for common options.
 
 ## Project Trust
 
-On interactive startup, pi asks before trusting a project folder that contains project-local inputs and has no saved decision in `~/.pi/agent/trust.json`. Trusting a project allows pi to read project instructions (`AGENTS.md`/`CLAUDE.md`), load `.pi/settings.json` and `.pi` resources, install missing project packages, and execute project extensions.
+On interactive startup, pix asks before trusting a project folder that contains project-local inputs and has no saved decision in `~/.pix/agent/trust.json`. Trusting a project allows pix to read project instructions (`AGENTS.md`/`CLAUDE.md`), load `.pix/settings.json` and `.pix` resources, install missing project packages, and execute project extensions.
 
 Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without a saved trust decision, they ignore project-local inputs unless `--approve`/`-a` is passed. Use `--no-approve`/`-na` to ignore project-local inputs for one run even when the project is trusted.
 
-`pi config` assumes project trust for that command so you can view and change project resource settings before starting a session. It does not save a trust decision; starting a session in that folder still prompts. Pass `--no-approve` to hide project-local inputs in `pi config`.
+`pix config` assumes project trust for that command so you can view and change project resource settings before starting a session. It does not save a trust decision; starting a session in that folder still prompts. Pass `--no-approve` to hide project-local inputs in `pix config`.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions. It writes `~/.pi/agent/trust.json` only; the current session is not reloaded, so restart pi for changes to take effect.
+Use `/trust` in interactive mode to save a project trust decision for future sessions. It writes `~/.pix/agent/trust.json` only; the current session is not reloaded, so restart pix for changes to take effect.
 
 ## All Settings
 
@@ -60,7 +60,7 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 
 ### Telemetry and update checks
 
-`enableInstallTelemetry` only controls the anonymous install/update ping to `https://pi.dev/api/report-install`. Opting out of telemetry does not disable update checks; Pix can still fetch `https://pi.dev/api/latest-version` to look for the latest version.
+`enableInstallTelemetry` controls local install/update version state and optional provider attribution headers. Opting out of telemetry does not disable update checks; Pix can still fetch `https://api.github.com/repos/ChengShiLiu16/pix/releases/latest` to look for the latest version.
 
 Set `PIX_SKIP_VERSION_CHECK=1` to disable the Pix version update check. Use `--offline` or `PIX_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
 
@@ -116,7 +116,7 @@ Set `PIX_SKIP_VERSION_CHECK=1` to disable the Pix version update check. Use `--o
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs` (e.g., Google's "quota will reset after 5h"), the request fails immediately with an informative error instead of waiting silently. Set to `0` to disable the cap.
 
-Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Pi sees them, which may block the agent until the provider quota resets in some circumstances.
+Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Pix sees them, which may block the agent until the provider quota resets in some circumstances.
 
 ```json
 {
@@ -203,7 +203,7 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 These settings define where to load extensions, skills, prompts, and themes from.
 
-Paths in `~/.pix/agent/settings.json` resolve relative to `~/.pix/agent`. Paths in `.pix/settings.json` resolve relative to `.pi`. Absolute paths and `~` are supported.
+Paths in `~/.pix/agent/settings.json` resolve relative to `~/.pix/agent`. Paths in `.pix/settings.json` resolve relative to `.pix`. Absolute paths and `~` are supported.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|

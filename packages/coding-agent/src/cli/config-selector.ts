@@ -1,5 +1,5 @@
 /**
- * TUI config selector for `pi config` command
+ * TUI config selector for `pix config` command
  */
 
 import { ProcessTerminal, TUI } from "@chengshiliu16/pix-tui";

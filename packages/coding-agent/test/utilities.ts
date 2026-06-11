@@ -113,8 +113,8 @@ export function hasAuthForProvider(provider: string): boolean {
 	return provider in storage;
 }
 
-/** Path to the real pi agent config directory */
-export const PI_AGENT_DIR = join(homedir(), ".pix", "agent");
+/** Path to the real pix agent config directory */
+export const PIX_AGENT_DIR = join(homedir(), ".pix", "agent");
 
 /**
  * Get an AuthStorage instance backed by ~/.pix/agent/auth.json

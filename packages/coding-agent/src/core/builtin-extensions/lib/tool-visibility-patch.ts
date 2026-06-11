@@ -34,8 +34,8 @@ import {
 
 const DEFAULT_RENDER_WIDTH = 120;
 
-/** Internal pi-coding-agent module paths — update when upgrading Pi. */
-export const PI_INTERNAL_MODULES = {
+/** Internal pix-coding-agent module paths — update when upgrading Pix. */
+export const PIX_INTERNAL_MODULES = {
 	theme: "dist/modes/interactive/theme/theme.js",
 } as const;
 
@@ -561,12 +561,12 @@ export async function installToolVisibilityPatch(): Promise<void> {
 	const ToolExecutionClass = piMod.ToolExecutionComponent;
 	if (!ToolExecutionClass?.prototype?.updateDisplay) {
 		throw new Error(
-			"ToolExecutionComponent.prototype.updateDisplay missing — patch cannot install on this Pi version",
+			"ToolExecutionComponent.prototype.updateDisplay missing — patch cannot install on this Pix version",
 		);
 	}
 
 	const packageRoot = getPackageRoot();
-	const themeUrl = pathToFileURL(join(packageRoot, PI_INTERNAL_MODULES.theme)).href;
+	const themeUrl = pathToFileURL(join(packageRoot, PIX_INTERNAL_MODULES.theme)).href;
 	const themeMod = (await import(themeUrl)) as { theme: ThemeLike };
 	const uiTheme = themeMod.theme;
 	const proto = ToolExecutionClass.prototype;

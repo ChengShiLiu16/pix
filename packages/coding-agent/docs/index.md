@@ -12,13 +12,9 @@ npm install -g --ignore-scripts @chengshiliu16/pix-coding-agent
 
 `--ignore-scripts` disables dependency lifecycle scripts during install. Pix does not require install scripts for normal npm installs.
 
-On Linux or macOS, you can also use the installer:
+Standalone release builds are available from [GitHub Releases](https://github.com/ChengShiLiu16/pix/releases).
 
-```bash
-curl -fsSL https://pi.dev/install.sh | sh
-```
-
-To uninstall pix itself, use npm for curl and npm installs:
+For npm installs, uninstall with:
 
 ```bash
 npm uninstall -g @chengshiliu16/pix-coding-agent
@@ -41,7 +37,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
 - [Using Pix](usage.md) - interactive mode, slash commands, context files, and CLI reference.
 - [Providers](providers.md) - subscription and API-key setup for built-in providers.
-- [Containerization](containerization.md) - sandbox pi with OpenShell, Gondolin, or Docker.
+- [Containerization](containerization.md) - sandbox pix with OpenShell, Gondolin, or Docker.
 - [Settings](settings.md) - global and project settings.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.

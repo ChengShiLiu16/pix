@@ -127,7 +127,7 @@ function formatModeList(): string {
 }
 
 function envMode(): FffMode | undefined {
-	return parseFffMode(process.env.PIX_FFF_MODE ?? process.env.PI_FFF_MODE);
+	return parseFffMode(process.env.PIX_FFF_MODE);
 }
 
 function hasRegexSyntax(pattern: string): boolean {
@@ -422,7 +422,7 @@ export function builtin(pi: ExtensionAPI): void {
 			},
 		});
 
-		if (process.env.PIX_FFF_MULTIGREP === "1" || process.env.PI_FFF_MULTIGREP === "1") {
+		if (process.env.PIX_FFF_MULTIGREP === "1") {
 			pi.registerTool<typeof multiGrepSchema, FffMultiGrepDetails>({
 				name: toolNames.multiGrep,
 				label: toolNames.multiGrep,

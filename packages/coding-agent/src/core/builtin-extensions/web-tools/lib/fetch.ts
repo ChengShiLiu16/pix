@@ -144,7 +144,7 @@ async function fetchPinnedUrl(
 	options: FetchWithPinningOptions,
 ): Promise<FetchPinnedResponse> {
 	const headers = {
-		"User-Agent": "Pi-Web-Tools/0.1 (+https://github.com/badlogic/pi-skills)",
+		"User-Agent": "Pix-Web-Tools/0.1 (+https://github.com/ChengShiLiu16/pix)",
 		Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8",
 	};
 	if (options.fetchFn) {

@@ -229,7 +229,7 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} install <source> [-l]     Install extension source and add to settings
   ${APP_NAME} remove <source> [-l]      Remove extension source from settings
   ${APP_NAME} uninstall <source> [-l]   Alias for remove
-  ${APP_NAME} update [source|self|pi]   Update pi and installed extensions
+  ${APP_NAME} update [source|self|pix]  Update pix and installed extensions
   ${APP_NAME} list [--approve|--no-approve]
                                  List installed extensions from settings
   ${APP_NAME} config [--no-approve]
@@ -378,7 +378,7 @@ ${chalk.bold("Environment Variables:")}
   PIX_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
   PIX_OFFLINE                       - Disable startup network operations when set to 1/true/yes
   PIX_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
-  PIX_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
+  PIX_SHARE_VIEWER_URL              - Base URL for /share command (default: GitHub gist URL)
 
 ${chalk.bold("Built-in Tool Names:")}
   read   - Read file contents

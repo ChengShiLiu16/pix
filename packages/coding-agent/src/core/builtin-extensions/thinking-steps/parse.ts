@@ -219,7 +219,7 @@ function isListContinuationChunk(chunk: string): boolean {
 		DIRECT_ACTION_START_RE.test(firstLine) &&
 		(collectPathTokens(firstLine).length > 0 ||
 			(firstLine.match(SYMBOL_TOKEN_RE) ?? []).length > 0 ||
-			/\b(?:before editing|after editing|npm|node|git|pi|larra|mcp|tsx|tsc)\b/i.test(firstLine));
+			/\b(?:before editing|after editing|npm|node|git|pix|larra|mcp|tsx|tsc)\b/i.test(firstLine));
 	if (hasFocusedActionCue) return false;
 
 	return !/^(?:overall|in summary|to summarize|in conclusion|finally|that should|this should|those steps should|this confirms|that confirms|with that)\b/i.test(
@@ -275,7 +275,7 @@ const SPINNER_STATUS_RE =
 const PATH_TOKEN_RE = /\b(?:[a-z0-9_-]+[/.])+[a-z0-9_-]+\b/gi;
 const SYMBOL_TOKEN_RE = /\b[a-z_][a-z0-9_]*\([^)]*\)/gi;
 const ARTIFACT_RE =
-	/(?:\b[a-z0-9_-]+\.(?:ts|tsx|js|jsx|json|md|txt|yml|yaml|lock)\b|\b[a-z_][a-z0-9_]*\([^)]*\)|`[^`]+`|\b(?:npm|node|git|pi|larra|mcp|tsx|tsc)\b|\b(?:ts\d{3,5}|err_[a-z0-9_]+)\b)/i;
+	/(?:\b[a-z0-9_-]+\.(?:ts|tsx|js|jsx|json|md|txt|yml|yaml|lock)\b|\b[a-z_][a-z0-9_]*\([^)]*\)|`[^`]+`|\b(?:npm|node|git|pix|larra|mcp|tsx|tsc)\b|\b(?:ts\d{3,5}|err_[a-z0-9_]+)\b)/i;
 const FAILURE_CUE_RE =
 	/\b(failed|failure|error|errors|blocked|abort(?:ed)?|cannot|unable|did not complete|not completed|reverted|rollback|locked)\b/i;
 const _SUCCESS_CUE_RE = /\b(pass(?:ed)?|succeed(?:ed)?)\b/i;
@@ -361,7 +361,7 @@ function isNoiseLine(value: string): boolean {
 function splitSummarySentences(value: string): string[] {
 	const placeholders = new Map<string, string>();
 	const protectedValue = value.replace(PATH_TOKEN_RE, (match) => {
-		const token = `__PI_THINKING_PATH_${placeholders.size}__`;
+		const token = `__PIX_THINKING_PATH_${placeholders.size}__`;
 		placeholders.set(token, match);
 		return token;
 	});

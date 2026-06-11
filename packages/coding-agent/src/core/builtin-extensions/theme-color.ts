@@ -33,7 +33,7 @@ export function builtin(pi: ExtensionAPI) {
 	const agentRoot = agentRootFromImportUrl(import.meta.url);
 
 	pi.registerCommand("theme-color", {
-		description: "Set current Pi theme accent color",
+		description: "Set current Pix theme accent color",
 		getArgumentCompletions: themeColorCompletions,
 		handler: async (args, ctx) => {
 			try {
@@ -43,7 +43,7 @@ export function builtin(pi: ExtensionAPI) {
 				const result = applyThemeAccentColor(theme, args);
 				await writeFile(themePath, `${JSON.stringify(result.theme, null, "\t")}\n`, "utf8");
 
-				const message = `Theme ${themeName} accent set to ${result.color.label} (${result.color.hex}). Reload/restart Pi to apply.`;
+				const message = `Theme ${themeName} accent set to ${result.color.label} (${result.color.hex}). Reload/restart Pix to apply.`;
 				if (ctx.hasUI) ctx.ui.notify(message, "info");
 				else console.info(message);
 			} catch (error) {

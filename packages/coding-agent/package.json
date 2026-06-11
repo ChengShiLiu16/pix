@@ -3,7 +3,7 @@
 	"version": "0.78.1",
 	"description": "Coding agent CLI with read, bash, edit, write tools and session management",
 	"type": "module",
-	"piConfig": {
+	"pixConfig": {
 		"name": "pix",
 		"configDir": ".pix"
 	},

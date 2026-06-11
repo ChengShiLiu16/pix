@@ -1,7 +1,7 @@
 const LATEST_VERSION_URL = "https://api.github.com/repos/ChengShiLiu16/pix/releases/latest";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
-export interface LatestPiRelease {
+export interface LatestPixRelease {
 	version: string;
 	packageName?: string;
 	note?: string;
@@ -51,10 +51,10 @@ export function isNewerPackageVersion(candidateVersion: string, currentVersion: 
 	return candidateVersion.trim() !== currentVersion.trim();
 }
 
-export async function getLatestPiRelease(
+export async function getLatestPixRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number } = {},
-): Promise<LatestPiRelease | undefined> {
+): Promise<LatestPixRelease | undefined> {
 	if (process.env.PIX_SKIP_VERSION_CHECK || process.env.PIX_OFFLINE) return undefined;
 	if (currentVersion.includes("-pix.")) return undefined;
 
@@ -69,30 +69,36 @@ export async function getLatestPiRelease(
 
 	const data = (await response.json()) as {
 		tag_name?: unknown;
+		version?: unknown;
 		body?: unknown;
+		note?: unknown;
+		packageName?: unknown;
 	};
-	if (typeof data.tag_name !== "string" || !data.tag_name.trim()) {
+	const rawVersion = typeof data.tag_name === "string" ? data.tag_name : data.version;
+	if (typeof rawVersion !== "string" || !rawVersion.trim()) {
 		return undefined;
 	}
-	const version = data.tag_name.trim().replace(/^v/, "");
-	const note = typeof data.body === "string" ? data.body.trim().slice(0, 500) : undefined;
+	const version = rawVersion.trim().replace(/^v/, "");
+	const rawNote = typeof data.body === "string" ? data.body : data.note;
+	const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : undefined;
+	const packageName = typeof data.packageName === "string" ? data.packageName : "@chengshiliu16/pix-coding-agent";
 	return {
 		version,
-		packageName: "@chengshiliu16/pix-coding-agent",
+		packageName,
 		...(note ? { note } : {}),
 	};
 }
 
-export async function getLatestPiVersion(
+export async function getLatestPixVersion(
 	currentVersion: string,
 	options: { timeoutMs?: number } = {},
 ): Promise<string | undefined> {
-	return (await getLatestPiRelease(currentVersion, options))?.version;
+	return (await getLatestPixRelease(currentVersion, options))?.version;
 }
 
-export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
+export async function checkForNewPixVersion(currentVersion: string): Promise<LatestPixRelease | undefined> {
 	try {
-		const latestRelease = await getLatestPiRelease(currentVersion);
+		const latestRelease = await getLatestPixRelease(currentVersion);
 		if (latestRelease && isNewerPackageVersion(latestRelease.version, currentVersion)) {
 			return latestRelease;
 		}

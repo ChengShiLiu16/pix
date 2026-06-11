@@ -29,7 +29,7 @@ import {
 import { getPatchedToolExecutionClass, isToolVisibilityPatchInstalled } from "./lib/tool-visibility-patch.ts";
 
 export function builtin(pi: ExtensionAPI) {
-	/** True while Pi replays persisted messages after session_start (avoid wiping batch replay). */
+	/** True while pix replays persisted messages after session_start (avoid wiping batch replay). */
 	let hydratingSession = false;
 
 	pi.registerCommand("batch-debug", {
@@ -46,7 +46,7 @@ export function builtin(pi: ExtensionAPI) {
 
 			const snapshot = snapshotBatchDebugState();
 			const lines = [
-				`Batch debug logging: ${isBatchDebugEnabled() ? "on" : "off"} (PI_BATCH_DEBUG=1 also enables)`,
+				`Batch debug logging: ${isBatchDebugEnabled() ? "on" : "off"} (PIX_BATCH_DEBUG=1 also enables)`,
 				`Tool visibility patch: ${isToolVisibilityPatchInstalled() ? "installed" : "NOT installed"}`,
 				`Patch target: ${getPatchedToolExecutionClass() ? "ToolExecutionComponent export" : "none"}`,
 				"Batch debug snapshot:",
@@ -74,7 +74,7 @@ export function builtin(pi: ExtensionAPI) {
 			replayBatchStateFromSessionMessages(messages);
 		};
 		applyReplay();
-		// Pi may emit message_start(user) while rebuilding chat — re-apply after that pass.
+		// Pix may emit message_start(user) while rebuilding chat — re-apply after that pass.
 		queueMicrotask(() => {
 			applyReplay();
 			hydratingSession = false;

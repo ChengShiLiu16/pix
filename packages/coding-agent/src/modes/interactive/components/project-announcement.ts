@@ -4,7 +4,7 @@ import { getBundledInteractiveAssetPath } from "../../../config.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 
-const BLOG_URL = "https://mariozechner.at/posts/2026-04-08-ive-sold-out/";
+const PROJECT_URL = "https://github.com/ChengShiLiu16/pix";
 const IMAGE_FILENAME = "clankolas.png";
 
 let cachedImageBase64: string | undefined;
@@ -24,15 +24,15 @@ function loadImageBase64(): string | undefined {
 	return cachedImageBase64;
 }
 
-export class EarendilAnnouncementComponent extends Container {
+export class ProjectAnnouncementComponent extends Container {
 	constructor() {
 		super();
 
 		this.addChild(new DynamicBorder((text) => theme.fg("accent", text)));
-		this.addChild(new Text(theme.bold(theme.fg("accent", "pi has joined Earendil")), 1, 0));
+		this.addChild(new Text(theme.bold(theme.fg("accent", "Pix coding agent")), 1, 0));
 		this.addChild(new Spacer(1));
-		this.addChild(new Text(theme.fg("muted", "Read the blog post:"), 1, 0));
-		this.addChild(new Text(theme.fg("mdLink", BLOG_URL), 1, 0));
+		this.addChild(new Text(theme.fg("muted", "Project home:"), 1, 0));
+		this.addChild(new Text(theme.fg("mdLink", PROJECT_URL), 1, 0));
 		this.addChild(new Spacer(1));
 
 		const imageBase64 = loadImageBase64();
