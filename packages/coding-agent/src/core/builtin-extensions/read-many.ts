@@ -166,17 +166,17 @@ function buildReadManyResultText(results: { path: string; result: ReadResult }[]
 	return { text, firstTruncatedFileIndex };
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let lastRegisteredCwd = "";
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		setDisplayCwd(ctx.cwd);
 		setReadBatchCwd(ctx.cwd);
 		if (ctx.cwd === lastRegisteredCwd) return;
 		lastRegisteredCwd = ctx.cwd;
 		const readDef = createReadToolDefinition(ctx.cwd);
 
-		pi.registerTool<typeof schema, ReadManyDetails>({
+		pix.registerTool<typeof schema, ReadManyDetails>({
 			name: "read_many",
 			label: "read many",
 			description:

@@ -29,10 +29,10 @@ async function readActiveThemeName(agentRoot: string): Promise<string> {
 	return settings.theme;
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	const agentRoot = agentRootFromImportUrl(import.meta.url);
 
-	pi.registerCommand("theme-color", {
+	pix.registerCommand("theme-color", {
 		description: "Set current Pix theme accent color",
 		getArgumentCompletions: themeColorCompletions,
 		handler: async (args, ctx) => {

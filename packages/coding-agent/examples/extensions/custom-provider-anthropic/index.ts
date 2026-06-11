@@ -565,8 +565,8 @@ function streamCustomAnthropic(
 // Extension Entry Point
 // =============================================================================
 
-export default function (pi: ExtensionAPI) {
-	pi.registerProvider("custom-anthropic", {
+export default function (pix: ExtensionAPI) {
+	pix.registerProvider("custom-anthropic", {
 		baseUrl: "https://api.anthropic.com",
 		apiKey: "$CUSTOM_ANTHROPIC_API_KEY",
 		api: "custom-anthropic-api",

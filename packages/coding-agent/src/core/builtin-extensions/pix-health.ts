@@ -7,10 +7,10 @@ function agentRootFromImportUrl(importUrl: string): string {
 	return dirname(dirname(fileURLToPath(importUrl)));
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	const agentRoot = agentRootFromImportUrl(import.meta.url);
 
-	pi.registerCommand("pix-health", {
+	pix.registerCommand("pix-health", {
 		description: "检查 Pix agent 扩展健康状态",
 		handler: async (_args, ctx) => {
 			const text = formatPixHealth(collectPixHealth(agentRoot));

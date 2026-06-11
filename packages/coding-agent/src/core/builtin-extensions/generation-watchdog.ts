@@ -4,7 +4,7 @@ import { generationWatchdogStatus, shouldShowGenerationWatchdog } from "./lib/ge
 const STATUS_KEY = "generation-watchdog";
 const TICK_MS = 1000;
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let activeCtx: ExtensionContext | undefined;
 	let assistantActive = false;
 	let startedAt = 0;
@@ -51,25 +51,25 @@ export function builtin(pi: ExtensionAPI) {
 		clearStatus();
 	}
 
-	pi.on("message_start", async (event, ctx) => {
+	pix.on("message_start", async (event, ctx) => {
 		if (event.message.role === "assistant") start(ctx);
 	});
 
-	pi.on("message_update", async (event, ctx) => {
+	pix.on("message_update", async (event, ctx) => {
 		if (event.message.role !== "assistant") return;
 		if (!assistantActive) start(ctx);
 		markUpdate();
 	});
 
-	pi.on("message_end", async (event) => {
+	pix.on("message_end", async (event) => {
 		if (event.message.role === "assistant") stop();
 	});
 
-	pi.on("agent_end", async () => {
+	pix.on("agent_end", async () => {
 		stop();
 	});
 
-	pi.on("session_shutdown", async () => {
+	pix.on("session_shutdown", async () => {
 		stop();
 		activeCtx = undefined;
 	});

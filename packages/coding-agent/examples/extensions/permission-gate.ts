@@ -7,10 +7,10 @@
 
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+export default function (pix: ExtensionAPI) {
 	const dangerousPatterns = [/\brm\s+(-rf?|--recursive)/i, /\bsudo\b/i, /\b(chmod|chown)\b.*777/i];
 
-	pi.on("tool_call", async (event, ctx) => {
+	pix.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "bash") return undefined;
 
 		const command = event.input.command as string;

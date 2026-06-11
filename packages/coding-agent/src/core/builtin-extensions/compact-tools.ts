@@ -147,7 +147,7 @@ function shouldRenderAsToolError(context: { isError?: boolean }, result: { conte
 
 const EMPTY = new Text("", 0, 0);
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let lastRegisteredCwd = "";
 
 	void installToolVisibilityPatch().catch((err) => {
@@ -157,7 +157,7 @@ export function builtin(pi: ExtensionAPI) {
 		);
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		try {
 			await installToolVisibilityPatch();
 		} catch (err) {
@@ -185,7 +185,7 @@ export function builtin(pi: ExtensionAPI) {
 			}
 			return readDef.execute(toolCallId, params, signal, onUpdate, ctx);
 		};
-		pi.registerTool({
+		pix.registerTool({
 			name: readDef.name,
 			label: readDef.label,
 			description: readDef.description,
@@ -261,7 +261,7 @@ export function builtin(pi: ExtensionAPI) {
 			}
 			return bashDef.execute(toolCallId, params, signal, onUpdate, ctx);
 		};
-		pi.registerTool({
+		pix.registerTool({
 			name: bashDef.name,
 			label: bashDef.label,
 			description: bashDef.description,
@@ -312,7 +312,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		// ======== grep ========
 		const grepDef = createGrepToolDefinition(cwd);
-		pi.registerTool({
+		pix.registerTool({
 			name: grepDef.name,
 			label: grepDef.label,
 			description: grepDef.description,
@@ -342,7 +342,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		// ======== find ========
 		const findDef = createFindToolDefinition(cwd);
-		pi.registerTool({
+		pix.registerTool({
 			name: findDef.name,
 			label: findDef.label,
 			description: findDef.description,
@@ -376,7 +376,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		// ======== ls ========
 		const lsDef = createLsToolDefinition(cwd);
-		pi.registerTool({
+		pix.registerTool({
 			name: lsDef.name,
 			label: lsDef.label,
 			description: lsDef.description,
@@ -413,7 +413,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		// ======== write ========
 		const writeDef = createWriteToolDefinition(cwd);
-		pi.registerTool({
+		pix.registerTool({
 			name: writeDef.name,
 			label: writeDef.label,
 			description: writeDef.description,
@@ -446,7 +446,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		// ======== edit ========
 		const editDef = createEditToolDefinition(cwd);
-		pi.registerTool({
+		pix.registerTool({
 			name: editDef.name,
 			label: editDef.label,
 			description: editDef.description,
@@ -483,7 +483,7 @@ export function builtin(pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("session_shutdown", async () => {
+	pix.on("session_shutdown", async () => {
 		restoreToolVisibilityPatch();
 	});
 }

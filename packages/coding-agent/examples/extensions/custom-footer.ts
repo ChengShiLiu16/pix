@@ -12,10 +12,10 @@ import type { AssistantMessage } from "@chengshiliu16/pix-ai";
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { truncateToWidth, visibleWidth } from "@chengshiliu16/pix-tui";
 
-export default function (pi: ExtensionAPI) {
+export default function (pix: ExtensionAPI) {
 	let enabled = false;
 
-	pi.registerCommand("footer", {
+	pix.registerCommand("footer", {
 		description: "Toggle custom footer",
 		handler: async (_args, ctx) => {
 			enabled = !enabled;

@@ -80,8 +80,8 @@ async function writeEnabled(enabled: boolean): Promise<void> {
 	}
 }
 
-function unregisterToolIfPossible(pi: ExtensionAPI): boolean {
-	const candidate = pi as ExtensionAPI & {
+function unregisterToolIfPossible(pix: ExtensionAPI): boolean {
+	const candidate = pix as ExtensionAPI & {
 		unregisterTool?: (name: string) => void;
 		removeTool?: (name: string) => void;
 	};
@@ -105,11 +105,11 @@ function renderToolText(
 	return new Text(styled, 0, 0);
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let enabled = DEFAULT_ASK_USER_QUESTION_ENABLED;
 
 	const registerQuestionTool = () => {
-		pi.registerTool<typeof schema, AskUserQuestionDetails>({
+		pix.registerTool<typeof schema, AskUserQuestionDetails>({
 			name: ASK_USER_QUESTION_TOOL_NAME,
 			label: "Ask User Question",
 			description:
@@ -202,7 +202,7 @@ export function builtin(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.registerCommand("ask-user-question", {
+	pix.registerCommand("ask-user-question", {
 		description: "开启、关闭或查看 ask_user_question 工具状态",
 		handler: async (args, ctx) => {
 			const action = parseAskUserQuestionCommand(args);
@@ -219,7 +219,7 @@ export function builtin(pi: ExtensionAPI) {
 
 			enabled = action === "on";
 			await writeEnabled(enabled);
-			pi.appendEntry(STATE_TYPE, { enabled });
+			pix.appendEntry(STATE_TYPE, { enabled });
 
 			if (enabled) {
 				registerQuestionTool();
@@ -227,7 +227,7 @@ export function builtin(pi: ExtensionAPI) {
 				return;
 			}
 
-			const removed = unregisterToolIfPossible(pi);
+			const removed = unregisterToolIfPossible(pix);
 			const suffix = removed
 				? "工具已从当前注册表移除。"
 				: "当前 Pix 版本未暴露 unregister API；本会话内残留调用会被拒绝，执行 /reload 后会从工具列表彻底移除。";
@@ -235,7 +235,7 @@ export function builtin(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		try {
 			enabled = await readEnabled();
 			if (enabled) registerQuestionTool();

@@ -7,14 +7,14 @@ function isAssistantMessage(message: unknown): message is AssistantMessage {
 	return role === "assistant";
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let agentStartMs: number | null = null;
 
-	pi.on("agent_start", () => {
+	pix.on("agent_start", () => {
 		agentStartMs = Date.now();
 	});
 
-	pi.on("agent_end", (event, ctx) => {
+	pix.on("agent_end", (event, ctx) => {
 		if (!ctx.hasUI) return;
 		if (agentStartMs === null) return;
 

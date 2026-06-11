@@ -5,13 +5,13 @@
  */
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
-	pi.on("agent_start", (_event, ctx) => {
+export default function (pix: ExtensionAPI) {
+	pix.on("agent_start", (_event, ctx) => {
 		const prompt = ctx.getSystemPrompt();
 		ctx.ui.setStatus("system-prompt", `System: ${prompt.length} chars`);
 	});
 
-	pi.on("session_shutdown", (_event, ctx) => {
+	pix.on("session_shutdown", (_event, ctx) => {
 		ctx.ui.setStatus("system-prompt", undefined);
 	});
 }

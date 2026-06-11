@@ -60,6 +60,6 @@ const structuredOutputTool = defineTool({
 	},
 });
 
-export default function (pi: ExtensionAPI) {
-	pi.registerTool(structuredOutputTool);
+export default function (pix: ExtensionAPI) {
+	pix.registerTool(structuredOutputTool);
 }

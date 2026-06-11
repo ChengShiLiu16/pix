@@ -28,11 +28,11 @@ import {
 } from "./lib/tool-batch-sequence.ts";
 import { getPatchedToolExecutionClass, isToolVisibilityPatchInstalled } from "./lib/tool-visibility-patch.ts";
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	/** True while pix replays persisted messages after session_start (avoid wiping batch replay). */
 	let hydratingSession = false;
 
-	pi.registerCommand("batch-debug", {
+	pix.registerCommand("batch-debug", {
 		description: "Print batch state; use `/batch-debug on|off` to toggle visibility logging",
 		handler: async (args, ctx) => {
 			const trimmed = args.trim().toLowerCase();
@@ -61,7 +61,7 @@ export function builtin(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		setDisplayCwd(ctx.cwd);
 		setReadBatchCwd(ctx.cwd);
 		hydratingSession = true;
@@ -81,11 +81,11 @@ export function builtin(pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("turn_start", async () => {
+	pix.on("turn_start", async () => {
 		hydratingSession = false;
 	});
 
-	pi.on("message_start", async (event) => {
+	pix.on("message_start", async (event) => {
 		if (event.message.role === "user") {
 			if (hydratingSession) return;
 			resetAllBatchState();
@@ -96,7 +96,7 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("message_update", async (event) => {
+	pix.on("message_update", async (event) => {
 		if (event.message.role !== "assistant") return;
 		const assistantEvent = event.assistantMessageEvent;
 		switch (assistantEvent.type) {
@@ -135,7 +135,7 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("tool_call", async (event) => {
+	pix.on("tool_call", async (event) => {
 		recordToolCallOrder(event.toolCallId);
 		if (isToolCallEventType("read", event)) {
 			recordReadToolCall(event.toolCallId, "read", event.input);

@@ -21,8 +21,8 @@ const STATUS_LABELS: Record<string, string> = {
 	"?": "未跟踪",
 };
 
-export function builtin(pi: ExtensionAPI) {
-	pi.registerCommand("diff", {
+export function builtin(pix: ExtensionAPI) {
+	pix.registerCommand("diff", {
 		description: "查看 git 变更文件，选择后在编辑器中打开 diff",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) {
@@ -31,7 +31,7 @@ export function builtin(pi: ExtensionAPI) {
 			}
 
 			// 获取所有变更文件
-			const result = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
+			const result = await pix.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
 			if (result.code !== 0) {
 				ctx.ui.notify(`git status 失败: ${result.stderr}`, "error");
 				return;
@@ -78,15 +78,15 @@ export function builtin(pi: ExtensionAPI) {
 
 			if (target.status === "?") {
 				// 未跟踪文件，直接打开
-				await pi.exec("code", ["-g", target.file], { cwd: ctx.cwd });
+				await pix.exec("code", ["-g", target.file], { cwd: ctx.cwd });
 			} else {
 				// 已跟踪文件，打开 diff
-				const diffResult = await pi.exec("git", ["difftool", "-y", "--tool=vscode", target.file], {
+				const diffResult = await pix.exec("git", ["difftool", "-y", "--tool=vscode", target.file], {
 					cwd: ctx.cwd,
 				});
 				// difftool 可能失败，回退到直接打开
 				if (diffResult.code !== 0) {
-					await pi.exec("code", ["-g", target.file], { cwd: ctx.cwd });
+					await pix.exec("code", ["-g", target.file], { cwd: ctx.cwd });
 				}
 			}
 		},

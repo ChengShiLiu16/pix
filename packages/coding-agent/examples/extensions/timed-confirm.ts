@@ -9,9 +9,9 @@
 
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+export default function (pix: ExtensionAPI) {
 	// Simple approach: use timeout option (recommended)
-	pi.registerCommand("timed", {
+	pix.registerCommand("timed", {
 		description: "Show a timed confirmation dialog (auto-cancels in 5s with countdown)",
 		handler: async (_args, ctx) => {
 			const confirmed = await ctx.ui.confirm(
@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("timed-select", {
+	pix.registerCommand("timed-select", {
 		description: "Show a timed select dialog (auto-cancels in 10s with countdown)",
 		handler: async (_args, ctx) => {
 			const choice = await ctx.ui.select("Pick an option", ["Option A", "Option B", "Option C"], { timeout: 10000 });
@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Manual approach: use AbortSignal for more control
-	pi.registerCommand("timed-signal", {
+	pix.registerCommand("timed-signal", {
 		description: "Show a timed confirm using AbortSignal (manual approach)",
 		handler: async (_args, ctx) => {
 			const controller = new AbortController();

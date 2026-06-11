@@ -9,9 +9,9 @@
  */
 import type { ExtensionAPI, SessionBeforeCompactEvent } from "../../index.ts";
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	// 在内置自动压缩触发前，注入自定义指令
-	pi.on("session_before_compact", async (event: SessionBeforeCompactEvent, _ctx) => {
+	pix.on("session_before_compact", async (event: SessionBeforeCompactEvent, _ctx) => {
 		// 只在自动压缩时注入指令（手动 /compact 由用户自己控制）
 		if (event.reason !== "manual") {
 			return {
@@ -21,7 +21,7 @@ export function builtin(pi: ExtensionAPI) {
 	});
 
 	// 手动压缩命令
-	pi.registerCommand("compact-here", {
+	pix.registerCommand("compact-here", {
 		description: "压缩上下文，可附加自定义指令",
 		handler: async (args, ctx) => {
 			const customInstructions = args?.trim() || undefined;

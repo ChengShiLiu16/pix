@@ -32,7 +32,7 @@ function extractPromptMatch(prompt: string): PromptMatch | undefined {
 }
 
 async function fetchGhMetadata(
-	pi: ExtensionAPI,
+	pix: ExtensionAPI,
 	kind: PromptMatch["kind"],
 	url: string,
 ): Promise<GhMetadata | undefined> {
@@ -40,7 +40,7 @@ async function fetchGhMetadata(
 		kind === "pr" ? ["pr", "view", url, "--json", "title,author"] : ["issue", "view", url, "--json", "title,author"];
 
 	try {
-		const result = await pi.exec("gh", args);
+		const result = await pix.exec("gh", args);
 		if (result.code !== 0 || !result.stdout) return undefined;
 		return JSON.parse(result.stdout) as GhMetadata;
 	} catch {
@@ -58,7 +58,7 @@ function formatAuthor(author?: GhMetadata["author"]): string | undefined {
 	return undefined;
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	const setWidget = (ctx: ExtensionContext, match: PromptMatch, title?: string, authorText?: string) => {
 		ctx.ui.setWidget("prompt-url", (_tui, thm) => {
 			const titleText = title ? thm.fg("accent", title) : thm.fg("accent", match.url);
@@ -81,17 +81,17 @@ export function builtin(pi: ExtensionAPI) {
 		const trimmedTitle = title?.trim();
 		const fallbackName = `${label}: ${match.url}`;
 		const desiredName = trimmedTitle ? `${label}: ${trimmedTitle} (${match.url})` : fallbackName;
-		const currentName = pi.getSessionName()?.trim();
+		const currentName = pix.getSessionName()?.trim();
 		if (!currentName) {
-			pi.setSessionName(desiredName);
+			pix.setSessionName(desiredName);
 			return;
 		}
 		if (currentName === match.url || currentName === fallbackName) {
-			pi.setSessionName(desiredName);
+			pix.setSessionName(desiredName);
 		}
 	};
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	pix.on("before_agent_start", async (event, ctx) => {
 		if (!ctx.hasUI) return;
 		const match = extractPromptMatch(event.prompt);
 		if (!match) {
@@ -100,7 +100,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		setWidget(ctx, match);
 		applySessionName(ctx, match);
-		void fetchGhMetadata(pi, match.kind, match.url).then((meta) => {
+		void fetchGhMetadata(pix, match.kind, match.url).then((meta) => {
 			const title = meta?.title?.trim();
 			const authorText = formatAuthor(meta?.author);
 			setWidget(ctx, match, title, authorText);
@@ -140,7 +140,7 @@ export function builtin(pi: ExtensionAPI) {
 
 		setWidget(ctx, match);
 		applySessionName(ctx, match);
-		void fetchGhMetadata(pi, match.kind, match.url).then((meta) => {
+		void fetchGhMetadata(pix, match.kind, match.url).then((meta) => {
 			const title = meta?.title?.trim();
 			const authorText = formatAuthor(meta?.author);
 			setWidget(ctx, match, title, authorText);
@@ -148,7 +148,7 @@ export function builtin(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		rebuildFromSession(ctx);
 	});
 }

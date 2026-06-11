@@ -9,8 +9,8 @@
 
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
-	pi.on("model_select", async (event, ctx) => {
+export default function (pix: ExtensionAPI) {
+	pix.on("model_select", async (event, ctx) => {
 		const { model, previousModel, source } = event;
 
 		// Format model identifiers

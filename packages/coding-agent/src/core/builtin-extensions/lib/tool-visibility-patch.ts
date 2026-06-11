@@ -547,7 +547,7 @@ export function restoreToolVisibilityPatch(): void {
 }
 
 export async function installToolVisibilityPatch(): Promise<void> {
-	// Regression guard: never patch pi-tui Container.render/addChild or ToolExecution.render
+	// Regression guard: never patch pix-tui Container.render/addChild or ToolExecution.render
 	// globally — that wiped the entire chat tree (see .revert-emergency-tui-20260524-190411/REVERT.md).
 	const prior = getPatchState();
 	if (prior) {

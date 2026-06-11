@@ -10,7 +10,7 @@
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { createBashTool } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+export default function (pix: ExtensionAPI) {
 	const cwd = process.cwd();
 
 	const bashTool = createBashTool(cwd, {
@@ -21,7 +21,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 	});
 
-	pi.registerTool({
+	pix.registerTool({
 		...bashTool,
 		execute: async (id, params, signal, onUpdate, _ctx) => {
 			return bashTool.execute(id, params, signal, onUpdate);

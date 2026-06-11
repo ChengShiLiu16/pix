@@ -30,11 +30,11 @@ interface SpanRecord {
 Example tree:
 
 ```text
-traceId=t1 spanId=s1 parent=-  name=pi.agent.prompt
-traceId=t1 spanId=s2 parent=s1 name=pi.agent.turn
-traceId=t1 spanId=s3 parent=s2 name=pi.ai.provider.request
-traceId=t1 spanId=s4 parent=s2 name=pi.agent.tool_call
-traceId=t1 spanId=s5 parent=s4 name=pi.session.append_entry
+traceId=t1 spanId=s1 parent=-  name=pix.agent.prompt
+traceId=t1 spanId=s2 parent=s1 name=pix.agent.turn
+traceId=t1 spanId=s3 parent=s2 name=pix.ai.provider.request
+traceId=t1 spanId=s4 parent=s2 name=pix.agent.tool_call
+traceId=t1 spanId=s5 parent=s4 name=pix.session.append_entry
 ```
 
 ## Async context
@@ -147,25 +147,25 @@ For Node, diagnostics channels can be used as a passive event bus:
 
 ```ts
 import { channel } from "diagnostics_channel";
-channel("pi.observability").publish(event);
+channel("pix.observability").publish(event);
 ```
 
-Subscribers can create OTel/Sentry spans without monkey-patching pi.
+Subscribers can create OTel/Sentry spans without monkey-patching pix.
 
-## What pi emits
+## What pix emits
 
 Pi emits what happened. It does not create OTel/Sentry spans directly.
 
 Initial minimal event names:
 
 ```text
-pi.agent.prompt
-pi.agent.skill
-pi.agent.prompt_template
-pi.agent.compaction
-pi.agent.branch_navigation
-pi.agent.session.append_entry
-pi.ai.provider.request
+pix.agent.prompt
+pix.agent.skill
+pix.agent.prompt_template
+pix.agent.compaction
+pix.agent.branch_navigation
+pix.agent.session.append_entry
+pix.ai.provider.request
 ```
 
 Each operation emits:
@@ -179,14 +179,14 @@ error
 Later additions:
 
 ```text
-pi.agent.turn
-pi.agent.tool_call
-pi.agent.queue_update
-pi.ai.provider.retry
-pi.ai.provider.first_token
-pi.ai.provider.usage
-pi.session.read
-pi.session.write
+pix.agent.turn
+pix.agent.tool_call
+pix.agent.queue_update
+pix.ai.provider.retry
+pix.ai.provider.first_token
+pix.ai.provider.usage
+pix.session.read
+pix.session.write
 ```
 
 ## Minimal instrumentation points
@@ -206,7 +206,7 @@ Example:
 
 ```ts
 return traceOperation(
-  "pi.agent.prompt",
+  "pix.agent.prompt",
   {
     sessionId: turnState.sessionId,
     provider: turnState.model.provider,
@@ -222,7 +222,7 @@ Session write:
 
 ```ts
 return traceOperation(
-  "pi.agent.session.append_entry",
+  "pix.agent.session.append_entry",
   { entryType: entry.type },
   async () => {
     await this.unwrap(this.storage.appendEntry(entry));
@@ -242,7 +242,7 @@ Example:
 
 ```ts
 return traceOperation(
-  "pi.ai.provider.request",
+  "pix.ai.provider.request",
   {
     api: model.api,
     provider: model.provider,
@@ -298,7 +298,7 @@ Content capture can be opt-in later with explicit redaction hooks.
 
 ## Listener behavior
 
-Observability must never affect pi execution.
+Observability must never affect pix execution.
 
 Subscriber errors should be swallowed or isolated. Harness hooks are control-plane and may affect execution; observability subscribers are passive and must not.
 
@@ -322,7 +322,7 @@ Every emitted event inside that async chain includes the context:
 ```ts
 {
   type: "start",
-  name: "pi.ai.provider.request",
+  name: "pix.ai.provider.request",
   traceId: "t1",
   spanId: "s3",
   parentSpanId: "s1",
@@ -353,10 +353,10 @@ Then:
 
 ```text
 packages/ai
-  emits pi.ai.* events
+  emits pix.ai.* events
 
 packages/agent
-  emits pi.agent.* / pi.session.* events
+  emits pix.agent.* / pix.session.* events
 ```
 
 Optional later:
@@ -366,7 +366,7 @@ packages/observability-node
   AsyncLocalStorage + diagnostics_channel bridge
 
 packages/otel
-  subscribes to pi events and creates OpenTelemetry spans
+  subscribes to pix events and creates OpenTelemetry spans
 ```
 
 ## Thesis

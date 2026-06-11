@@ -16,8 +16,8 @@ const WebSearchParams = Type.Object({
 type WebSearchParams = Static<typeof WebSearchParams>;
 const EMPTY = new Text("", 0, 0);
 
-export function builtin(pi: ExtensionAPI): void {
-	pi.registerTool<typeof WebSearchParams>({
+export function builtin(pix: ExtensionAPI): void {
+	pix.registerTool<typeof WebSearchParams>({
 		name: "Brave_Search",
 		label: "Brave Search",
 		description: "通过 Brave Search API 搜索互联网获取实时信息，或抓取指定 URL 的网页内容。需要联网信息时使用。",

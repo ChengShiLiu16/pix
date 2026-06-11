@@ -7,10 +7,10 @@
 
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+export default function (pix: ExtensionAPI) {
 	const protectedPaths = [".env", ".git/", "node_modules/"];
 
-	pi.on("tool_call", async (event, ctx) => {
+	pix.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "write" && event.toolName !== "edit") {
 			return undefined;
 		}

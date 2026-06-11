@@ -129,15 +129,15 @@ function buildGrepManyResultText(results: { search: SearchItem; result: SingleRe
 	return buildResultText(sections, "grep_many").text;
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let lastRegisteredCwd = "";
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		if (ctx.cwd === lastRegisteredCwd) return;
 		lastRegisteredCwd = ctx.cwd;
 		const grepDef = createGrepToolDefinition(ctx.cwd);
 
-		pi.registerTool<typeof schema, GrepManyDetails>({
+		pix.registerTool<typeof schema, GrepManyDetails>({
 			name: "grep_many",
 			label: "search many",
 			description:

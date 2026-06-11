@@ -155,7 +155,7 @@ function defaultFffDbPath(name: string): string {
 	return join(ensureFffDbDir(), name);
 }
 
-export function builtin(pi: ExtensionAPI): void {
+export function builtin(pix: ExtensionAPI): void {
 	let finder: FileFinder | undefined;
 	let finderCwd: string | undefined;
 	let finderPromise: Promise<FileFinder> | undefined;
@@ -168,15 +168,15 @@ export function builtin(pi: ExtensionAPI): void {
 	const grepCursorCache = new Map<string, GrepCursor>();
 	const findCursorCache = new Map<string, FindCursor>();
 
-	pi.registerFlag("fff-mode", {
+	pix.registerFlag("fff-mode", {
 		description: `FFF mode: ${formatModeList()}`,
 		type: "string",
 	});
-	pi.registerFlag("fff-frecency-db", {
+	pix.registerFlag("fff-frecency-db", {
 		description: "Path to the FFF frecency database (overrides FFF_FRECENCY_DB)",
 		type: "string",
 	});
-	pi.registerFlag("fff-history-db", {
+	pix.registerFlag("fff-history-db", {
 		description: "Path to the FFF query history database (overrides FFF_HISTORY_DB)",
 		type: "string",
 	});
@@ -202,19 +202,19 @@ export function builtin(pi: ExtensionAPI): void {
 	}
 
 	function currentMode(): FffMode {
-		const flagValue = pi.getFlag("fff-mode");
+		const flagValue = pix.getFlag("fff-mode");
 		const flagMode = typeof flagValue === "string" ? parseFffMode(flagValue) : undefined;
 		return flagMode ?? envMode() ?? "tools-and-ui";
 	}
 
 	function currentFrecencyDbPath(): string {
-		const flagValue = pi.getFlag("fff-frecency-db");
+		const flagValue = pix.getFlag("fff-frecency-db");
 		if (typeof flagValue === "string" && flagValue.length > 0) return flagValue;
 		return process.env.FFF_FRECENCY_DB ?? defaultFffDbPath("frecency.db");
 	}
 
 	function currentHistoryDbPath(): string {
-		const flagValue = pi.getFlag("fff-history-db");
+		const flagValue = pix.getFlag("fff-history-db");
 		if (typeof flagValue === "string" && flagValue.length > 0) return flagValue;
 		return process.env.FFF_HISTORY_DB ?? defaultFffDbPath("history.db");
 	}
@@ -263,7 +263,7 @@ export function builtin(pi: ExtensionAPI): void {
 	}
 
 	function registerFffTools(toolNames: FffToolNames): void {
-		pi.registerTool<typeof grepSchema, FffGrepDetails>({
+		pix.registerTool<typeof grepSchema, FffGrepDetails>({
 			name: toolNames.grep,
 			label: toolNames.grep,
 			description: `Grep file contents with FFF. Smart-case, auto-detects regex vs literal, git-aware, frecency-ranked. Default limit ${DEFAULT_GREP_LIMIT}.`,
@@ -350,7 +350,7 @@ export function builtin(pi: ExtensionAPI): void {
 			},
 		});
 
-		pi.registerTool<typeof findSchema, FffFindDetails>({
+		pix.registerTool<typeof findSchema, FffFindDetails>({
 			name: toolNames.find,
 			label: toolNames.find,
 			aliases: toolNames.findAliases,
@@ -423,7 +423,7 @@ export function builtin(pi: ExtensionAPI): void {
 		});
 
 		if (process.env.PIX_FFF_MULTIGREP === "1") {
-			pi.registerTool<typeof multiGrepSchema, FffMultiGrepDetails>({
+			pix.registerTool<typeof multiGrepSchema, FffMultiGrepDetails>({
 				name: toolNames.multiGrep,
 				label: toolNames.multiGrep,
 				description: "Search file contents for ANY of multiple literal patterns with FFF Aho-Corasick.",
@@ -472,7 +472,7 @@ export function builtin(pi: ExtensionAPI): void {
 		}
 	}
 
-	pi.on("session_start", (_event, ctx) => {
+	pix.on("session_start", (_event, ctx) => {
 		activeCwd = ctx.cwd;
 		modeAtRegistration = currentMode();
 		toolNamesAtRegistration = resolveFffToolNames(modeAtRegistration);
@@ -494,11 +494,11 @@ export function builtin(pi: ExtensionAPI): void {
 			});
 	});
 
-	pi.on("session_shutdown", () => {
+	pix.on("session_shutdown", () => {
 		destroyFinder();
 	});
 
-	pi.registerCommand("fff-mode", {
+	pix.registerCommand("fff-mode", {
 		description: `Show FFF mode. Configure with --fff-mode <${formatModeList()}> then /reload.`,
 		handler: async (args, ctx) => {
 			const requested = args.trim();
@@ -518,7 +518,7 @@ export function builtin(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("fff-health", {
+	pix.registerCommand("fff-health", {
 		description: "Show FFF file finder health and status",
 		handler: async (_args, ctx) => {
 			const f = await ensureFinder(ctx.cwd);
@@ -547,7 +547,7 @@ export function builtin(pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.registerCommand("fff-rescan", {
+	pix.registerCommand("fff-rescan", {
 		description: "Trigger FFF to rescan files",
 		handler: async (_args, ctx) => {
 			const f = await ensureFinder(ctx.cwd);

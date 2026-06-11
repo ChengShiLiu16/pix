@@ -1,7 +1,7 @@
 /**
  * Subagent Tool - Delegate tasks to specialized agents
  *
- * Spawns a separate `pi` process for each subagent invocation,
+ * Spawns a separate `pix` process for each subagent invocation,
  * giving it an isolated context window.
  *
  * Supports three modes:
@@ -451,8 +451,8 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
-export default function (pi: ExtensionAPI) {
-	pi.registerTool({
+export default function (pix: ExtensionAPI) {
+	pix.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [

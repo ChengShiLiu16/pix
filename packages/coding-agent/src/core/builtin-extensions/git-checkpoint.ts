@@ -12,14 +12,14 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "../../index.ts";
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	const checkpoints = new Map<string, string>();
 	let isGitRepo = false;
 	/** User-message entry id for the current agent loop (set on message_end). */
 	let pendingUserEntryId: string | undefined;
 
 	const restoreCheckpoint = async (ref: string, ctx: ExtensionContext) => {
-		const result = await pi.exec("git", ["stash", "apply", ref], { cwd: ctx.cwd });
+		const result = await pix.exec("git", ["stash", "apply", ref], { cwd: ctx.cwd });
 		if (result.code === 0) {
 			ctx.ui.notify("代码已恢复到检查点", "info");
 			return;
@@ -29,10 +29,10 @@ export function builtin(pi: ExtensionAPI) {
 		ctx.ui.notify(`恢复检查点失败：${detail}`, "error");
 	};
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		// 检测是否在 git 仓库中
 		try {
-			const result = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], {
+			const result = await pix.exec("git", ["rev-parse", "--is-inside-work-tree"], {
 				cwd: ctx.cwd,
 			});
 			isGitRepo = result.code === 0;
@@ -41,21 +41,21 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("message_end", async (event, ctx) => {
+	pix.on("message_end", async (event, ctx) => {
 		if (event.message.role !== "user") return;
 		const leaf = ctx.sessionManager.getLeafEntry();
 		if (leaf) pendingUserEntryId = leaf.id;
 	});
 
-	pi.on("turn_start", async (event, ctx) => {
+	pix.on("turn_start", async (event, ctx) => {
 		if (!isGitRepo) return;
 
 		// 检查是否有未提交的变更
-		const statusResult = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
+		const statusResult = await pix.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
 		if (statusResult.code !== 0 || !statusResult.stdout.trim()) return;
 
 		// 创建 git stash 检查点
-		const { stdout } = await pi.exec("git", ["stash", "create"], { cwd: ctx.cwd });
+		const { stdout } = await pix.exec("git", ["stash", "create"], { cwd: ctx.cwd });
 		const ref = stdout.trim();
 		if (!ref) return;
 
@@ -69,7 +69,7 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_before_fork", async (event, ctx) => {
+	pix.on("session_before_fork", async (event, ctx) => {
 		if (!isGitRepo || !ctx.hasUI) return;
 
 		const ref = checkpoints.get(event.entryId);
@@ -82,7 +82,7 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_before_tree", async (event, ctx) => {
+	pix.on("session_before_tree", async (event, ctx) => {
 		if (!isGitRepo || !ctx.hasUI) return;
 
 		// tree 导航时也提供恢复选项
@@ -97,7 +97,7 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_end", async () => {
+	pix.on("agent_end", async () => {
 		checkpoints.clear();
 		pendingUserEntryId = undefined;
 	});

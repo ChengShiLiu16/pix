@@ -87,15 +87,15 @@ function buildLsManyResultText(results: { path: string; result: SingleResult }[]
 	return buildResultText(sections, "ls_many").text;
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let lastRegisteredCwd = "";
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		if (ctx.cwd === lastRegisteredCwd) return;
 		lastRegisteredCwd = ctx.cwd;
 		const lsDef = createLsToolDefinition(ctx.cwd);
 
-		pi.registerTool<typeof schema, LsManyDetails>({
+		pix.registerTool<typeof schema, LsManyDetails>({
 			name: "ls_many",
 			label: "list many",
 			description:

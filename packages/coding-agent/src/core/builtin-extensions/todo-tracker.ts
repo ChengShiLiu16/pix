@@ -64,7 +64,7 @@ function formatCommandGroups(state: TodoState): string {
 	return parts.join("\n");
 }
 
-export function builtin(pi: ExtensionAPI) {
+export function builtin(pix: ExtensionAPI) {
 	let state: TodoState = cloneState(EMPTY_TODO_STATE);
 	let widgetCtx: any = null;
 	let todoOverlay: TodoOverlay | undefined;
@@ -84,7 +84,7 @@ export function builtin(pi: ExtensionAPI) {
 	}
 
 	function persistState() {
-		pi.appendEntry("todo-state", { todos: state.todos, nextId: state.nextId });
+		pix.appendEntry("todo-state", { todos: state.todos, nextId: state.nextId });
 	}
 
 	function refreshWidget(): void {
@@ -127,21 +127,21 @@ export function builtin(pi: ExtensionAPI) {
 		}
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
+	pix.on("session_start", async (_event, ctx) => {
 		handleLifecycle(ctx);
 	});
 
-	pi.on("session_compact", async (_event, ctx) => {
+	pix.on("session_compact", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 		todoOverlay?.update();
 	});
 
-	pi.on("session_tree", async (_event, ctx) => {
+	pix.on("session_tree", async (_event, ctx) => {
 		restoreFromBranch(ctx);
 		todoOverlay?.update();
 	});
 
-	pi.on("before_agent_start", async (event) => {
+	pix.on("before_agent_start", async (event) => {
 		resetAgentTodoTracking();
 		clearCompletedState();
 		if (hasOpenTodos(state)) return;
@@ -158,24 +158,24 @@ export function builtin(pi: ExtensionAPI) {
 		};
 	});
 
-	pi.on("session_shutdown", async (_event, _ctx) => {
+	pix.on("session_shutdown", async (_event, _ctx) => {
 		todoOverlay?.dispose();
 		todoOverlay = undefined;
 		widgetCtx = null;
 	});
 
-	pi.on("agent_end", async () => {
+	pix.on("agent_end", async () => {
 		clearAddOnlyAgentTodos();
 		resetAgentTodoTracking();
 	});
 
-	pi.on("tool_execution_end", async (event) => {
+	pix.on("tool_execution_end", async (event) => {
 		if (event.toolName !== "todo_manage" || event.isError) return;
 		refreshWidget();
 	});
 
 	// ---- 命令 ----
-	pi.registerCommand("todos", {
+	pix.registerCommand("todos", {
 		description: "查看或管理 todo 列表",
 		handler: async (args, ctx) => {
 			if (args?.trim() === "clear") {
@@ -193,7 +193,7 @@ export function builtin(pi: ExtensionAPI) {
 	// ---- LLM 工具 ----
 	const EMPTY = new Text("", 0, 0);
 
-	pi.registerTool({
+	pix.registerTool({
 		name: "todo_manage",
 		label: "Todo Manager",
 		description:
