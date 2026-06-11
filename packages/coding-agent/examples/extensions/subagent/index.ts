@@ -268,6 +268,7 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
+	mainModel: string | undefined,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -285,8 +286,10 @@ async function runSingleAgent(
 		};
 	}
 
+	// Model precedence: agent's explicit `model:` > main process's current model > child's config default.
+	const effectiveModel = agent.model ?? mainModel;
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
+	if (effectiveModel) args.push("--model", effectiveModel);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
@@ -300,7 +303,7 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: agent.model,
+		model: effectiveModel,
 		step,
 	};
 
@@ -330,8 +333,32 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
+				// Run the child in its own process group (POSIX) so abort can signal the
+				// whole tree — the child plus any grandchildren (bash, rg, ...) it spawns.
+				detached: process.platform !== "win32",
 			});
 			let buffer = "";
+			let killTimer: ReturnType<typeof setTimeout> | undefined;
+			let abortHandler: (() => void) | undefined;
+
+			// Signal the child's whole process group on POSIX (negative pid), or just the
+			// child on Windows. Swallows ESRCH when the process has already exited.
+			const killTree = (sig: NodeJS.Signals) => {
+				try {
+					if (process.platform !== "win32" && typeof proc.pid === "number") {
+						process.kill(-proc.pid, sig);
+					} else {
+						proc.kill(sig);
+					}
+				} catch {
+					/* already exited */
+				}
+			};
+
+			const cleanup = () => {
+				if (killTimer) clearTimeout(killTimer);
+				if (signal && abortHandler) signal.removeEventListener("abort", abortHandler);
+			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -382,24 +409,32 @@ async function runSingleAgent(
 			});
 
 			proc.on("close", (code) => {
+				cleanup();
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
+				cleanup();
 				resolve(1);
 			});
 
 			if (signal) {
-				const killProc = () => {
+				abortHandler = () => {
 					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
+					killTree("SIGTERM");
+					killTimer = setTimeout(() => killTree("SIGKILL"), 5000);
+					// Resolve as soon as the child itself exits, without waiting for "close".
+					// A killed child may leave grandchildren holding the inherited stdout
+					// pipe open, which delays "close" indefinitely and would otherwise hang
+					// the awaiting parent. "exit" fires on the child's own termination.
+					proc.once("exit", () => {
+						cleanup();
+						resolve(proc.exitCode ?? -1);
+					});
 				};
-				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
+				if (signal.aborted) abortHandler();
+				else signal.addEventListener("abort", abortHandler, { once: true });
 			}
 		});
 
@@ -492,6 +527,10 @@ export default function (pix: ExtensionAPI) {
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+			// Inherit the main process's current model so subagents match it (unless the
+			// agent pins its own `model:`). Without this, subagents fall back to the
+			// child's config default, which may differ from what the main session uses.
+			const mainModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -578,6 +617,7 @@ export default function (pix: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
+						mainModel,
 					);
 					results.push(result);
 
@@ -656,6 +696,7 @@ export default function (pix: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
+						mainModel,
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -678,6 +719,9 @@ export default function (pix: ExtensionAPI) {
 						},
 					],
 					details: makeDetails("parallel")(results),
+					// Surface as an error only when every task failed; partial success still
+					// returns usable output for the surviving tasks.
+					isError: successCount === 0,
 				};
 			}
 
@@ -692,6 +736,7 @@ export default function (pix: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
+					mainModel,
 				);
 				const isError = isFailedResult(result);
 				if (isError) {
