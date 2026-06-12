@@ -398,8 +398,6 @@ describe("default model selection", () => {
 		const result = await findInitialModel({
 			cliProvider: "openrouter",
 			cliModel: "openrouter/openai/ghost-model",
-			scopedModels: [],
-			isContinuing: false,
 			modelRegistry: registry,
 		});
 
@@ -426,8 +424,6 @@ describe("default model selection", () => {
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
 
 		const result = await findInitialModel({
-			scopedModels: [],
-			isContinuing: false,
 			modelRegistry: registry,
 		});
 

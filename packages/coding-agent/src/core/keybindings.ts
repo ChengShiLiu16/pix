@@ -39,12 +39,7 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
-	"app.models.save": true;
-	"app.models.enableAll": true;
-	"app.models.clearAll": true;
-	"app.models.toggleProvider": true;
-	"app.models.reorderUp": true;
-	"app.models.reorderDown": true;
+
 	"app.tree.filter.default": true;
 	"app.tree.filter.noTools": true;
 	"app.tree.filter.userOnly": true;
@@ -148,30 +143,7 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
 	},
-	"app.models.save": {
-		defaultKeys: "ctrl+s",
-		description: "Save model selection",
-	},
-	"app.models.enableAll": {
-		defaultKeys: "ctrl+a",
-		description: "Enable all models",
-	},
-	"app.models.clearAll": {
-		defaultKeys: "ctrl+x",
-		description: "Clear all models",
-	},
-	"app.models.toggleProvider": {
-		defaultKeys: "ctrl+p",
-		description: "Toggle all models for provider",
-	},
-	"app.models.reorderUp": {
-		defaultKeys: "alt+up",
-		description: "Move model up in order",
-	},
-	"app.models.reorderDown": {
-		defaultKeys: "alt+down",
-		description: "Move model down in order",
-	},
+
 	"app.tree.filter.default": {
 		defaultKeys: "ctrl+d",
 		description: "Tree filter: default view",

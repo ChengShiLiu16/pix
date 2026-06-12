@@ -1,5 +1,5 @@
-import type { AgentTool, ThinkingLevel } from "@chengshiliu16/pix-agent-core";
-import { fauxAssistantMessage, fauxToolCall, type Model } from "@chengshiliu16/pix-ai";
+import type { AgentTool } from "@chengshiliu16/pix-agent-core";
+import { fauxAssistantMessage, fauxToolCall } from "@chengshiliu16/pix-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BuildSystemPromptOptions, ExtensionAPI } from "../../src/index.ts";
@@ -44,7 +44,7 @@ describe("AgentSession model and extension characterization", () => {
 		).toEqual([`${nextModel.provider}/${nextModel.id}`]);
 	});
 
-	it("cycles through scoped models and preserves the scoped thinking preference", async () => {
+	it("cycles through all available models", async () => {
 		const harness = await createHarness({
 			models: [
 				{ id: "faux-1", name: "One", reasoning: true },
@@ -52,12 +52,6 @@ describe("AgentSession model and extension characterization", () => {
 			],
 		});
 		harnesses.push(harness);
-		const modelOne = harness.getModel("faux-1")!;
-		const modelTwo = harness.getModel("faux-2")!;
-		harness.session.setScopedModels([{ model: modelOne, thinkingLevel: "high" }, { model: modelTwo }] as Array<{
-			model: Model<string>;
-			thinkingLevel?: ThinkingLevel;
-		}>);
 		harness.session.setThinkingLevel("high");
 
 		await harness.session.cycleModel();

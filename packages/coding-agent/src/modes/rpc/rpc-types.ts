@@ -132,7 +132,7 @@ export type RpcResponse =
 			type: "response";
 			command: "cycle_model";
 			success: true;
-			data: { model: Model<any>; thinkingLevel: ThinkingLevel; isScoped: boolean } | null;
+			data: { model: Model<any>; thinkingLevel: ThinkingLevel } | null;
 	  }
 	| {
 			id?: string;

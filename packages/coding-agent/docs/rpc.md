@@ -248,8 +248,7 @@ Response:
   "success": true,
   "data": {
     "model": {...},
-    "thinkingLevel": "medium",
-    "isScoped": false
+    "thinkingLevel": "medium"
   }
 }
 ```

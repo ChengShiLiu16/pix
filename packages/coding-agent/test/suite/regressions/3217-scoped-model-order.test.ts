@@ -1,11 +1,12 @@
+import type { Model } from "@chengshiliu16/pix-ai";
 import { setKeybindings, type TUI } from "@chengshiliu16/pix-tui";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
+import type { ModelRegistry } from "../../../src/core/model-registry.ts";
+import type { SettingsManager } from "../../../src/core/settings-manager.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
-import { ScopedModelsSelectorComponent } from "../../../src/modes/interactive/components/scoped-models-selector.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../../src/utils/ansi.ts";
-import { createHarness, type Harness } from "../harness.ts";
 
 function createFakeTui(): TUI {
 	return {
@@ -13,92 +14,73 @@ function createFakeTui(): TUI {
 	} as unknown as TUI;
 }
 
+function createModel(provider: string, id: string): Model<any> {
+	return {
+		provider,
+		id,
+		name: id,
+		api: "anthropic-messages",
+		baseUrl: "https://example.test",
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 1000,
+		maxTokens: 1000,
+	};
+}
+
+function createSelector(models: Model<any>[], currentModel: Model<any>): ModelSelectorComponent {
+	const modelRegistry = {
+		refresh: () => {},
+		getError: () => undefined,
+		getAvailable: async () => models,
+	} as unknown as ModelRegistry;
+	const settingsManager = {
+		setDefaultModelAndProvider: () => {},
+	} as unknown as SettingsManager;
+
+	return new ModelSelectorComponent(
+		createFakeTui(),
+		currentModel,
+		settingsManager,
+		modelRegistry,
+		() => {},
+		() => {},
+	);
+}
+
 async function waitForAsyncRender(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe("issue #3217 scoped model ordering", () => {
-	const harnesses: Harness[] = [];
-
+describe("model selector provider grouping", () => {
 	beforeAll(() => {
 		initTheme("dark");
 	});
 
 	beforeEach(() => {
-		// Ensure test isolation: keybindings are a global singleton
 		setKeybindings(new KeybindingsManager());
 	});
 
-	afterEach(() => {
-		while (harnesses.length > 0) {
-			harnesses.pop()?.cleanup();
-		}
-	});
-
-	it("propagates reordered scoped models back to the session state", async () => {
-		const harness = await createHarness({
-			models: [
-				{ id: "faux-1", name: "One", reasoning: true },
-				{ id: "faux-2", name: "Two", reasoning: true },
-				{ id: "faux-3", name: "Three", reasoning: true },
-			],
-		});
-		harnesses.push(harness);
-
-		const orderedIds = harness.models.map((model) => `${model.provider}/${model.id}`);
-		const changes: Array<string[] | null> = [];
-		const selector = new ScopedModelsSelectorComponent(
-			{
-				allModels: [...harness.models],
-				enabledModelIds: orderedIds,
-			},
-			{
-				onChange: (enabledModelIds) => {
-					changes.push(enabledModelIds);
-				},
-				onPersist: () => {},
-				onCancel: () => {},
-			},
-		);
-
-		selector.handleInput("\x1b[1;3B");
-
-		expect(changes).toEqual([[orderedIds[1], orderedIds[0], orderedIds[2]]]);
-	});
-
-	it("preserves scoped model order in the /model scoped tab", async () => {
-		const harness = await createHarness({
-			models: [
-				{ id: "faux-1", name: "One", reasoning: true },
-				{ id: "faux-2", name: "Two", reasoning: true },
-				{ id: "faux-3", name: "Three", reasoning: true },
-			],
-		});
-		harnesses.push(harness);
-
-		const modelOne = harness.getModel("faux-1")!;
-		const modelTwo = harness.getModel("faux-2")!;
-		const modelThree = harness.getModel("faux-3")!;
-		const selector = new ModelSelectorComponent(
-			createFakeTui(),
-			modelOne,
-			harness.settingsManager,
-			harness.session.modelRegistry,
-			[{ model: modelTwo }, { model: modelOne }, { model: modelThree }],
-			() => {},
-			() => {},
+	it("groups models by provider and marks the current model in place", async () => {
+		const currentModel = createModel("zai", "glm-5");
+		const selector = createSelector(
+			[createModel("openai", "gpt-5"), currentModel, createModel("anthropic", "claude-opus")],
+			currentModel,
 		);
 
 		await waitForAsyncRender();
 
 		const renderedLines = stripAnsi(selector.render(120).join("\n"))
 			.split("\n")
-			.filter((line) => line.includes(`[${modelOne.provider}]`));
-		const orderedIds = renderedLines.slice(0, 3).map((line) => {
-			const [modelId] = line.trim().replace(/^→\s*/, "").split(" [");
-			return modelId?.trim() ?? "";
-		});
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0);
 
-		expect(orderedIds).toEqual([modelTwo.id, modelOne.id, modelThree.id]);
+		expect(renderedLines).toContain("anthropic (1)");
+		expect(renderedLines).toContain("claude-opus");
+		expect(renderedLines).toContain("openai (1)");
+		expect(renderedLines).toContain("gpt-5");
+		expect(renderedLines).toContain("zai (1)");
+		expect(renderedLines.some((line) => line.endsWith("glm-5 ✓"))).toBe(true);
 	});
 });
