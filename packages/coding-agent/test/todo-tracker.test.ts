@@ -81,6 +81,47 @@ describe("todo state validation and replay", () => {
 	});
 });
 
+describe("todo reducer dedup", () => {
+	it("rejects exact duplicate text for pending/in_progress todos", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "移除 isScoped 残留字段" });
+		const dup = applyMutation(added.state, "add", { text: "移除 isScoped 残留字段" });
+		expect(dup.op.kind).toBe("error");
+		if (dup.op.kind === "error") expect(dup.op.message).toContain("#1");
+	});
+
+	it("rejects duplicate differing only in whitespace", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "移除 isScoped  残留字段" });
+		const dup = applyMutation(added.state, "add", { text: "移除 isScoped 残留字段" });
+		expect(dup.op.kind).toBe("error");
+	});
+
+	it("allows duplicate text for completed todos", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "移除 isScoped 残留字段" });
+		const done = applyMutation(added.state, "done", { id: 1 });
+		const reAdd = applyMutation(done.state, "add", { text: "移除 isScoped 残留字段" });
+		expect(reAdd.op.kind).toBe("add");
+	});
+
+	it("rejects in_progress duplicate", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "移除 isScoped 残留字段" });
+		const started = applyMutation(added.state, "start", { id: 1 });
+		const dup = applyMutation(started.state, "add", { text: "移除 isScoped 残留字段" });
+		expect(dup.op.kind).toBe("error");
+	});
+
+	it("allows rephrased tasks (model should avoid these via prompt guidance)", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "清理 scoped models 残留 keybinding 定义" });
+		const rephrased = applyMutation(added.state, "add", { text: "清理 scoped models 残留（keybindings + 文档）" });
+		expect(rephrased.op.kind).toBe("add");
+	});
+
+	it("allows genuinely different tasks", () => {
+		const added = applyMutation(EMPTY_TODO_STATE, "add", { text: "移除 isScoped 残留字段" });
+		const diff = applyMutation(added.state, "add", { text: "添加新的 context 参数" });
+		expect(diff.op.kind).toBe("add");
+	});
+});
+
 describe("todo overlay", () => {
 	it("renders completed todos and removes the widget only for empty state", () => {
 		let todos: TodoItem[] = [{ id: 1, text: "done task", status: "completed" }];

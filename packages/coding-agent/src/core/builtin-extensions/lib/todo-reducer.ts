@@ -42,6 +42,23 @@ function normalizeSingleLine(value: string): string {
 	return value.replace(/\s+/gu, " ").trim();
 }
 
+/**
+ * Normalize text for dedup comparison: lowercase and collapse whitespace.
+ */
+function normalizeForDedup(text: string): string {
+	return text
+		.replace(/[\s\u3000]+/gu, " ")
+		.trim()
+		.toLowerCase();
+}
+
+/**
+ * Check if two todo texts are identical after whitespace normalization.
+ */
+function isDuplicateText(a: string, b: string): boolean {
+	return normalizeForDedup(a) === normalizeForDedup(b);
+}
+
 /** Pure reducer for todo_manage mutations. */
 export function applyMutation(state: TodoState, action: TodoAction, params: TodoMutationParams): ApplyResult {
 	switch (action) {
@@ -52,6 +69,11 @@ export function applyMutation(state: TodoState, action: TodoAction, params: Todo
 			}
 			if (text.length > MAX_TODO_TEXT_LENGTH) {
 				return errorResult(state, `错误：任务描述不能超过 ${MAX_TODO_TEXT_LENGTH} 个字符`);
+			}
+			// Dedup: reject if a pending/in_progress todo has similar text
+			const duplicate = state.todos.find((t) => t.status !== "completed" && isDuplicateText(t.text, text));
+			if (duplicate) {
+				return errorResult(state, `已存在相似任务 #${duplicate.id}: ${duplicate.text}`);
 			}
 			if (state.todos.length >= MAX_TODOS) {
 				return errorResult(state, `错误：todo 数量不能超过 ${MAX_TODOS} 条`);

@@ -214,6 +214,7 @@ export function builtin(pix: ExtensionAPI) {
 			"不要在最终总结阶段新建 todo；如果本轮只 add 而没有 start/done/remove，系统会把这些空转 todo 当作临时清单清理掉",
 			"每个 todo 应该是一个具体的、可完成的动作，不要写模糊的描述",
 			"start 会将其他进行中的任务降回 pending，确保同时只有一个任务处于 in_progress",
+			"add 前先看返回的列表摘要，不要添加与已有任务重复的 todo；如果已有任务描述不够准确，用 remove 删除后再 add，而不是再添加一条",
 		],
 		parameters: Type.Object({
 			action: StringEnum(["add", "start", "done", "remove", "list"] as const, {
@@ -271,13 +272,13 @@ export function builtin(pix: ExtensionAPI) {
 				case "add":
 					refreshWidget();
 					return {
-						content: [{ type: "text", text: `+#${result.op.id}` }],
+						content: [{ type: "text", text: `+#${result.op.id} ${formatListSummary(result.state)}` }],
 						details,
 					};
 				case "start":
 					refreshWidget();
 					return {
-						content: [{ type: "text", text: `◐#${result.op.id}` }],
+						content: [{ type: "text", text: `◐#${result.op.id} ${formatListSummary(result.state)}` }],
 						details,
 					};
 				case "done": {
@@ -290,14 +291,14 @@ export function builtin(pix: ExtensionAPI) {
 					}
 					refreshWidget();
 					return {
-						content: [{ type: "text", text: `✓#${result.op.id}` }],
+						content: [{ type: "text", text: `✓#${result.op.id} ${formatListSummary(result.state)}` }],
 						details,
 					};
 				}
 				case "remove":
 					refreshWidget();
 					return {
-						content: [{ type: "text", text: `✕#${result.op.id}` }],
+						content: [{ type: "text", text: `✕#${result.op.id} ${formatListSummary(result.state)}` }],
 						details,
 					};
 				case "list":
