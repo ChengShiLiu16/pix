@@ -2366,6 +2366,16 @@ export class AgentSession {
 				definition: tool.definition,
 				sourceInfo: tool.sourceInfo,
 			});
+			if (tool.definition.aliases) {
+				for (const alias of tool.definition.aliases) {
+					if (!definitionRegistry.has(alias)) {
+						definitionRegistry.set(alias, {
+							definition: tool.definition,
+							sourceInfo: tool.sourceInfo,
+						});
+					}
+				}
+			}
 		}
 		this._toolDefinitions = definitionRegistry;
 		this._toolPromptSnippets = new Map(

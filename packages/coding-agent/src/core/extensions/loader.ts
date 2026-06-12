@@ -185,6 +185,18 @@ function createExtensionAPI(
 				definition: tool,
 				sourceInfo: extension.sourceInfo,
 			});
+			if (tool.aliases) {
+				for (const alias of tool.aliases) {
+					const existing = extension.tools.get(alias);
+					// 别名槽位为空或属于同名工具（重复注册时刷新旧定义）才写入，不覆盖其他工具的主名
+					if (!existing || existing.definition.name === tool.name) {
+						extension.tools.set(alias, {
+							definition: tool,
+							sourceInfo: extension.sourceInfo,
+						});
+					}
+				}
+			}
 			runtime.refreshTools();
 		},
 

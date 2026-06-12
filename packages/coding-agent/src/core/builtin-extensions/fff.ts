@@ -18,6 +18,7 @@ import {
 	resolveFffToolNames,
 	VALID_FFF_MODES,
 } from "./lib/fff.ts";
+import { formatTreeCall, type ThemeLike } from "./lib/format-tree-call.ts";
 
 const DEFAULT_GREP_LIMIT = 20;
 const DEFAULT_FIND_LIMIT = 30;
@@ -110,7 +111,12 @@ function firstText(result: AgentToolResult<unknown>): string {
 		.join("\n");
 }
 
-function renderTextResult(result: AgentToolResult<unknown>, expanded: boolean, maxLines: number): Text {
+function renderTextResult(
+	result: AgentToolResult<unknown>,
+	expanded: boolean,
+	maxLines: number,
+	theme?: ThemeLike,
+): Text {
 	const output = firstText(result).trim();
 	if (!output) return new Text("No output", 0, 0);
 	const lines = output.split("\n");
@@ -118,6 +124,9 @@ function renderTextResult(result: AgentToolResult<unknown>, expanded: boolean, m
 	let content = displayLines.join("\n");
 	if (lines.length > displayLines.length) {
 		content += `\n... (${lines.length - displayLines.length} more lines)`;
+	}
+	if (theme) {
+		content = theme.fg("dim", content);
 	}
 	return new Text(content, 0, 0);
 }
@@ -343,10 +352,10 @@ export function builtin(pix: ExtensionAPI): void {
 			renderCall(args, theme, context) {
 				if (!context.argsComplete) return new Text("", 0, 0);
 				const path = args.path ?? ".";
-				return new Text(`${theme.bold(toolNames.grep)} /${args.pattern}/ in ${path}`, 0, 0);
+				return formatTreeCall(theme, toolNames.grep, [`/${args.pattern}/ in ${path}`]);
 			},
-			renderResult(result, options) {
-				return renderTextResult(result, options.expanded, 15);
+			renderResult(result, options, theme) {
+				return renderTextResult(result, options.expanded, 15, theme);
 			},
 		});
 
@@ -415,10 +424,10 @@ export function builtin(pix: ExtensionAPI): void {
 			renderCall(args, theme, context) {
 				if (!context.argsComplete) return new Text("", 0, 0);
 				const path = args.path ?? ".";
-				return new Text(`${theme.bold(toolNames.find)} ${args.pattern} in ${path}`, 0, 0);
+				return formatTreeCall(theme, toolNames.find, [`${args.pattern} in ${path}`]);
 			},
-			renderResult(result, options) {
-				return renderTextResult(result, options.expanded, 20);
+			renderResult(result, options, theme) {
+				return renderTextResult(result, options.expanded, 20, theme);
 			},
 		});
 
@@ -463,10 +472,10 @@ export function builtin(pix: ExtensionAPI): void {
 				},
 				renderCall(args, theme, context) {
 					if (!context.argsComplete) return new Text("", 0, 0);
-					return new Text(`${theme.bold(toolNames.multiGrep)} ${args.patterns.join(", ")}`, 0, 0);
+					return formatTreeCall(theme, toolNames.multiGrep, [`${args.patterns.join(", ")}`]);
 				},
-				renderResult(result, options) {
-					return renderTextResult(result, options.expanded, 15);
+				renderResult(result, options, theme) {
+					return renderTextResult(result, options.expanded, 15, theme);
 				},
 			});
 		}

@@ -78,7 +78,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		this.settingsManager = settingsManager;
 		this.modelRegistry = modelRegistry;
 		this.scopedModels = scopedModels;
-		this.scope = scopedModels.length > 0 ? "scoped" : "all";
+		// 始终默认打开 "all" 作用域；存在过滤时用户可按 Tab 切到 "scoped"
+		this.scope = "all";
 		this.onSelectCallback = onSelect;
 		this.onCancelCallback = onCancel;
 
