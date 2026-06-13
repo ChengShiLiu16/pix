@@ -303,6 +303,9 @@ export class Editor implements Component, Focusable {
 	// Prompt history for up/down navigation
 	private history: string[] = [];
 	private historyIndex: number = -1; // -1 = not browsing, 0 = most recent, 1 = older, etc.
+	// Buffer stashed when entering history browsing (the user's typed/pasted
+	// draft), restored when navigating back down past the newest entry.
+	private historyDraft: string = "";
 
 	// Kill ring for Emacs-style kill/yank operations
 	private killRing = new KillRing();
@@ -424,6 +427,13 @@ export class Editor implements Component, Focusable {
 		return currentVisualLine === visualLines.length - 1;
 	}
 
+	/** True when the cursor is at the very end of the buffer (last line, last column). */
+	private isCursorAtBufferEnd(): boolean {
+		const lastLine = this.state.lines.length - 1;
+		if (this.state.cursorLine !== lastLine) return false;
+		return this.state.cursorCol >= (this.state.lines[lastLine]?.length ?? 0);
+	}
+
 	private navigateHistory(direction: 1 | -1): void {
 		this.lastAction = null;
 		if (this.history.length === 0) return;
@@ -431,16 +441,20 @@ export class Editor implements Component, Focusable {
 		const newIndex = this.historyIndex - direction; // Up(-1) increases index, Down(1) decreases
 		if (newIndex < -1 || newIndex >= this.history.length) return;
 
-		// Capture state when first entering history browsing mode
+		// Entering history browsing: stash the current buffer (whatever the user
+		// typed or pasted) so it can be restored when they navigate back down
+		// past the newest entry, instead of being discarded.
 		if (this.historyIndex === -1 && newIndex >= 0) {
 			this.pushUndoSnapshot();
+			this.historyDraft = this.getText();
 		}
 
 		this.historyIndex = newIndex;
 
 		if (this.historyIndex === -1) {
-			// Returned to "current" state - clear editor
-			this.setTextInternal("");
+			// Returned past the newest entry - restore the stashed draft.
+			this.setTextInternal(this.historyDraft);
+			this.historyDraft = "";
 		} else {
 			this.setTextInternal(this.history[this.historyIndex] || "");
 		}
@@ -852,14 +866,40 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 
-		// Arrow key navigation (with history support)
+		// Arrow key navigation (with history support).
+		//
+		// While browsing history (historyIndex > -1), the cursor is the switch:
+		// every history switch re-lands it at the very end of the buffer, and
+		// while it sits there Up/Down switch entries (older/newer) in a single
+		// keystroke — so switching never requires climbing through a tall
+		// entry's lines, in either direction. The moment the cursor leaves the
+		// end (Left/Up, or a mouse click), Up/Down move between the recalled
+		// entry's lines instead, so it can be edited; typing then detaches the
+		// buffer into an editable draft.
+		//
+		// When NOT browsing, Up/Down move the cursor within the draft; reaching
+		// the first visual line and pressing Up enters history (stashing the
+		// current draft so it is restored on the way back down).
 		if (kb.matches(data, "tui.editor.cursorUp")) {
-			if (this.isEditorEmpty()) {
+			if (this.historyIndex > -1) {
+				if (this.isCursorAtBufferEnd()) {
+					this.navigateHistory(-1);
+				} else {
+					this.moveCursor(-1, 0);
+				}
+			} else if (this.isEditorEmpty()) {
 				this.navigateHistory(-1);
-			} else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
+			} else if (this.history.length > 0 && (this.isCursorAtBufferEnd() || this.isOnFirstVisualLine())) {
+				// Draft with the cursor at the buffer end (the natural resting
+				// spot after typing or pasting) or at the first line: enter
+				// history, stashing the draft for restore on the way back. The
+				// buffer-end trigger keeps history reachable in one keystroke
+				// even from a tall multi-line draft, matching the browsing model;
+				// to instead move the cursor up to edit a previous line, leave
+				// the end first (Left / mouse click).
 				this.navigateHistory(-1);
 			} else if (this.isOnFirstVisualLine()) {
-				// Already at top - jump to start of line
+				// First line but no history to enter: jump to start of line.
 				this.moveToLineStart();
 			} else {
 				this.moveCursor(-1, 0);
@@ -867,10 +907,18 @@ export class Editor implements Component, Focusable {
 			return;
 		}
 		if (kb.matches(data, "tui.editor.cursorDown")) {
-			if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
-				this.navigateHistory(1);
+			if (this.historyIndex > -1) {
+				if (this.isCursorAtBufferEnd()) {
+					this.navigateHistory(1);
+				} else if (this.isOnLastVisualLine()) {
+					// Off the end but on the last line: snap to the buffer end so
+					// the next Down switches to a newer entry.
+					this.moveToLineEnd();
+				} else {
+					this.moveCursor(1, 0);
+				}
 			} else if (this.isOnLastVisualLine()) {
-				// Already at bottom - jump to end of line
+				// Not browsing and at the bottom - jump to end of line.
 				this.moveToLineEnd();
 			} else {
 				this.moveCursor(1, 0);

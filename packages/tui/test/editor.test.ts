@@ -185,20 +185,32 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "first");
 		});
 
-		it("uses cursor movement instead of history when editor has content", () => {
+		it("moves the cursor within a draft when it is off the buffer end", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("history item");
-			editor.setText("line1\nline2");
+			editor.setText("line1\nline2"); // cursor at the buffer end
 
-			// Cursor is at end of line2, Up should move to line1
-			editor.handleInput("\x1b[A"); // Up - cursor movement
+			editor.handleInput("\x1b[D"); // Left - leave the buffer end (edit intent)
+			editor.handleInput("\x1b[A"); // Up - now moves the cursor up, not history
 
-			// Insert character to verify cursor position
-			editor.handleInput("X");
+			assert.strictEqual(editor.getText(), "line1\nline2"); // unchanged, not history
+			assert.strictEqual(editor.getCursor().line, 0);
+		});
 
-			// X should be inserted in line1, not replace with history
-			assert.strictEqual(editor.getText(), "line1X\nline2");
+		it("enters history from a multi-line draft when the cursor is at the buffer end", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.addToHistory("history item");
+			editor.setText("draft line1\ndraft line2"); // cursor at the buffer end
+
+			// At the buffer end, Up reaches history in one keystroke (no climbing)
+			// and stashes the draft.
+			editor.handleInput("\x1b[A");
+			assert.strictEqual(editor.getText(), "history item");
+
+			editor.handleInput("\x1b[B"); // Down past newest - restore the draft
+			assert.strictEqual(editor.getText(), "draft line1\ndraft line2");
 		});
 
 		it("limits history to 100 entries", () => {
@@ -222,61 +234,98 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "prompt 5");
 		});
 
-		it("allows cursor movement within multi-line history entry with Down", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-
-			editor.addToHistory("line1\nline2\nline3");
-
-			// Browse to the multi-line entry
-			editor.handleInput("\x1b[A"); // Up - shows entry, cursor at end of line3
-			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
-
-			// Down should exit history since cursor is on last line
-			editor.handleInput("\x1b[B"); // Down
-			assert.strictEqual(editor.getText(), ""); // Exited to empty
-		});
-
-		it("allows cursor movement within multi-line history entry with Up", () => {
+		it("switches to older history on Up from a multi-line entry without climbing", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("older entry");
 			editor.addToHistory("line1\nline2\nline3");
 
-			// Browse to the multi-line entry
-			editor.handleInput("\x1b[A"); // Up - shows multi-line, cursor at end of line3
+			editor.handleInput("\x1b[A"); // Up - recall multi-line (cursor at bottom)
+			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
 
-			// Up should move cursor within the entry (not on first line yet)
-			editor.handleInput("\x1b[A"); // Up - cursor moves to line2
-			assert.strictEqual(editor.getText(), "line1\nline2\nline3"); // Still same entry
-
-			editor.handleInput("\x1b[A"); // Up - cursor moves to line1 (now on first visual line)
-			assert.strictEqual(editor.getText(), "line1\nline2\nline3"); // Still same entry
-
-			// Now Up should navigate to older history entry
-			editor.handleInput("\x1b[A"); // Up - navigate to older
+			// While browsing, Up switches entries regardless of cursor position -
+			// one keystroke, no climbing through the lines first.
+			editor.handleInput("\x1b[A");
 			assert.strictEqual(editor.getText(), "older entry");
 		});
 
-		it("navigates from multi-line entry back to newer via Down after cursor movement", () => {
+		it("switches to newer history on Down from a multi-line entry without climbing", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("line1\nline2\nline3");
+			editor.addToHistory("newer entry");
 
-			// Browse to entry and move cursor up
-			editor.handleInput("\x1b[A"); // Up - shows entry, cursor at end
-			editor.handleInput("\x1b[A"); // Up - cursor to line2
-			editor.handleInput("\x1b[A"); // Up - cursor to line1
-
-			// Now Down should move cursor down within the entry
-			editor.handleInput("\x1b[B"); // Down - cursor to line2
+			editor.handleInput("\x1b[A"); // Up - "newer entry"
+			editor.handleInput("\x1b[A"); // Up - "line1\nline2\nline3" (cursor bottom)
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
 
-			editor.handleInput("\x1b[B"); // Down - cursor to line3
+			// Down switches to the newer entry in one keystroke.
+			editor.handleInput("\x1b[B");
+			assert.strictEqual(editor.getText(), "newer entry");
+		});
+
+		it("moves between lines (not switch) once the cursor leaves the buffer end", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.addToHistory("older entry");
+			editor.addToHistory("line1\nline2\nline3");
+
+			editor.handleInput("\x1b[A"); // recall multi-line (cursor at buffer end)
+			editor.handleInput("\x1b[D"); // Left - cursor leaves the end (edit intent)
+
+			// Off the end, Up moves up a line within the entry instead of switching.
+			editor.handleInput("\x1b[A"); // -> line 1, still same entry
+			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
+			assert.strictEqual(editor.getCursor().line, 1);
+		});
+
+		it("resumes switching once the cursor is back at the buffer end", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.addToHistory("older entry");
+			editor.addToHistory("line1\nline2\nline3");
+
+			editor.handleInput("\x1b[A"); // recall (cursor at buffer end)
+			editor.handleInput("\x1b[D"); // Left - leave the end
+			editor.handleInput("\x1b[A"); // Up - move to line 1 (editing nav)
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
 
-			// Now on last line, Down should exit history
-			editor.handleInput("\x1b[B"); // Down - exit to empty
-			assert.strictEqual(editor.getText(), "");
+			// Move back down: lands on the last line, then snaps to the buffer end.
+			editor.handleInput("\x1b[B"); // -> line 2
+			editor.handleInput("\x1b[B"); // -> snap to buffer end (last line, end)
+			assert.deepStrictEqual(editor.getCursor(), { line: 2, col: "line3".length });
+			// Now at the buffer end: Up switches to the older entry in one press.
+			editor.handleInput("\x1b[A");
+			assert.strictEqual(editor.getText(), "older entry");
+		});
+
+		it("stashes and restores a typed draft across history browsing", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.addToHistory("history entry");
+			editor.setText("my unsent draft");
+
+			editor.handleInput("\x1b[A"); // Up - enter history, stash the draft
+			assert.strictEqual(editor.getText(), "history entry");
+
+			editor.handleInput("\x1b[B"); // Down past newest - restore the draft
+			assert.strictEqual(editor.getText(), "my unsent draft");
+		});
+
+		it("preserves a multi-line pasted draft after browsing history", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			editor.addToHistory("history entry");
+			const draft = "pasted A\npasted B\npasted C";
+			editor.setText(draft); // cursor lands at the buffer end
+
+			// From the buffer end, a single Up reaches history (no climbing) and
+			// the draft is stashed, never lost.
+			editor.handleInput("\x1b[A");
+			assert.strictEqual(editor.getText(), "history entry");
+
+			editor.handleInput("\x1b[B"); // back down - restore the full draft
+			assert.strictEqual(editor.getText(), draft);
 		});
 	});
 
