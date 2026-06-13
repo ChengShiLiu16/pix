@@ -1,6 +1,6 @@
 import type { AutocompleteProvider, AutocompleteSuggestions } from "../autocomplete.ts";
 import { getKeybindings } from "../keybindings.ts";
-import { decodePrintableKey, matchesKey } from "../keys.ts";
+import { decodePrintableKey, type MouseEvent, matchesKey } from "../keys.ts";
 import { KillRing } from "../kill-ring.ts";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.ts";
 import { UndoStack } from "../undo-stack.ts";
@@ -227,6 +227,10 @@ interface LayoutLine {
 	text: string;
 	hasCursor: boolean;
 	cursorPos?: number;
+	/** Index of the logical line this layout row belongs to. */
+	logicalLine: number;
+	/** Column offset within the logical line where this row's text starts. */
+	startIndex: number;
 }
 
 export interface EditorTheme {
@@ -265,6 +269,10 @@ export class Editor implements Component, Focusable {
 
 	// Vertical scrolling support
 	private scrollOffset: number = 0;
+
+	// Last render's layout + structure, for mapping mouse clicks to cursor pos.
+	private lastLayoutLines: LayoutLine[] = [];
+	private lastVisibleLineCount: number = 0;
 
 	// Border color (can be changed dynamically)
 	public borderColor: (str: string) => string;
@@ -495,6 +503,10 @@ export class Editor implements Component, Focusable {
 		// Get visible lines slice
 		const visibleLines = layoutLines.slice(this.scrollOffset, this.scrollOffset + maxVisibleLines);
 
+		// Record structure for mouse-click -> cursor mapping in handleMouse().
+		this.lastLayoutLines = layoutLines;
+		this.lastVisibleLineCount = visibleLines.length;
+
 		const result: string[] = [];
 		const leftPadding = " ".repeat(paddingX);
 		const rightPadding = leftPadding;
@@ -579,6 +591,48 @@ export class Editor implements Component, Focusable {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Map a click within the editor to a cursor position (app-managed mouse mode).
+	 * `localY` is the 0-based row within the editor's own render output: row 0 is
+	 * the top border, rows 1..N are visible text lines, then the bottom border.
+	 * `evt.x` is the 0-based content-space column (margin already removed by TUI).
+	 */
+	handleMouse(evt: MouseEvent, localY: number): void {
+		if (evt.action !== "up" && evt.action !== "down") return;
+		// Row 0 is the top border; text rows start at localY === 1.
+		const visibleIndex = localY - 1;
+		if (visibleIndex < 0 || visibleIndex >= this.lastVisibleLineCount) return;
+		const layoutIndex = this.scrollOffset + visibleIndex;
+		const layoutLine = this.lastLayoutLines[layoutIndex];
+		if (!layoutLine) return;
+
+		// Strip the editor's own left padding from the content-space column.
+		const targetCol = Math.max(0, evt.x - this.paddingX);
+		const offset = this.columnToIndex(layoutLine.text, targetCol);
+
+		this.state.cursorLine = layoutLine.logicalLine;
+		this.setCursorCol(layoutLine.startIndex + offset);
+		this.tui.requestRender();
+	}
+
+	/**
+	 * Convert a visual column within `text` to a string index, snapping to the
+	 * nearer grapheme edge. Respects atomic markers via the grapheme segmenter.
+	 */
+	private columnToIndex(text: string, targetCol: number): number {
+		if (targetCol <= 0) return 0;
+		let acc = 0;
+		for (const g of this.segment(text, "grapheme")) {
+			const w = visibleWidth(g.segment);
+			if (targetCol < acc + w) {
+				// Click landed on this grapheme; snap to whichever edge is closer.
+				return targetCol < acc + w / 2 ? g.index : g.index + g.segment.length;
+			}
+			acc += w;
+		}
+		return text.length;
 	}
 
 	handleInput(data: string): void {
@@ -879,6 +933,8 @@ export class Editor implements Component, Focusable {
 				text: "",
 				hasCursor: true,
 				cursorPos: 0,
+				logicalLine: 0,
+				startIndex: 0,
 			});
 			return layoutLines;
 		}
@@ -896,11 +952,15 @@ export class Editor implements Component, Focusable {
 						text: line,
 						hasCursor: true,
 						cursorPos: this.state.cursorCol,
+						logicalLine: i,
+						startIndex: 0,
 					});
 				} else {
 					layoutLines.push({
 						text: line,
 						hasCursor: false,
+						logicalLine: i,
+						startIndex: 0,
 					});
 				}
 			} else {
@@ -944,11 +1004,15 @@ export class Editor implements Component, Focusable {
 							text: chunk.text,
 							hasCursor: true,
 							cursorPos: adjustedCursorPos,
+							logicalLine: i,
+							startIndex: chunk.startIndex,
 						});
 					} else {
 						layoutLines.push({
 							text: chunk.text,
 							hasCursor: false,
+							logicalLine: i,
+							startIndex: chunk.startIndex,
 						});
 					}
 				}

@@ -3933,4 +3933,60 @@ describe("Editor component", () => {
 			assert.strictEqual(submitted, pastedText);
 		});
 	});
+
+	describe("Mouse click to move cursor", () => {
+		const click = (x: number) =>
+			({ x, y: 0, action: "up", button: "left", shift: false, alt: false, ctrl: false }) as const;
+
+		it("moves the cursor to the clicked column on a single line", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hello world");
+			editor.render(80);
+
+			editor.handleMouse(click(6), 1); // row 0 is the top border, text starts at row 1
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 6 });
+		});
+
+		it("clamps the cursor to end of line when clicking past the text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hi");
+			editor.render(80);
+
+			editor.handleMouse(click(40), 1);
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+
+		it("resolves the logical line when clicking a lower row", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("abc\ndefgh");
+			editor.render(80);
+
+			editor.handleMouse(click(3), 2); // row 2 -> second logical line
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 3 });
+		});
+
+		it("ignores clicks on the top border row", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hello");
+			editor.render(80);
+			editor.handleMouse(click(2), 1); // place cursor at col 2 first
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+
+			editor.handleMouse(click(4), 0); // border row -> no change
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+
+		it("snaps to the nearer grapheme edge", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("abcd");
+			editor.render(80);
+
+			editor.handleMouse(click(2), 1); // exactly on 'c' left edge -> col 2
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+	});
 });

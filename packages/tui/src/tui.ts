@@ -635,7 +635,10 @@ export class TUI extends Container {
 				// expand/collapse keeps it visually in place (content flows down),
 				// rather than snapping the view to the bottom.
 				const screenRow = Math.max(0, hit.start - this.lastWindowTop);
-				hit.component.handleMouse?.(evt, fullLineIndex - hit.start);
+				// Hand the component a content-space column (margin removed), matching
+				// the coordinate space its render output lives in.
+				const contentEvt = { ...evt, x: Math.max(0, evt.x - this.marginX) };
+				hit.component.handleMouse?.(contentEvt, fullLineIndex - hit.start);
 				this.pendingAnchor = { fullIndex: hit.start, screenRow };
 				this.requestRender();
 				return;
