@@ -156,7 +156,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 	if (hasGitEvidenceRead) {
 		addGuideline(
-			"When git output is captured as evidence, use git_evidence_read for exact spans; do not rerun broad git show/log/diff or read .pix/session-evidence/git/*.txt directly.",
+			"When git output is captured as evidence, use git_evidence_read for exact spans; do not rerun broad git show/log/diff or read .pix/session-evidence/git/*.txt directly. If a bash command contains a git subcommand (even inside pipes or $()), the entire stdout becomes an evidence digest — so avoid piping git output into tools like wc -l or diff when you need their numeric/text results; use git_evidence_read or separate non-git post-processing instead.",
 		);
 	}
 	if (hasGitEvidenceRead && hasGitEvidenceFindings) {
