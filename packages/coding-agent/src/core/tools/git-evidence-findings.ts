@@ -453,12 +453,7 @@ export function createGitEvidenceFindingsToolDefinition(
 		promptSnippet: "Record verified git evidence conclusions before final answers",
 		promptGuidelines: [
 			"For any final answer that includes non-inventory conclusions derived from git evidence, MUST record compact theme-level findings and call git_evidence_findings action=list before finalizing.",
-			"Findings are scoped to the current session only and the list output is compact. Use at most 3-5 high-signal findings.",
-			"Use one finding per theme or issue, not one per commit; keep findings compact and cite only the strongest raw/source spans.",
-			`Allowed claimKind values: ${CLAIM_KIND_VALUES.join(", ")}. Use inventory for overview/scope/theme summaries.`,
-			`Allowed basis values: ${BASIS_VALUES.join(", ")}. Use metadata for git log subjects; stat for changed-file inventory; raw_diff for git show/diff hunks.`,
-			"Commit subjects, file names, and stats only support inventory claims. Content, behavior, and correctness claims require raw diff and/or source spans.",
-			"Absence claims (missing tests/implementation/coverage) require searched evidence spans. Causality claims require raw evidence plus source spans and limitations explaining the verified link.",
+			"Use at most 3-5 high-signal findings, one per theme or issue (not one per commit); cite only the strongest raw/source spans. Field values and per-claim evidence requirements are enforced on add — call action=schema for the reference.",
 			"Record unsupported or insufficiently checked conclusions as hypothesis with limitations; do not present them as verified findings.",
 			"Use findings internally to support your analysis; do not repeat raw findings format in user-facing text.",
 		],

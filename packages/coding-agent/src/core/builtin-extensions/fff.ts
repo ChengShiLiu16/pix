@@ -29,14 +29,12 @@ const grepSchema = Type.Object({
 	pattern: Type.String({ description: "Search pattern (literal text or regex)" }),
 	path: Type.Optional(
 		Type.String({
-			description:
-				"Repo-relative path constraint. Directory prefix, filename, or glob. Examples: src/, main.ts, *.ts, src/**/*.cc.",
+			description: "Repo-relative path constraint: directory prefix, filename, or glob.",
 		}),
 	),
 	exclude: Type.Optional(
 		Type.Union([Type.String(), Type.Array(Type.String())], {
-			description:
-				"Exclude paths. Same syntax as path; comma/space-separated string or array. Example: test/,*.min.js,!vendor/.",
+			description: "Exclude paths (same syntax as path; string or array).",
 		}),
 	),
 	caseSensitive: Type.Optional(
@@ -54,14 +52,12 @@ const findSchema = Type.Object({
 	}),
 	path: Type.Optional(
 		Type.String({
-			description:
-				"Repo-relative path constraint. Directory prefix, filename, or glob. Examples: src/, main.ts, *.ts, src/**/*.cc.",
+			description: "Repo-relative path constraint: directory prefix, filename, or glob.",
 		}),
 	),
 	exclude: Type.Optional(
 		Type.Union([Type.String(), Type.Array(Type.String())], {
-			description:
-				"Exclude paths. Same syntax as path; comma/space-separated string or array. Example: test/,*.min.js,!vendor/.",
+			description: "Exclude paths (same syntax as path; string or array).",
 		}),
 	),
 	limit: Type.Optional(Type.Number({ description: `Max results per page (default ${DEFAULT_FIND_LIMIT})` })),
@@ -369,7 +365,6 @@ export function builtin(pix: ExtensionAPI): void {
 				`Use ${toolNames.find} for fuzzy filename/path exploration when the user names a concept, feature, or symbol.`,
 				`The exact FFF find tool name is ${toolNames.find}; do not call ffind unless recovering from a previous failed call.`,
 				`Use grep or ffgrep for content; ${toolNames.find} is for paths.`,
-				"Use ls/ls_many when you specifically need an alphabetical directory layout.",
 			],
 			parameters: findSchema,
 			renderShell: "self",

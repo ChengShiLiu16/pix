@@ -283,8 +283,7 @@ export function createGitEvidenceReadToolDefinition(
 			"Read or search raw git evidence captured from git log/show/diff/diff-tree/status/blame. Use id/path or ranges from a Git evidence digest. Supports offset/limit and literal pattern search.",
 		promptSnippet: "Read/search captured raw git evidence by id or path",
 		promptGuidelines: [
-			"When a Git evidence digest shows hunk spans like git-show-abcdef123456:120-180, use git_evidence_read with offset/limit before making non-inventory claims.",
-			"Read narrow spans only: default limit is 80 lines and max is 160 lines. Prefer exact hunk spans or pattern search before reading a range.",
+			"When a Git evidence digest shows hunk spans like git-show-abcdef123456:120-180, use git_evidence_read with offset/limit before making non-inventory claims. Prefer exact hunk spans or pattern search over reading a wide range.",
 			"Use ranges to read several targeted spans in one call instead of rerunning broad git show/diff commands.",
 		],
 		parameters: gitEvidenceReadSchema,
