@@ -20,7 +20,7 @@ import { theme } from "../theme/theme.ts";
 // Persistent input history store
 // ---------------------------------------------------------------------------
 
-type HistoryStore = {
+export type HistoryStore = {
 	load(): string[];
 	record(text: string, fallbackEntries: readonly unknown[]): string[];
 };
@@ -31,36 +31,29 @@ function hasErrorCode(error: unknown, code: string): boolean {
 	);
 }
 
-function createHistoryStore(historyPath: string): HistoryStore {
-	let loaded = false;
-	let entries: string[] = [];
-
+export function createHistoryStore(historyPath: string): HistoryStore {
+	// Always read the file fresh rather than caching: the history file is shared
+	// across every session/process, so a cached snapshot would be stale and the
+	// next save() would clobber entries written by other sessions in the
+	// meantime (last-writer-wins data loss when switching between sessions).
 	function load(): string[] {
-		if (loaded) return entries;
-		loaded = true;
-
 		try {
-			entries = parseInputHistoryFile(JSON.parse(readFileSync(historyPath, "utf8")));
+			return parseInputHistoryFile(JSON.parse(readFileSync(historyPath, "utf8")));
 		} catch (error) {
 			if (hasErrorCode(error, "ENOENT")) {
-				entries = [];
-				return entries;
+				return [];
 			}
 			console.warn(
 				"[persistent-input-history] failed to load history:",
 				error instanceof Error ? error.message : error,
 			);
-			entries = [];
+			return [];
 		}
-
-		return entries;
 	}
 
 	function save(nextEntries: readonly string[]): void {
-		entries = [...nextEntries];
-		loaded = true;
 		try {
-			writeFileSync(historyPath, `${JSON.stringify(createInputHistoryFile(entries), null, "\t")}\n`, "utf8");
+			writeFileSync(historyPath, `${JSON.stringify(createInputHistoryFile(nextEntries), null, "\t")}\n`, "utf8");
 		} catch (error) {
 			console.warn(
 				"[persistent-input-history] failed to save history:",
