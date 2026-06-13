@@ -65,7 +65,12 @@ describe("model selector provider grouping", () => {
 	it("groups models by provider and marks the current model in place", async () => {
 		const currentModel = createModel("zai", "glm-5");
 		const selector = createSelector(
-			[createModel("openai", "gpt-5"), currentModel, createModel("anthropic", "claude-opus")],
+			[
+				createModel("openai", "gpt-5"),
+				currentModel,
+				createModel("zai", "glm-4"),
+				createModel("anthropic", "claude-opus"),
+			],
 			currentModel,
 		);
 
@@ -80,7 +85,8 @@ describe("model selector provider grouping", () => {
 		expect(renderedLines).toContain("claude-opus");
 		expect(renderedLines).toContain("openai (1)");
 		expect(renderedLines).toContain("gpt-5");
-		expect(renderedLines).toContain("zai (1)");
+		expect(renderedLines.filter((line) => line === "zai (2)")).toHaveLength(1);
+		expect(renderedLines).toContain("glm-4");
 		expect(renderedLines.some((line) => line.endsWith("glm-5 ✓"))).toBe(true);
 	});
 });
