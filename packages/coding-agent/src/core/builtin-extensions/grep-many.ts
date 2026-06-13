@@ -30,11 +30,13 @@ const schema = Type.Object({
 		}),
 	),
 	// Single-search shorthand (same shape as grep); wrapped into searches internally.
-	pattern: Type.Optional(Type.String({ description: "Single search only: pattern (use searches[] for multiple)" })),
-	path: Type.Optional(Type.String({ description: "Single search only: file or directory to search in" })),
-	glob: Type.Optional(Type.String({ description: "Single search only: glob pattern to filter files" })),
-	ignoreCase: Type.Optional(Type.Boolean({ description: "Single search only: case-insensitive search" })),
-	literal: Type.Optional(Type.Boolean({ description: "Single search only: treat pattern as literal string" })),
+	pattern: Type.Optional(
+		Type.String({ description: "Single-search shorthand: pattern (prefer searches[] for multiple)" }),
+	),
+	path: Type.Optional(Type.String()),
+	glob: Type.Optional(Type.String()),
+	ignoreCase: Type.Optional(Type.Boolean()),
+	literal: Type.Optional(Type.Boolean()),
 });
 
 type SearchItem = Static<typeof searchItemSchema>;
@@ -145,8 +147,8 @@ export function builtin(pix: ExtensionAPI) {
 			renderShell: "self",
 			promptSnippet: "Run multiple searches in one call (searches: [...])",
 			promptGuidelines: [
-				"Always batch ALL searches into a single grep_many call (up to 10 searches). NEVER make multiple grep_many or grep calls when you can combine them into one.",
-				'Use the `searches` array: { searches: [{ pattern: "foo", path: "src" }, { pattern: "bar", glob: "*.ts" }] }. Every array element must be a full object — not a bare string like "glob". Top-level pattern/path alone works for a single search but searches[] is preferred for multiple.',
+				"Batch all searches into one grep_many call (up to 10); beyond that, split into the fewest calls.",
+				'Each searches[] element must be a full object like { pattern: "foo", path: "src" }, not a bare string. Top-level pattern works for a single search.',
 			],
 			parameters: schema,
 			prepareArguments: prepareGrepManyArguments,

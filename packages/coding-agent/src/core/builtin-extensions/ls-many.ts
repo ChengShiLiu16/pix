@@ -103,8 +103,7 @@ export function builtin(pix: ExtensionAPI) {
 			renderShell: "self",
 			promptSnippet: "List multiple directories in one call",
 			promptGuidelines: [
-				`Always batch ALL directories you need to list into a single ls_many call (up to ${LS_MANY_MAX_PATHS} paths). NEVER make multiple ls_many or ls calls when you can combine them into one.`,
-				`If you need to list more than ${LS_MANY_MAX_PATHS} directories, split into the fewest possible calls (e.g. two calls of 20 and 5, not many small calls).`,
+				`Batch all directories you need to list into one ls_many call (up to ${LS_MANY_MAX_PATHS} paths); beyond that, split into the fewest calls.`,
 			],
 			parameters: schema,
 			prepareArguments: preparePathsArguments as any,
