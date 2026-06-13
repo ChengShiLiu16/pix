@@ -52,6 +52,7 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { contextDebug } from "./context-debug.ts";
+import { detectGitInspection, isGitEvidenceText } from "./context-git-evidence.ts";
 import {
 	optimizeOutgoingContextWithReport,
 	shouldUseOptimizedContextInsteadOfCompaction,
@@ -255,6 +256,46 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 // ============================================================================
 // AgentSession Class
 // ============================================================================
+
+/**
+ * True when the transcript contains a git inspection command (a digest will be
+ * or has been created) or an already-captured git evidence digest. Mirrors the
+ * createGitEvidenceResult gate (detectGitInspection) so activation lines up
+ * exactly with digest creation, plus isGitEvidenceText to cover restored/older
+ * sessions whose raw output was already transformed.
+ */
+export function messagesHaveGitEvidenceSignal(messages: AgentMessage[]): boolean {
+	for (const message of messages) {
+		const content = (message as { content?: unknown }).content;
+		if ((message as { role?: string }).role === "assistant" && Array.isArray(content)) {
+			for (const block of content) {
+				if (
+					block?.type === "toolCall" &&
+					block?.name === "bash" &&
+					typeof block?.arguments?.command === "string" &&
+					detectGitInspection(block.arguments.command)
+				) {
+					return true;
+				}
+			}
+		}
+		if (Array.isArray(content)) {
+			for (const block of content) {
+				if (block?.type === "text" && typeof block?.text === "string" && isGitEvidenceText(block.text)) {
+					return true;
+				}
+			}
+		}
+		if (
+			(message as { role?: string }).role === "bashExecution" &&
+			typeof (message as { command?: unknown }).command === "string" &&
+			detectGitInspection((message as { command: string }).command)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
 
 export class AgentSession {
 	readonly agent: Agent;
@@ -813,6 +854,26 @@ export class AgentSession {
 		// Rebuild base system prompt with new tool set
 		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
 		this.agent.state.systemPrompt = this._baseSystemPrompt;
+	}
+
+	/**
+	 * Lazily activate the git evidence tools the moment a git inspection command
+	 * has run — which, per createGitEvidenceResult, is exactly when a git evidence
+	 * digest will be created. Called from prepareNextTurn so the tools (and their
+	 * guidelines) are present on the very next request, before the model could read
+	 * the digest. This matches the always-on behavior precisely (no relaxed or
+	 * tightened constraint) while keeping their schemas out of git-free sessions.
+	 *
+	 * Idempotent and one-way for the session. Returns true when the active tool set
+	 * changed (so the caller can hand the loop a refreshed context snapshot).
+	 */
+	activateGitEvidenceIfNeeded(messages: AgentMessage[]): boolean {
+		if (this.agent.state.tools.some((tool) => tool.name === "git_evidence_read")) return false;
+		if (!this._toolRegistry.has("git_evidence_read")) return false;
+		if (!messagesHaveGitEvidenceSignal(messages)) return false;
+		const active = this.getActiveToolNames();
+		this.setActiveToolsByName([...active, "git_evidence_read", "git_evidence_findings"]);
+		return true;
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -2434,7 +2495,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "bash", "edit", "write", "ls", "git_evidence_read", "git_evidence_findings"];
+			: ["read", "bash", "edit", "write", "ls"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

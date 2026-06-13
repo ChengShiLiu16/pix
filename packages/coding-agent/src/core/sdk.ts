@@ -4,7 +4,7 @@ import { clampThinkingLevel, type Message, type Model, streamSimple } from "@che
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { getShellEnv } from "../utils/shell.ts";
-import { AgentSession } from "./agent-session.ts";
+import { AgentSession, messagesHaveGitEvidenceSignal } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import { optimizeOutgoingContext } from "./context-optimizer.ts";
@@ -239,21 +239,29 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
 	}
 
-	const defaultActiveToolNames: ToolName[] = [
-		"read",
-		"bash",
-		"edit",
-		"write",
-		"ls",
-		"git_evidence_read",
-		"git_evidence_findings",
-	];
+	// git_evidence_* are intentionally omitted from the default set: they are lazily
+	// activated by AgentSession.activateGitEvidenceIfNeeded the moment a git inspection
+	// command runs (i.e. exactly when a digest is created), keeping their schemas out of
+	// git-free sessions without changing behavior. Restored sessions that already contain
+	// git evidence re-activate them below so resume is unaffected.
+	const defaultActiveToolNames: ToolName[] = ["read", "bash", "edit", "write", "ls"];
 	const allowedToolNames = options.tools ?? (options.noTools === "all" ? [] : undefined);
 	const excludedToolNames = options.excludeTools;
 	const excludedToolNameSet = excludedToolNames ? new Set(excludedToolNames) : undefined;
 	const initialActiveToolNames: string[] = (
 		options.tools ? [...options.tools] : options.noTools ? [] : defaultActiveToolNames
 	).filter((name) => !excludedToolNameSet?.has(name));
+	// Resume safety: if a restored transcript already contains git evidence, the git
+	// tools must be active from the first turn so the model can read prior digests.
+	if (
+		!options.tools &&
+		!options.noTools &&
+		hasExistingSession &&
+		messagesHaveGitEvidenceSignal(existingSession.messages) &&
+		!excludedToolNameSet?.has("git_evidence_read")
+	) {
+		initialActiveToolNames.push("git_evidence_read", "git_evidence_findings");
+	}
 
 	let agent: Agent;
 
@@ -295,6 +303,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	};
 
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
+	const sessionRef: { current?: AgentSession } = {};
 
 	agent = new Agent({
 		initialState: {
@@ -367,6 +376,21 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!runner) return next;
 			return runner.emitContext(next);
 		},
+		prepareNextTurn: (turnContext) => {
+			// Lazily bring in git evidence tools the moment a git inspection command has
+			// run, before the next request is built. Hand the loop a refreshed context
+			// snapshot (preserving the live transcript) so the new tools + guidelines take
+			// effect on the very next turn — exactly when the digest becomes readable.
+			const session = sessionRef.current;
+			if (!session?.activateGitEvidenceIfNeeded(turnContext.context.messages)) return undefined;
+			return {
+				context: {
+					...turnContext.context,
+					tools: agent.state.tools.slice(),
+					systemPrompt: agent.state.systemPrompt,
+				},
+			};
+		},
 		steeringMode: settingsManager.getSteeringMode(),
 		followUpMode: settingsManager.getFollowUpMode(),
 		transport: settingsManager.getTransport(),
@@ -402,6 +426,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});
+	sessionRef.current = session;
 	const extensionsResult = resourceLoader.getExtensions();
 
 	return {
