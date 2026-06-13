@@ -109,6 +109,7 @@ import { DynamicBorder } from "./components/dynamic-border.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
+import { ExtensionSelectorWithInputComponent } from "./components/extension-selector-with-input.ts";
 import { FooterComponent } from "./components/footer.ts";
 import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
@@ -343,6 +344,7 @@ export class InteractiveMode {
 
 	// Extension UI state
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
+	private extensionSelectorWithInput: ExtensionSelectorWithInputComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
@@ -1796,6 +1798,9 @@ export class InteractiveMode {
 		if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
+		if (this.extensionSelectorWithInput) {
+			this.hideExtensionSelectorWithInput();
+		}
 		if (this.extensionInput) {
 			this.hideExtensionInput();
 		}
@@ -1962,6 +1967,8 @@ export class InteractiveMode {
 			select: (title, options, opts) => this.showExtensionSelector(title, options, opts),
 			confirm: (title, message, opts) => this.showExtensionConfirm(title, message, opts),
 			input: (title, placeholder, opts) => this.showExtensionInput(title, placeholder, opts),
+			selectWithInput: (title, options, customInputIndex, customInputPlaceholder, opts) =>
+				this.showExtensionSelectorWithInput(title, options, customInputIndex, customInputPlaceholder, opts),
 			notify: (message, type) => this.showExtensionNotify(message, type),
 			onTerminalInput: (handler) => this.addExtensionTerminalInputListener(handler),
 			setStatus: (key, text) => this.setExtensionStatus(key, text),
@@ -2065,6 +2072,77 @@ export class InteractiveMode {
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
 		this.extensionSelector = undefined;
+		this.ui.setFocus(this.editor);
+		this.ui.requestRender();
+	}
+
+	/**
+	 * Show a selector with inline text input for extensions.
+	 */
+	private showExtensionSelectorWithInput(
+		title: string,
+		options: string[],
+		customInputIndex: number,
+		customInputPlaceholder?: string,
+		opts?: ExtensionUIDialogOptions,
+	): Promise<{ selected?: string; customValue?: string; cancelled: boolean }> {
+		return new Promise((resolve) => {
+			if (opts?.signal?.aborted) {
+				resolve({ cancelled: true });
+				return;
+			}
+
+			const onAbort = () => {
+				this.hideExtensionSelectorWithInput();
+				resolve({ cancelled: true });
+			};
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+
+			this.extensionSelectorWithInput = new ExtensionSelectorWithInputComponent(
+				title,
+				options,
+				(result) => {
+					opts?.signal?.removeEventListener("abort", onAbort);
+					this.hideExtensionSelectorWithInput();
+					if (result.cancelled) {
+						resolve({ cancelled: true });
+					} else if (result.customValue !== undefined) {
+						resolve({ customValue: result.customValue, cancelled: false });
+					} else if (result.optionIndex !== undefined) {
+						resolve({ selected: options[result.optionIndex], cancelled: false });
+					} else {
+						resolve({ cancelled: true });
+					}
+				},
+				() => {
+					opts?.signal?.removeEventListener("abort", onAbort);
+					this.hideExtensionSelectorWithInput();
+					resolve({ cancelled: true });
+				},
+				{
+					tui: this.ui,
+					timeout: opts?.timeout,
+					customInputIndex,
+					customInputPlaceholder,
+					onToggleToolsExpanded: () => this.toggleToolOutputExpansion(),
+				},
+			);
+
+			this.editorContainer.clear();
+			this.editorContainer.addChild(this.extensionSelectorWithInput);
+			this.ui.setFocus(this.extensionSelectorWithInput);
+			this.ui.requestRender();
+		});
+	}
+
+	/**
+	 * Hide the extension selector with inline input.
+	 */
+	private hideExtensionSelectorWithInput(): void {
+		this.extensionSelectorWithInput?.dispose();
+		this.editorContainer.clear();
+		this.editorContainer.addChild(this.editor);
+		this.extensionSelectorWithInput = undefined;
 		this.ui.setFocus(this.editor);
 		this.ui.requestRender();
 	}

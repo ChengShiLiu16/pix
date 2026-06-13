@@ -221,6 +221,16 @@ export type RpcExtensionUIRequest =
 			placeholder?: string;
 			timeout?: number;
 	  }
+	| {
+			type: "extension_ui_request";
+			id: string;
+			method: "selectWithInput";
+			title: string;
+			options: string[];
+			customInputIndex: number;
+			customInputPlaceholder?: string;
+			timeout?: number;
+	  }
 	| { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string }
 	| {
 			type: "extension_ui_request";

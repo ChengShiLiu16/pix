@@ -131,6 +131,18 @@ export interface ExtensionUIContext {
 	/** Show a text input dialog. */
 	input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions): Promise<string | undefined>;
 
+	/**
+	 * Show a selector with an inline text input at the specified option index.
+	 * The user can choose a preset option or type a custom value directly.
+	 */
+	selectWithInput(
+		title: string,
+		options: string[],
+		customInputIndex: number,
+		customInputPlaceholder?: string,
+		opts?: ExtensionUIDialogOptions,
+	): Promise<{ selected?: string; customValue?: string; cancelled: boolean }>;
+
 	/** Show a notification to the user. */
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 

@@ -148,6 +148,33 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				"cancelled" in r && r.cancelled ? undefined : "value" in r ? r.value : undefined,
 			),
 
+		selectWithInput: (title, options, customInputIndex, customInputPlaceholder, opts) =>
+			createDialogPromise(
+				opts,
+				{ cancelled: true },
+				{
+					method: "selectWithInput",
+					title,
+					options,
+					customInputIndex,
+					customInputPlaceholder,
+					timeout: opts?.timeout,
+				},
+				(r) => {
+					if ("cancelled" in r && r.cancelled) return { cancelled: true };
+					if ("value" in r) {
+						const val = r.value as string;
+						// 如果值匹配某个选项，视为选择该选项；否则视为自定义输入
+						const optionIndex = options.indexOf(val);
+						if (optionIndex !== -1) {
+							return { selected: val, cancelled: false };
+						}
+						return { customValue: val, cancelled: false };
+					}
+					return { cancelled: true };
+				},
+			),
+
 		notify(message: string, type?: "info" | "warning" | "error"): void {
 			// Fire and forget - no response needed
 			output({

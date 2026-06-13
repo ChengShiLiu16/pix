@@ -13,7 +13,6 @@ import { Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext } from "../../index.ts";
 import {
-	ASK_USER_QUESTION_CUSTOM_INPUT_OPTION,
 	ASK_USER_QUESTION_PROMPT_GUIDELINES,
 	ASK_USER_QUESTION_STATE_FILE,
 	ASK_USER_QUESTION_TOOL_NAME,
@@ -171,16 +170,25 @@ export function builtin(pix: ExtensionAPI) {
 
 				const { question, details, options } = normalized.value;
 				const presented = buildAskUserQuestionOptions(options);
-				const selectedOption = await ctx.ui.select(buildAskUserQuestionLabel(question, details), presented.options);
-				// 按位置识别自定义输入入口，避免依赖选项文案内容；展示文案可自由调整而不影响判定。
-				const choseCustomInput =
-					selectedOption !== undefined && presented.options.indexOf(selectedOption) === presented.customInputIndex;
-				let selected = selectedOption;
 
-				if (choseCustomInput) {
-					const customValue = await ctx.ui.input(ASK_USER_QUESTION_CUSTOM_INPUT_OPTION, "输入你的回复");
-					const trimmed = customValue?.trim();
-					selected = trimmed && trimmed.length > 0 ? trimmed : undefined;
+				// 使用内嵌输入框的选择器，用户可以直接在“自定义输入”行输入文字
+				const result = await ctx.ui.selectWithInput(
+					buildAskUserQuestionLabel(question, details),
+					presented.options,
+					presented.customInputIndex,
+					"输入你的回复",
+				);
+
+				let selected: string | undefined;
+				let choseCustomInput = false;
+
+				if (result.cancelled) {
+					selected = undefined;
+				} else if (result.customValue !== undefined) {
+					selected = result.customValue;
+					choseCustomInput = true;
+				} else if (result.selected !== undefined) {
+					selected = result.selected;
 				}
 
 				const cancelled = !selected;
