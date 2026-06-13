@@ -175,7 +175,6 @@ cat README.md | pix -p "Summarize this text"
 | `--model <pattern>` | Model pattern or ID; supports `provider/id` and optional `:<thinking>` |
 | `--api-key <key>` | API key, overriding environment variables |
 | `--thinking <level>` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `--models <patterns>` | Comma-separated patterns for Ctrl+P cycling |
 | `--list-models [search]` | List available models |
 
 ### Session Options
@@ -267,9 +266,6 @@ pix --model openai/gpt-4o "Help me refactor"
 # Model with thinking level shorthand
 pix --model sonnet:high "Solve this complex problem"
 
-# Limit model cycling
-pix --models "claude-*,gpt-4o"
-
 # Read-only mode
 pix --tools read,grep,find,ls -p "Review the code"
 
@@ -295,4 +291,3 @@ pix --exclude-tools ask_question
 Pix keeps the core small and pushes workflow-specific behavior into extensions, skills, prompt templates, and packages.
 
 It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
-

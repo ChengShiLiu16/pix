@@ -181,18 +181,6 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 
 When multiple sources specify a session directory, precedence is `--session-dir`, `PIX_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.
 
-### Model Cycling
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `enabledModels` | string[] | - | Model patterns for Ctrl+P cycling (same format as `--models` CLI flag) |
-
-```json
-{
-  "enabledModels": ["claude-*", "gpt-4o", "gemini-2*"]
-}
-```
-
 ### Markdown
 
 | Setting | Type | Default | Description |
@@ -259,7 +247,6 @@ See [packages.md](packages.md) for package management details.
     "enabled": true,
     "maxRetries": 3
   },
-  "enabledModels": ["claude-*", "gpt-4o"],
   "warnings": {
     "anthropicExtraUsage": true
   },
