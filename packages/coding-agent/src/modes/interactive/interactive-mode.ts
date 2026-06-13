@@ -397,7 +397,20 @@ export class InteractiveMode {
 			await this.rebindCurrentSession();
 		});
 		this.version = VERSION;
-		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
+		// Opt-in: alternate-screen + mouse so the app owns scrolling and can receive
+		// clicks (click-to-expand, drag-select). Controlled by the `terminal.mouseUI`
+		// setting, with the PIX_MOUSE_UI env var as a fallback override.
+		const mouseUI = this.settingsManager.getMouseUI();
+		this.ui = new TUI(new ProcessTerminal({ enableMouse: mouseUI }), this.settingsManager.getShowHardwareCursor(), {
+			appScroll: mouseUI,
+			marginX: mouseUI ? 2 : 0,
+		});
+		if (mouseUI) {
+			// App-managed drag selection: copy the selected transcript text on release.
+			this.ui.onSelectionCopy = (text) => {
+				void copyToClipboard(text);
+			};
+		}
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
@@ -4038,6 +4051,7 @@ export class InteractiveMode {
 					quietStartup: this.settingsManager.getQuietStartup(),
 					clearOnShrink: this.settingsManager.getClearOnShrink(),
 					showTerminalProgress: this.settingsManager.getShowTerminalProgress(),
+					mouseUI: this.settingsManager.getMouseUI(),
 					warnings: this.settingsManager.getWarnings(),
 				},
 				{
@@ -4156,6 +4170,11 @@ export class InteractiveMode {
 					},
 					onShowTerminalProgressChange: (enabled) => {
 						this.settingsManager.setShowTerminalProgress(enabled);
+					},
+					onMouseUIChange: (enabled) => {
+						// Takes effect on next launch: alt-screen/mouse is wired at TUI
+						// construction, so we persist the choice and let the user restart.
+						this.settingsManager.setMouseUI(enabled);
 					},
 					onWarningsChange: (warnings) => {
 						this.settingsManager.setWarnings(warnings);

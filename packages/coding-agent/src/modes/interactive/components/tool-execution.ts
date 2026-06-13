@@ -24,6 +24,9 @@ export interface ToolExecutionOptions {
 }
 
 export class ToolExecutionComponent extends Container {
+	/** Collapse blocks whose renderer doesn't collapse itself once they exceed this many lines (mouse mode). */
+	private static readonly COLLAPSE_LINE_LIMIT = 12;
+
 	private contentBox: Box;
 	private contentText: Text;
 	private selfRenderContainer: Container;
@@ -36,6 +39,8 @@ export class ToolExecutionComponent extends Container {
 	private toolCallId: string;
 	private args: any;
 	private expanded = false;
+	/** Whether the collapsed output has hidden content worth expanding (mouse mode). */
+	private expandable = false;
 	private showImages: boolean;
 	private imageWidthCells: number;
 	private isPartial = true;
@@ -235,7 +240,10 @@ export class ToolExecutionComponent extends Container {
 		if (this.hideComponent) {
 			return [];
 		}
+		return this.augmentForMouse(this.renderBase(width), width);
+	}
 
+	private renderBase(width: number): string[] {
 		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
 			const contentLines = this.selfRenderContainer.render(width);
 			if (contentLines.length === 0 && this.imageComponents.length === 0) {
@@ -261,6 +269,73 @@ export class ToolExecutionComponent extends Container {
 		}
 
 		return super.render(width);
+	}
+
+	/**
+	 * In mouse mode, append a clickable expand/collapse button at the block tail
+	 * for every completed tool block, so any block can be toggled regardless of
+	 * how its renderer collapses:
+	 *  - Renderers that collapse themselves (emit a "to expand" hint): keep their
+	 *    output, just add a button.
+	 *  - Renderers that always render full (e.g. edit/diff): collapse the output
+	 *    here when it exceeds the line limit.
+	 *  - Short header-summary blocks (e.g. Write): still offer a button; expanding
+	 *    lets the renderer reveal the hidden body.
+	 * No-op outside app-scroll mode, so keyboard-only rendering is unchanged.
+	 */
+	private augmentForMouse(lines: string[], width: number): string[] {
+		if (!this.ui.appScrollEnabled || lines.length === 0 || this.isPartial) {
+			return lines;
+		}
+		if (this.expanded) {
+			this.expandable = true;
+			return [...lines, theme.fg("dim", "▾ 点击收起")];
+		}
+		// Renderer already collapsed itself (its own expand hint is present): keep it.
+		if (lines.some((line) => line.includes("to expand"))) {
+			this.expandable = true;
+			return [...lines, theme.fg("dim", "▸ 点击展开")];
+		}
+		// Renderer rendered everything: collapse long output here.
+		if (lines.length > ToolExecutionComponent.COLLAPSE_LINE_LIMIT) {
+			this.expandable = true;
+			const shown = lines.slice(0, ToolExecutionComponent.COLLAPSE_LINE_LIMIT);
+			const hidden = lines.length - ToolExecutionComponent.COLLAPSE_LINE_LIMIT;
+			return [...shown, theme.fg("dim", `▸ 点击展开 (${hidden} 行)`)];
+		}
+		// Short block whose renderer hides its result body when collapsed
+		// (e.g. read/bash/grep): offer a button so expansion can reveal it.
+		if (this.resultHiddenWhenCollapsed(width)) {
+			this.expandable = true;
+			return [...lines, theme.fg("dim", "▸ 点击展开")];
+		}
+		// Fully shown and nothing left to reveal: no button.
+		this.expandable = false;
+		return lines;
+	}
+
+	/**
+	 * True when there is result content that the renderer is hiding in the
+	 * current (collapsed) state — i.e. expanding would reveal more. Used to
+	 * suppress a useless expand button on blocks that already show everything.
+	 */
+	private resultHiddenWhenCollapsed(width: number): boolean {
+		if (this.expanded || !this.result || !this.resultRendererComponent) {
+			return false;
+		}
+		if (this.getTextOutput().trim() === "") {
+			return false;
+		}
+		return this.resultRendererComponent.render(width).length === 0;
+	}
+
+	/** Click anywhere in the block toggles this block's expansion (mouse mode). */
+	handleMouse(): void {
+		if (this.expanded) {
+			this.setExpanded(false);
+		} else if (this.expandable) {
+			this.setExpanded(true);
+		}
 	}
 
 	private renderBatchFallback(): boolean {

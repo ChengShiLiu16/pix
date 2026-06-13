@@ -13,7 +13,7 @@
  *   - result 折叠为空, 展开显示完整内容/diff
  */
 
-import { Container, Spacer, Text } from "@chengshiliu16/pix-tui";
+import { Container, Text } from "@chengshiliu16/pix-tui";
 import type { ExtensionAPI } from "../../index.ts";
 import {
 	type BashToolDetails,
@@ -30,6 +30,7 @@ import {
 	type LsToolDetails,
 	type ReadToolDetails,
 } from "../../index.ts";
+import { renderDiff } from "../../modes/interactive/components/diff.ts";
 import { formatBashCallWithBatch, getBashFileMutationPreview } from "./lib/bash-batch-display.ts";
 import { formatToolPath, formatTreeCall, setDisplayCwd, shortenPath } from "./lib/format-tree-call.ts";
 import { formatReadCallWithBatch, setReadBatchCwd } from "./lib/read-batch-display.ts";
@@ -63,6 +64,22 @@ function hasImage(content: any[]): boolean {
 
 function lineCount(text: string): number {
 	return text ? text.split("\n").length : 0;
+}
+
+/**
+ * Render a brand-new file (write tool) as an all-added diff: each line shown as
+ * a green "+N content" row, matching the edit tool's diff colors and Claude
+ * Code's new-file presentation.
+ */
+function renderNewFileDiff(content: string, theme: ThemeLike): string {
+	const lines = content.split("\n");
+	let end = lines.length;
+	while (end > 0 && lines[end - 1] === "") end--;
+	const shown = lines.slice(0, end);
+	const numWidth = String(shown.length).length;
+	return shown
+		.map((line, i) => theme.fg("toolDiffAdded", `+${String(i + 1).padStart(numWidth)} ${line.replace(/\t/g, "   ")}`))
+		.join("\n");
 }
 
 function renderErrorText(result: { content?: any[] }, theme: ThemeLike): Text {
@@ -431,7 +448,7 @@ export function builtin(pix: ExtensionAPI) {
 					`${formatToolPath(path)} ${theme.fg("toolOutput", `(${lines} lines)`)}`,
 				]);
 			},
-			renderResult(result: any, { expanded }: any, theme: any, context: any) {
+			renderResult(result: any, _options: any, theme: any, context: any) {
 				const args = context.args as { path?: string; file_path?: string; content?: string };
 				const content = args?.content ?? "";
 
@@ -439,8 +456,10 @@ export function builtin(pix: ExtensionAPI) {
 					return renderErrorText(result, theme);
 				}
 
-				if (!expanded) return EMPTY;
-				return new Text(content, 0, 0);
+				// Show the new-file diff inline by default (like Claude Code); the
+				// transcript component collapses long output to a clickable preview.
+				if (!content) return EMPTY;
+				return new Text(renderNewFileDiff(content, theme), 2, 0);
 			},
 		});
 
@@ -466,18 +485,18 @@ export function builtin(pix: ExtensionAPI) {
 					`${formatToolPath(path)}${countLabel ? theme.fg("toolOutput", countLabel) : ""}`,
 				]);
 			},
-			renderResult(result: any, { expanded }: any, theme: any, context: any) {
+			renderResult(result: any, _options: any, theme: any, context: any) {
 				if (shouldRenderAsToolError(context, result)) {
 					return renderErrorText(result, theme);
 				}
 
 				const details = result.details as EditToolDetails | undefined;
 				const diff = details?.diff;
-				if (!diff || !expanded) return EMPTY;
+				if (!diff) return EMPTY;
 
+				const rawPath = context.args?.path ?? context.args?.file_path;
 				const comp = new Container();
-				comp.addChild(new Spacer(1));
-				comp.addChild(new Text(diff, 0, 0));
+				comp.addChild(new Text(renderDiff(diff, { filePath: rawPath }), 2, 0));
 				return comp;
 			},
 		});

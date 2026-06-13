@@ -127,6 +127,19 @@ export class ProcessTerminal implements Terminal {
 		return env;
 	})();
 
+	// When enabled, the terminal switches to the alternate screen and enables
+	// SGR mouse reporting so the app can own scrolling and receive clicks.
+	private readonly enableMouse: boolean;
+	private readonly altScreen: boolean;
+	private mouseActive = false;
+	private altScreenActive = false;
+
+	constructor(options: { enableMouse?: boolean; altScreen?: boolean } = {}) {
+		this.enableMouse = options.enableMouse ?? false;
+		// App-managed scroll requires the alternate screen; default it to follow enableMouse.
+		this.altScreen = options.altScreen ?? this.enableMouse;
+	}
+
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
 	}
@@ -143,13 +156,26 @@ export class ProcessTerminal implements Terminal {
 		process.stdin.setEncoding("utf8");
 		process.stdin.resume();
 
+		// Switch to the alternate screen first so the app owns the viewport and
+		// the user's previous shell output is preserved on exit.
+		if (this.altScreen) {
+			process.stdout.write("\x1b[?1049h");
+			this.altScreenActive = true;
+		}
+
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
-		// Mouse tracking is disabled — no component currently handles mouse events.
-		// Enabling it would capture scroll wheel events and break terminal scrollback.
-		// process.stdout.write("\x1b[?1006h"); // SGR mouse mode
-		// process.stdout.write("\x1b[?1002h"); // Button event tracking (press/release/drag)
+		// Mouse reporting. Once enabled the terminal sends button/wheel/drag events
+		// to the app instead of doing native scrollback/selection, so the app owns
+		// scrolling AND selection. ?1002 = button-event tracking: reports presses,
+		// releases, wheel, and motion *while a button is held* (needed for drag
+		// selection) without flooding on idle motion.
+		if (this.enableMouse) {
+			process.stdout.write("\x1b[?1002h"); // Button-event tracking (press/release/drag + wheel)
+			process.stdout.write("\x1b[?1006h"); // SGR extended coordinates
+			this.mouseActive = true;
+		}
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -451,9 +477,12 @@ export class ProcessTerminal implements Terminal {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
-		// Disable mouse tracking (currently not enabled, but defensive cleanup)
-		// process.stdout.write("\x1b[?1002l"); // Disable button event tracking
-		// process.stdout.write("\x1b[?1006l"); // Disable SGR mouse mode
+		// Disable mouse reporting (mirror of start()).
+		if (this.mouseActive) {
+			process.stdout.write("\x1b[?1006l"); // Disable SGR extended coordinates
+			process.stdout.write("\x1b[?1002l"); // Disable button-event tracking
+			this.mouseActive = false;
+		}
 
 		const shouldDisableKittyProtocol =
 			this.keyboardProtocolPushed || this._kittyProtocolActive || this.keyboardProtocolNegotiationPending;
@@ -489,6 +518,12 @@ export class ProcessTerminal implements Terminal {
 		if (this.resizeHandler) {
 			process.stdout.removeListener("resize", this.resizeHandler);
 			this.resizeHandler = undefined;
+		}
+
+		// Leave the alternate screen last so the original shell content is restored.
+		if (this.altScreenActive) {
+			process.stdout.write("\x1b[?1049l");
+			this.altScreenActive = false;
 		}
 
 		// Pause stdin to prevent any buffered input (e.g., Ctrl+D) from being

@@ -6,10 +6,22 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { performance } from "node:perf_hooks";
-import { isKeyRelease, matchesKey } from "./keys.ts";
+import { isKeyRelease, type MouseEvent, matchesKey, parseMouse } from "./keys.ts";
 import type { Terminal } from "./terminal.ts";
 import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.ts";
-import { extractSegments, normalizeTerminalOutput, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.ts";
+import {
+	applyScopedStyle,
+	extractSegments,
+	normalizeTerminalOutput,
+	sliceByColumn,
+	sliceWithWidth,
+	visibleWidth,
+} from "./utils.ts";
+
+/** Strip SGR color codes and OSC 8 hyperlink wrappers for plain-text extraction. */
+function stripAnsiCodes(text: string): string {
+	return text.replace(/\x1b\[[0-9;:]*m/g, "").replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
+}
 
 const KITTY_SEQUENCE_PREFIX = "\x1b_G";
 
@@ -56,10 +68,28 @@ export interface Component {
 	wantsKeyRelease?: boolean;
 
 	/**
+	 * Optional handler for a mouse event whose target resolved to this component
+	 * (app-managed scroll mode only). `localY` is the 0-based row within this
+	 * component's own rendered output; `evt.x` is the 0-based column.
+	 */
+	handleMouse?(evt: MouseEvent, localY: number): void;
+
+	/**
 	 * Invalidate any cached rendering state.
 	 * Called when theme changes or when component needs to re-render from scratch.
 	 */
 	invalidate(): void;
+}
+
+/** A component's line range within the full rendered content, for hit-testing. */
+interface MouseHit {
+	component: Component;
+	start: number; // inclusive full-content line index
+	end: number; // exclusive
+}
+
+function isMouseAware(c: Component | null): c is Component & { handleMouse: NonNullable<Component["handleMouse"]> } {
+	return c !== null && typeof c.handleMouse === "function";
 }
 
 type InputListenerResult = { consume?: boolean; data?: string } | undefined;
@@ -257,6 +287,50 @@ export class Container implements Component {
 		}
 		return lines;
 	}
+
+	/** True when this node renders by plain child concatenation (descendable for hit-testing). */
+	private usesDefaultRender(): boolean {
+		return this.render === Container.prototype.render;
+	}
+
+	/**
+	 * Render while recording the line range of every mouse-aware component, for
+	 * click hit-testing. Lines are identical to {@link render}. Components that
+	 * override render() are treated as opaque leaves (their internal layout is
+	 * their own concern, exposed via handleMouse's localY).
+	 */
+	renderWithHits(width: number, offset: number): { lines: string[]; hits: MouseHit[] } {
+		// Opaque node (custom render): emit its lines as-is, record it as one hit.
+		if (!this.usesDefaultRender()) {
+			const lines = this.render(width);
+			const hits: MouseHit[] = isMouseAware(this)
+				? [{ component: this, start: offset, end: offset + lines.length }]
+				: [];
+			return { lines, hits };
+		}
+
+		const lines: string[] = [];
+		const hits: MouseHit[] = [];
+		let cur = offset;
+		for (const child of this.children) {
+			const r = renderNodeWithHits(child, width, cur);
+			for (const line of r.lines) lines.push(line);
+			for (const hit of r.hits) hits.push(hit);
+			cur += r.lines.length;
+		}
+		if (isMouseAware(this)) hits.push({ component: this, start: offset, end: cur });
+		return { lines, hits };
+	}
+}
+
+/** Render any component with hit ranges: descend into plain Containers, treat others as leaves. */
+function renderNodeWithHits(node: Component, width: number, offset: number): { lines: string[]; hits: MouseHit[] } {
+	if (node instanceof Container) {
+		return node.renderWithHits(width, offset);
+	}
+	const lines = node.render(width);
+	const hits: MouseHit[] = isMouseAware(node) ? [{ component: node, start: offset, end: offset + lines.length }] : [];
+	return { lines, hits };
 }
 
 /**
@@ -286,16 +360,286 @@ export class TUI extends Container {
 	private fullRedrawCount = 0;
 	private stopped = false;
 
+	// App-managed scrolling (alternate-screen mode). When enabled, the TUI renders
+	// only a height-sized window of the full content and owns scroll position,
+	// instead of letting content flow into the terminal's native scrollback.
+	private appScroll = false;
+	/** Horizontal page margin (blank columns on each side) in app-scroll/alt-screen mode. */
+	private marginX = 0;
+	/** Lines scrolled up from the bottom. 0 means pinned to the latest content. */
+	private scrollOffset = 0;
+	/** When true, new content keeps the view pinned to the bottom. */
+	private stickToBottom = true;
+	/** Top index (into the full line array) of the last rendered window. For hit-testing. */
+	private lastWindowTop = 0;
+	/**
+	 * Pending scroll anchor consumed on the next windowing pass: keep full-content
+	 * line `fullIndex` pinned at screen row `screenRow`. Set when a block is
+	 * clicked to expand/collapse so the block stays put and content flows down,
+	 * instead of the view snapping to the bottom.
+	 */
+	private pendingAnchor: { fullIndex: number; screenRow: number } | null = null;
+	/** Mouse-aware component line ranges from the last render (full-content indices). */
+	private lastHits: MouseHit[] = [];
+	/** Full (pre-window) rendered lines from the last render, for selection text extraction. */
+	private lastFullLines: string[] = [];
+	private removeMouseListener?: () => void;
+
+	// App-managed text selection (mouse mode). Coordinates are in full-content
+	// space: `line` is an index into lastFullLines, `col` is a visible column.
+	private selAnchor: { line: number; col: number } | null = null;
+	private selEnd: { line: number; col: number } | null = null;
+	private selecting = false; // a drag is in progress
+	private hasSelection = false; // a finished/active selection should be highlighted
+	private mouseMoved = false; // motion seen since the last mousedown (click vs drag)
+	/** Invoked with the selected text when a drag-selection completes (app wires clipboard). */
+	public onSelectionCopy?: (text: string) => void;
+
 	// Overlay stack for modal components rendered on top of base content
 	private focusOrderCounter = 0;
 	private overlayStack: OverlayStackEntry[] = [];
 	private overlayFocusRestore: OverlayFocusRestoreState = { status: "inactive" };
 
-	constructor(terminal: Terminal, showHardwareCursor?: boolean) {
+	constructor(
+		terminal: Terminal,
+		showHardwareCursor?: boolean,
+		options: { appScroll?: boolean; marginX?: number } = {},
+	) {
 		super();
 		this.terminal = terminal;
 		if (showHardwareCursor !== undefined) {
 			this.showHardwareCursor = showHardwareCursor;
+		}
+		this.appScroll = options.appScroll ?? false;
+		this.marginX = Math.max(0, Math.floor(options.marginX ?? 0));
+	}
+
+	/** Whether app-managed scrolling (alternate-screen window rendering) is active. */
+	get appScrollEnabled(): boolean {
+		return this.appScroll;
+	}
+
+	/** Number of wheel-line steps per scroll-wheel notch. */
+	private static readonly WHEEL_STEP = 3;
+
+	/**
+	 * Collapse full content into a height-sized window based on the current
+	 * scroll position, re-pinning to the bottom when stuck and clamping the
+	 * saved offset to the latest content size.
+	 */
+	private applyScrollWindow(lines: string[], height: number): string[] {
+		if (height <= 0) {
+			this.lastWindowTop = 0;
+			return [];
+		}
+		const maxOffset = Math.max(0, lines.length - height);
+		if (this.pendingAnchor) {
+			// Keep the clicked block pinned at its screen row; content flows down.
+			const { fullIndex, screenRow } = this.pendingAnchor;
+			this.pendingAnchor = null;
+			const anchoredTop = Math.max(0, Math.min(fullIndex - Math.max(0, screenRow), maxOffset));
+			this.scrollOffset = maxOffset - anchoredTop;
+			this.stickToBottom = this.scrollOffset === 0;
+		} else if (this.stickToBottom) {
+			this.scrollOffset = 0;
+		} else {
+			this.scrollOffset = Math.min(Math.max(0, this.scrollOffset), maxOffset);
+			if (this.scrollOffset === 0) this.stickToBottom = true;
+		}
+		const top = maxOffset - this.scrollOffset;
+		this.lastWindowTop = top;
+		const windowLines = lines.slice(top, top + height);
+		// Pad to a full screen so stale rows below short content are cleared.
+		while (windowLines.length < height) windowLines.push("");
+		return windowLines;
+	}
+
+	/** Scroll by N lines: positive reveals older content, negative reveals newer. */
+	scrollBy(lines: number): void {
+		if (!this.appScroll || lines === 0) return;
+		const next = Math.max(0, this.scrollOffset + lines);
+		if (next === this.scrollOffset && this.stickToBottom === (next === 0)) return;
+		this.scrollOffset = next;
+		this.stickToBottom = next === 0;
+		this.requestRender();
+	}
+
+	/** Re-pin the view to the latest content. */
+	scrollToBottom(): void {
+		if (!this.appScroll) return;
+		if (this.scrollOffset === 0 && this.stickToBottom) return;
+		this.scrollOffset = 0;
+		this.stickToBottom = true;
+		this.requestRender();
+	}
+
+	/**
+	 * Paint dim ▲/▼ "more content" markers into the reserved left margin of the
+	 * top/bottom rows. Touches only the displayed lines (not lastFullLines or
+	 * lastHits), so text selection and click hit-testing are unaffected. No-op
+	 * when there is no margin or nothing is scrolled out of view.
+	 */
+	private addScrollIndicators(lines: string[]): string[] {
+		if (this.marginX < 1 || lines.length === 0) return lines;
+		const moreAbove = this.lastWindowTop > 0;
+		const moreBelow = this.scrollOffset > 0;
+		if (!moreAbove && !moreBelow) return lines;
+		const out = lines.slice();
+		const mark = (idx: number, glyph: string): void => {
+			const line = out[idx] ?? "";
+			// The line starts with marginX blank cells; replace the first one.
+			out[idx] = `\x1b[2m${glyph}\x1b[22m${line.slice(1)}`;
+		};
+		if (moreAbove) mark(0, "▲");
+		if (moreBelow) mark(out.length - 1, "▼");
+		return out;
+	}
+
+	/**
+	 * Intercept mouse sequences before they reach the focused component.
+	 * Wheel scrolls; press+drag selects text; press+release without movement is
+	 * a click dispatched to the target component. Everything is consumed so raw
+	 * sequences never leak to the focused component as text.
+	 */
+	private handleMouseInput(data: string): InputListenerResult {
+		const evt = parseMouse(data);
+		if (!evt) return undefined;
+		if (evt.shift) return { consume: true };
+		if (evt.wheel) {
+			this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
+			return { consume: true };
+		}
+
+		const line = this.lastWindowTop + evt.y;
+		// Screen column -> content column: content starts marginX cells from the left.
+		const col = Math.max(0, evt.x - this.marginX);
+
+		if (evt.action === "down" && evt.button !== "right") {
+			this.beginSelection(line, col);
+			return { consume: true };
+		}
+		if (evt.action === "move" && this.selecting) {
+			this.updateSelection(line, col);
+			return { consume: true };
+		}
+		if (evt.action === "up" && evt.button !== "right") {
+			this.endSelection(line, col, evt);
+			return { consume: true };
+		}
+		return { consume: true };
+	}
+
+	private beginSelection(line: number, col: number): void {
+		this.selecting = true;
+		this.mouseMoved = false;
+		this.selAnchor = { line, col };
+		this.selEnd = { line, col };
+		if (this.hasSelection) {
+			// Clear a previous highlight on a fresh press.
+			this.hasSelection = false;
+			this.requestRender();
+		}
+	}
+
+	private updateSelection(line: number, col: number): void {
+		if (!this.selAnchor) return;
+		this.selEnd = { line, col };
+		if (line !== this.selAnchor.line || col !== this.selAnchor.col) {
+			this.mouseMoved = true;
+			this.hasSelection = true;
+		}
+		this.requestRender();
+	}
+
+	private endSelection(line: number, col: number, evt: MouseEvent): void {
+		this.selecting = false;
+		if (!this.mouseMoved) {
+			// No drag: treat as a click on the target component.
+			this.clearSelection();
+			this.dispatchClick(evt);
+			return;
+		}
+		this.selEnd = { line, col };
+		const text = this.getSelectedText();
+		if (text) this.onSelectionCopy?.(text);
+		this.requestRender(); // keep the highlight until the next interaction
+	}
+
+	/** Clear any active text selection and request a redraw if needed. */
+	clearSelection(): void {
+		this.selAnchor = null;
+		this.selEnd = null;
+		this.selecting = false;
+		this.mouseMoved = false;
+		if (this.hasSelection) {
+			this.hasSelection = false;
+			this.requestRender();
+		}
+	}
+
+	/** Normalized [start, end] of the current selection in (line, col) order. */
+	private orderedSelection(): { start: { line: number; col: number }; end: { line: number; col: number } } | null {
+		if (!this.selAnchor || !this.selEnd) return null;
+		let a = this.selAnchor;
+		let b = this.selEnd;
+		if (a.line > b.line || (a.line === b.line && a.col > b.col)) [a, b] = [b, a];
+		return { start: a, end: b };
+	}
+
+	/** Extract the selected text (plain, ANSI stripped) from the full content lines. */
+	private getSelectedText(): string {
+		const sel = this.orderedSelection();
+		if (!sel) return "";
+		const out: string[] = [];
+		for (let ln = sel.start.line; ln <= sel.end.line && ln < this.lastFullLines.length; ln++) {
+			const lineStr = this.lastFullLines[ln] ?? "";
+			const lineWidth = visibleWidth(lineStr);
+			const fromCol = ln === sel.start.line ? sel.start.col : 0;
+			const toCol = ln === sel.end.line ? Math.min(sel.end.col, lineWidth) : lineWidth;
+			const slice = sliceByColumn(lineStr, fromCol, Math.max(0, toCol - fromCol));
+			out.push(stripAnsiCodes(slice));
+		}
+		return out.join("\n");
+	}
+
+	/** Paint the active selection over the visible window (window-row aligned). */
+	private applySelectionHighlight(windowLines: string[]): string[] {
+		const sel = this.orderedSelection();
+		if (!sel) return windowLines;
+		const result = windowLines.slice();
+		for (let row = 0; row < result.length; row++) {
+			const ln = this.lastWindowTop + row;
+			if (ln < sel.start.line || ln > sel.end.line) continue;
+			const lineStr = result[row] ?? "";
+			const lineWidth = visibleWidth(lineStr);
+			const fromCol = ln === sel.start.line ? sel.start.col : 0;
+			const toCol = ln === sel.end.line ? Math.min(sel.end.col, lineWidth) : lineWidth;
+			if (toCol <= fromCol) continue;
+			const before = sliceByColumn(lineStr, 0, fromCol);
+			const mid = sliceByColumn(lineStr, fromCol, toCol - fromCol);
+			const after = sliceByColumn(lineStr, toCol, Math.max(0, lineWidth - toCol));
+			const hl = applyScopedStyle((t) => `\x1b[7m${t}\x1b[27m`, mid);
+			result[row] = before + hl + after;
+		}
+		return result;
+	}
+
+	/** Map a click's screen row to the owning mouse-aware component and notify it. */
+	private dispatchClick(evt: MouseEvent): void {
+		// While an overlay is up, the transcript underneath is not interactive.
+		if (this.getTopmostVisibleOverlay()) return;
+		const fullLineIndex = this.lastWindowTop + evt.y;
+		for (const hit of this.lastHits) {
+			if (fullLineIndex >= hit.start && fullLineIndex < hit.end) {
+				// Anchor the clicked block's top to its current screen row so an
+				// expand/collapse keeps it visually in place (content flows down),
+				// rather than snapping the view to the bottom.
+				const screenRow = Math.max(0, hit.start - this.lastWindowTop);
+				hit.component.handleMouse?.(evt, fullLineIndex - hit.start);
+				this.pendingAnchor = { fullIndex: hit.start, screenRow };
+				this.requestRender();
+				return;
+			}
 		}
 	}
 
@@ -605,6 +949,9 @@ export class TUI extends Container {
 			() => this.requestRender(),
 		);
 		this.terminal.hideCursor();
+		if (this.appScroll) {
+			this.removeMouseListener = this.addInputListener((data) => this.handleMouseInput(data));
+		}
 		this.queryCellSize();
 		this.requestRender();
 	}
@@ -632,6 +979,10 @@ export class TUI extends Container {
 
 	stop(): void {
 		this.stopped = true;
+		if (this.removeMouseListener) {
+			this.removeMouseListener();
+			this.removeMouseListener = undefined;
+		}
 		if (this.renderTimer) {
 			clearTimeout(this.renderTimer);
 			this.renderTimer = undefined;
@@ -724,6 +1075,14 @@ export class TUI extends Container {
 			return;
 		}
 
+		// Any keypress dismisses an active text selection highlight. Escape is
+		// consumed (its only job here was to clear); other keys still proceed.
+		if (this.hasSelection && !isKeyRelease(data)) {
+			const wasEscape = matchesKey(data, "escape");
+			this.clearSelection();
+			if (wasEscape) return;
+		}
+
 		// Global debug key handler (Shift+Ctrl+D)
 		if (matchesKey(data, "shift+ctrl+d") && this.onDebug) {
 			this.onDebug();
@@ -744,6 +1103,21 @@ export class TUI extends Container {
 		}
 
 		const focusIsOverlay = this.overlayStack.some((o) => o.component === this.focusedComponent);
+
+		// App-managed transcript paging (alt-screen mode). Only intercepts when not
+		// inside a modal overlay, so overlays keep their own PageUp/PageDown.
+		if (this.appScroll && !focusIsOverlay && !isKeyRelease(data)) {
+			const page = Math.max(1, this.terminal.rows - 2);
+			if (matchesKey(data, "pageUp")) {
+				this.scrollBy(page);
+				return;
+			}
+			if (matchesKey(data, "pageDown")) {
+				this.scrollBy(-page);
+				return;
+			}
+		}
+
 		if (!focusIsOverlay) {
 			const restoreState = this.getVisibleOverlayFocusRestore();
 			if (restoreState.status === "eligible") {
@@ -1140,8 +1514,34 @@ export class TUI extends Container {
 			return targetScreenRow - currentScreenRow;
 		};
 
-		// Render all components to get new lines
-		let newLines = this.render(width);
+		// Render all components to get new lines. In app-scroll mode we also collect
+		// mouse-hit ranges and collapse the full content to a height-sized window.
+		// In the alternate screen this window IS the screen, so the existing
+		// differential logic maps window row i directly to terminal row i.
+		let newLines: string[];
+		if (this.appScroll) {
+			// Reserve a blank column margin on each side for a "page" look. Content
+			// (and hit/selection columns) live in content space [0, contentWidth);
+			// the left margin is prefixed only to the final displayed lines, and
+			// mouse x is shifted back by marginX in handleMouseInput.
+			const marginX = this.marginX;
+			const contentWidth = Math.max(1, width - marginX * 2);
+			const r = this.renderWithHits(contentWidth, 0);
+			this.lastHits = r.hits;
+			this.lastFullLines = r.lines;
+			newLines = this.applyScrollWindow(r.lines, height);
+			// Paint the active text selection over the visible window.
+			if (this.hasSelection) {
+				newLines = this.applySelectionHighlight(newLines);
+			}
+			if (marginX > 0) {
+				const pad = " ".repeat(marginX);
+				newLines = newLines.map((line) => pad + line);
+			}
+			newLines = this.addScrollIndicators(newLines);
+		} else {
+			newLines = this.render(width);
+		}
 
 		// Composite overlays into the rendered lines (before differential compare)
 		if (this.overlayStack.length > 0) {

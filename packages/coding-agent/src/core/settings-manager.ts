@@ -35,6 +35,7 @@ export interface TerminalSettings {
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
 	clearOnShrink?: boolean; // default: false (clear empty rows when content shrinks)
 	showTerminalProgress?: boolean; // default: false (OSC 9;4 terminal progress indicators)
+	mouseUI?: boolean; // default: true (alt-screen mouse UI: click-to-expand, app scroll, drag-select; PIX_MOUSE_UI=0 to opt out)
 }
 
 export interface ImageSettings {
@@ -1030,6 +1031,24 @@ export class SettingsManager {
 		}
 		this.globalSettings.terminal.clearOnShrink = enabled;
 		this.markModified("terminal", "clearOnShrink");
+		this.save();
+	}
+
+	getMouseUI(): boolean {
+		// Settings takes precedence; otherwise default on, with PIX_MOUSE_UI=0 as an
+		// env opt-out (e.g. for terminals where mouse reporting misbehaves).
+		if (this.settings.terminal?.mouseUI !== undefined) {
+			return this.settings.terminal.mouseUI;
+		}
+		return process.env.PIX_MOUSE_UI !== "0";
+	}
+
+	setMouseUI(enabled: boolean): void {
+		if (!this.globalSettings.terminal) {
+			this.globalSettings.terminal = {};
+		}
+		this.globalSettings.terminal.mouseUI = enabled;
+		this.markModified("terminal", "mouseUI");
 		this.save();
 	}
 

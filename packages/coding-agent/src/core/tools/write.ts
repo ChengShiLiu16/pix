@@ -143,16 +143,19 @@ function formatWriteCall(
 	if (fileContent === null) {
 		text += `\n\n${theme.fg("error", "[invalid content arg - expected string]")}`;
 	} else if (fileContent) {
-		const lang = rawPath ? getLanguageFromPath(rawPath) : undefined;
-		const renderedLines = lang
-			? (cache?.highlightedLines ?? highlightCode(replaceTabs(normalizeDisplayText(fileContent)), lang))
-			: normalizeDisplayText(fileContent).split("\n");
-		const lines = trimTrailingEmptyLines(renderedLines);
+		// Render a new file as an all-added diff (green "+N content" lines), matching
+		// the edit tool's diff style and Claude Code's new-file presentation.
+		const sourceLines = cache?.normalizedLines ?? replaceTabs(normalizeDisplayText(fileContent)).split("\n");
+		const lines = trimTrailingEmptyLines(sourceLines);
 		const totalLines = lines.length;
 		const maxLines = options.expanded ? lines.length : 10;
 		const displayLines = lines.slice(0, maxLines);
-		const remaining = lines.length - maxLines;
-		text += `\n\n${displayLines.map((line) => (lang ? line : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
+		const remaining = totalLines - maxLines;
+		const numWidth = String(totalLines).length;
+		const body = displayLines
+			.map((line, i) => theme.fg("toolDiffAdded", `+${String(i + 1).padStart(numWidth)} ${replaceTabs(line)}`))
+			.join("\n");
+		text += `\n\n${body}`;
 		if (remaining > 0) {
 			text += `${theme.fg("muted", `\n... (${remaining} more lines, ${totalLines} total,`)} click or ${keyHint("app.tools.expand", "to expand")})`;
 		}

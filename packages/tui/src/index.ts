@@ -53,8 +53,10 @@ export {
 	Key,
 	type KeyEventType,
 	type KeyId,
+	type MouseEvent,
 	matchesKey,
 	parseKey,
+	parseMouse,
 	setKittyProtocolActive,
 } from "./keys.ts";
 // Input buffering for batch splitting

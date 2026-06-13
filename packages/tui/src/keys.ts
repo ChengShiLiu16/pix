@@ -1398,3 +1398,58 @@ function decodeModifyOtherKeysPrintable(data: string): string | undefined {
 export function decodePrintableKey(data: string): string | undefined {
 	return decodeKittyPrintable(data) ?? decodeModifyOtherKeysPrintable(data);
 }
+
+// =============================================================================
+// Mouse (SGR 1006) parsing
+// =============================================================================
+
+/** A decoded mouse event in screen-relative, 0-based coordinates. */
+export interface MouseEvent {
+	/** 0-based column (terminal x - 1). */
+	x: number;
+	/** 0-based row (terminal y - 1). */
+	y: number;
+	/** Press, release, or motion. */
+	action: "down" | "up" | "move";
+	/** Which button is involved (the released button on "up"). */
+	button: "left" | "middle" | "right" | "none";
+	/** Set when this is a scroll-wheel event; `button` is "none" then. */
+	wheel?: "up" | "down";
+	shift: boolean;
+	alt: boolean;
+	ctrl: boolean;
+}
+
+// ESC [ < Cb ; Cx ; Cy (M|m)  — M = press/motion, m = release.
+const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/;
+
+/**
+ * Parse an SGR (1006) mouse sequence. Returns null for non-mouse input.
+ * StdinBuffer already isolates a full mouse sequence into a single chunk.
+ */
+export function parseMouse(data: string): MouseEvent | null {
+	const m = data.match(SGR_MOUSE_RE);
+	if (!m) return null;
+	const cb = Number.parseInt(m[1]!, 10);
+	const x = Number.parseInt(m[2]!, 10) - 1;
+	const y = Number.parseInt(m[3]!, 10) - 1;
+	const isRelease = m[4] === "m";
+
+	const shift = (cb & 4) !== 0;
+	const alt = (cb & 8) !== 0;
+	const ctrl = (cb & 16) !== 0;
+	const isMotion = (cb & 32) !== 0;
+	const isWheel = (cb & 64) !== 0;
+
+	if (isWheel) {
+		// Wheel buttons: 64 = up, 65 = down (low bit picks direction).
+		return { x, y, action: "down", button: "none", wheel: (cb & 1) === 0 ? "up" : "down", shift, alt, ctrl };
+	}
+
+	const buttonBits = cb & 3;
+	// buttonBits === 3 means "no button" (e.g. bare motion).
+	const button = buttonBits === 0 ? "left" : buttonBits === 1 ? "middle" : buttonBits === 2 ? "right" : "none";
+	const action: "down" | "up" | "move" = isMotion ? "move" : isRelease ? "up" : "down";
+
+	return { x, y, action, button, shift, alt, ctrl };
+}
