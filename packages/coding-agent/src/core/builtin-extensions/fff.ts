@@ -24,6 +24,7 @@ const DEFAULT_GREP_LIMIT = 20;
 const DEFAULT_FIND_LIMIT = 30;
 const MENTION_MAX_RESULTS = 20;
 const CURSOR_CACHE_MAX = 200;
+const MENTION_REFRESH_MIN_INTERVAL_MS = 2000;
 
 const grepSchema = Type.Object({
 	pattern: Type.String({ description: "Search pattern (literal text or regex)" }),
@@ -164,6 +165,8 @@ export function builtin(pix: ExtensionAPI): void {
 	let finder: FileFinder | undefined;
 	let finderCwd: string | undefined;
 	let finderPromise: Promise<FileFinder> | undefined;
+	let refreshPromise: Promise<void> | undefined;
+	let lastRefreshAt = 0;
 	let activeCwd = process.cwd();
 	let modeAtRegistration: FffMode | undefined;
 	let toolNamesAtRegistration: FffToolNames | undefined;
@@ -243,6 +246,9 @@ export function builtin(pix: ExtensionAPI): void {
 				frecencyDbPath: currentFrecencyDbPath(),
 				historyDbPath: currentHistoryDbPath(),
 				aiMode: true,
+				// 规避 dmtrKovalenko/fff#603：macOS watcher 会在原生 debouncer
+				// 线程 SIGSEGV，绕过 JS 清理流程。禁用 watcher，搜索前显式刷新索引。
+				disableWatch: true,
 			});
 			if (!created.ok) {
 				throw new Error(`Failed to create FFF file finder: ${created.error}`);
@@ -258,9 +264,27 @@ export function builtin(pix: ExtensionAPI): void {
 		return finderPromise;
 	}
 
+	// watcher 被禁用后索引不会自动更新。工具调用强制刷新；@ 补全高频触发，
+	// 只在索引超过短间隔未刷新时刷新一次，避免每次按键都触发扫描。
+	async function refreshIndex(f: FileFinder, minIntervalMs = 0): Promise<void> {
+		if (minIntervalMs > 0 && Date.now() - lastRefreshAt < minIntervalMs) return;
+		if (refreshPromise) return refreshPromise;
+		refreshPromise = (async () => {
+			const res = f.scanFiles();
+			if (!res.ok) return;
+			await f.waitForScan(3000);
+			lastRefreshAt = Date.now();
+		})().finally(() => {
+			refreshPromise = undefined;
+		});
+		return refreshPromise;
+	}
+
 	async function getMentionItems(query: string, signal: AbortSignal): Promise<AutocompleteItem[]> {
 		if (signal.aborted) return [];
 		const f = await ensureFinder(activeCwd);
+		if (signal.aborted) return [];
+		await refreshIndex(f, MENTION_REFRESH_MIN_INTERVAL_MS);
 		if (signal.aborted) return [];
 		const result = f.mixedSearch(query, { pageSize: MENTION_MAX_RESULTS });
 		if (!result.ok) return [];
@@ -283,6 +307,7 @@ export function builtin(pix: ExtensionAPI): void {
 			async execute(_toolCallId, params, signal) {
 				if (signal?.aborted) throw new Error("Operation aborted");
 				const f = await ensureFinder(activeCwd);
+				if (!params.cursor) await refreshIndex(f);
 				const effectiveLimit = Math.max(1, params.limit ?? DEFAULT_GREP_LIMIT);
 				const query = buildFffQuery(params.path, params.pattern, params.exclude, activeCwd);
 				const detected = detectGrepMode(params.pattern);
@@ -371,6 +396,7 @@ export function builtin(pix: ExtensionAPI): void {
 			async execute(_toolCallId, params, signal) {
 				if (signal?.aborted) throw new Error("Operation aborted");
 				const f = await ensureFinder(activeCwd);
+				if (!params.cursor) await refreshIndex(f);
 				const resumed = params.cursor ? findCursorCache.get(params.cursor) : undefined;
 				const effectiveLimit = resumed ? resumed.pageSize : Math.max(1, params.limit ?? DEFAULT_FIND_LIMIT);
 				const query = resumed
@@ -441,6 +467,7 @@ export function builtin(pix: ExtensionAPI): void {
 				async execute(_toolCallId, params, signal) {
 					if (signal?.aborted) throw new Error("Operation aborted");
 					const f = await ensureFinder(activeCwd);
+					if (!params.cursor) await refreshIndex(f);
 					const effectiveLimit = Math.max(1, params.limit ?? DEFAULT_GREP_LIMIT);
 					const result = f.multiGrep({
 						patterns: params.patterns,
