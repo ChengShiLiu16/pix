@@ -31,6 +31,7 @@ const compat = {
 	requiresAssistantAfterToolResult: false,
 	requiresThinkingAsText: true,
 	contentThinkingTags: "none",
+	toolCallContentPolicy: "preserve",
 	requiresReasoningContentOnAssistantMessages: false,
 	thinkingFormat: "openai",
 	openRouterRouting: {},

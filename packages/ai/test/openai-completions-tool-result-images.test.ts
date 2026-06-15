@@ -29,6 +29,7 @@ const compat: Required<OpenAICompletionsCompat> = {
 	requiresAssistantAfterToolResult: false,
 	requiresThinkingAsText: false,
 	contentThinkingTags: "none",
+	toolCallContentPolicy: "preserve",
 	requiresReasoningContentOnAssistantMessages: false,
 	thinkingFormat: "openai",
 	openRouterRouting: {},

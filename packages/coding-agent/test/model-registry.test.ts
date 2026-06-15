@@ -422,6 +422,7 @@ describe("ModelRegistry", () => {
 								supportsStrictMode: false,
 								cacheControlFormat: "anthropic",
 								contentThinkingTags: "xml",
+								toolCallContentPolicy: "drop-when-tool-calls",
 							},
 						},
 					],
@@ -437,6 +438,7 @@ describe("ModelRegistry", () => {
 			expect(compat?.supportsStrictMode).toBe(false);
 			expect(compat?.cacheControlFormat).toBe("anthropic");
 			expect(compat?.contentThinkingTags).toBe("xml");
+			expect(compat?.toolCallContentPolicy).toBe("drop-when-tool-calls");
 		});
 
 		test("compat schema accepts Anthropic eager tool input streaming flag", () => {

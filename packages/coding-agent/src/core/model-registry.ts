@@ -108,6 +108,7 @@ const OpenAICompletionsCompatSchema = Type.Object({
 	requiresAssistantAfterToolResult: Type.Optional(Type.Boolean()),
 	requiresThinkingAsText: Type.Optional(Type.Boolean()),
 	contentThinkingTags: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("xml")])),
+	toolCallContentPolicy: Type.Optional(Type.Union([Type.Literal("preserve"), Type.Literal("drop-when-tool-calls")])),
 	requiresReasoningContentOnAssistantMessages: Type.Optional(Type.Boolean()),
 	thinkingFormat: Type.Optional(
 		Type.Union([

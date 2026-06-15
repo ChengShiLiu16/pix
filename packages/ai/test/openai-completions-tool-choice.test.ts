@@ -1061,6 +1061,7 @@ describe("openai-completions tool_choice", () => {
 				requiresAssistantAfterToolResult: false,
 				requiresThinkingAsText: false,
 				contentThinkingTags: "none",
+				toolCallContentPolicy: "preserve",
 				requiresReasoningContentOnAssistantMessages: false,
 				thinkingFormat: "openai",
 				openRouterRouting: {},

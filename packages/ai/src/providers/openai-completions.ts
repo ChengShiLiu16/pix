@@ -266,6 +266,9 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			const toolCallBlocksByIndex = new Map<number, StreamingToolCallBlock>();
 			const toolCallBlocksById = new Map<string, StreamingToolCallBlock>();
 			const blocks = output.content as StreamingBlock[];
+			const dropTextOnToolCalls = compat.toolCallContentPolicy === "drop-when-tool-calls";
+			let sawToolCall = false;
+			const deferredContentEvents: ContentThinkingTagEvent[] = [];
 			const getContentIndex = (block: StreamingBlock) => blocks.indexOf(block);
 			const finishBlock = (block: StreamingBlock) => {
 				const contentIndex = getContentIndex(block);
@@ -362,6 +365,26 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 					emitContentThinkingTagEvent(event);
 				}
 			};
+			const handleContentDelta = (delta: string) => {
+				if (!dropTextOnToolCalls) {
+					emitContentDelta(delta);
+					return;
+				}
+				if (sawToolCall) {
+					return;
+				}
+				if (compat.contentThinkingTags !== "xml") {
+					deferredContentEvents.push({ type: "text", delta });
+					return;
+				}
+				deferredContentEvents.push(...parseContentThinkingTags(contentThinkingTagState, delta));
+			};
+			const emitDeferredContent = () => {
+				for (const event of deferredContentEvents) {
+					emitContentThinkingTagEvent(event);
+				}
+				deferredContentEvents.length = 0;
+			};
 			const ensureToolCallBlock = (toolCall: StreamingToolCallDelta) => {
 				const streamIndex = typeof toolCall.index === "number" ? toolCall.index : undefined;
 				let block = streamIndex !== undefined ? toolCallBlocksByIndex.get(streamIndex) : undefined;
@@ -437,7 +460,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 						choice.delta.content !== undefined &&
 						choice.delta.content.length > 0
 					) {
-						emitContentDelta(choice.delta.content);
+						handleContentDelta(choice.delta.content);
 					}
 
 					// Some endpoints return reasoning in reasoning_content (llama.cpp),
@@ -467,6 +490,12 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 					}
 
 					if (choice?.delta?.tool_calls) {
+						if (dropTextOnToolCalls && !sawToolCall) {
+							sawToolCall = true;
+							deferredContentEvents.length = 0;
+							contentThinkingTagState.buffer = "";
+							contentThinkingTagState.inThinking = false;
+						}
 						for (const toolCall of choice.delta.tool_calls) {
 							const block = ensureToolCallBlock(toolCall);
 							if (!block.id && toolCall.id) {
@@ -508,10 +537,18 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				}
 			}
 
-			if (compat.contentThinkingTags === "xml") {
-				for (const event of flushContentThinkingTagParser(contentThinkingTagState)) {
-					emitContentThinkingTagEvent(event);
+			if (compat.contentThinkingTags === "xml" && !(dropTextOnToolCalls && sawToolCall)) {
+				const events = flushContentThinkingTagParser(contentThinkingTagState);
+				if (dropTextOnToolCalls) {
+					deferredContentEvents.push(...events);
+				} else {
+					for (const event of events) {
+						emitContentThinkingTagEvent(event);
+					}
 				}
+			}
+			if (dropTextOnToolCalls && !sawToolCall) {
+				emitDeferredContent();
 			}
 
 			for (const block of blocks) {
@@ -1255,6 +1292,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		requiresAssistantAfterToolResult: false,
 		requiresThinkingAsText: false,
 		contentThinkingTags: "none",
+		toolCallContentPolicy: "preserve",
 		requiresReasoningContentOnAssistantMessages: isDeepSeek,
 		thinkingFormat: isDeepSeek
 			? "deepseek"
@@ -1302,6 +1340,7 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 			model.compat.requiresAssistantAfterToolResult ?? detected.requiresAssistantAfterToolResult,
 		requiresThinkingAsText: model.compat.requiresThinkingAsText ?? detected.requiresThinkingAsText,
 		contentThinkingTags: model.compat.contentThinkingTags ?? detected.contentThinkingTags,
+		toolCallContentPolicy: model.compat.toolCallContentPolicy ?? detected.toolCallContentPolicy,
 		requiresReasoningContentOnAssistantMessages:
 			model.compat.requiresReasoningContentOnAssistantMessages ??
 			detected.requiresReasoningContentOnAssistantMessages,
