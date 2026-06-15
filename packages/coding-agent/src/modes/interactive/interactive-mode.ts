@@ -4392,6 +4392,11 @@ export class InteractiveMode {
 	}
 
 	private showTreeSelector(initialSelectedId?: string): void {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before using the tree.");
+			return;
+		}
+
 		const tree = this.sessionManager.getTree();
 		const realLeafId = this.sessionManager.getLeafId();
 		const initialFilterMode = this.settingsManager.getTreeFilterMode();
@@ -4407,6 +4412,7 @@ export class InteractiveMode {
 				realLeafId,
 				this.ui.terminal.rows,
 				async (entryId) => {
+					const selectedEntry = this.sessionManager.getEntry(entryId);
 					// Selecting the current leaf is a no-op (already there)
 					if (entryId === realLeafId) {
 						done();
@@ -4474,6 +4480,7 @@ export class InteractiveMode {
 						const result = await this.session.navigateTree(entryId, {
 							summarize: wantsSummary,
 							customInstructions,
+							restoreWorkspace: true,
 						});
 
 						if (result.aborted) {
@@ -4493,7 +4500,16 @@ export class InteractiveMode {
 						if (result.editorText && !this.editor.getText().trim()) {
 							this.editor.setText(result.editorText);
 						}
-						this.showStatus("Navigated to selected point");
+						const restore = result.workspaceRestore;
+						if (restore) {
+							this.showStatus(
+								`Navigated to selected point; restored ${restore.restoredFiles} files, ${restore.restoredSymlinks} symlinks, removed ${restore.removedPaths} paths`,
+							);
+						} else if (selectedEntry?.type === "message" && selectedEntry.message.role === "user") {
+							this.showStatus("Navigated to selected point; no workspace snapshot available");
+						} else {
+							this.showStatus("Navigated to selected point");
+						}
 						void this.flushCompactionQueue({ willRetry: false });
 					} catch (error) {
 						this.showError(error instanceof Error ? error.message : String(error));

@@ -14,7 +14,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import type {
 	Agent,
 	AgentEvent,
@@ -99,7 +100,17 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
+import { resolveToCwd } from "./tools/path-utils.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import {
+	addPathToWorkspaceSnapshot,
+	captureWorkspaceSnapshot,
+	isWorkspaceSnapshotDetails,
+	restoreWorkspaceSnapshot,
+	WORKSPACE_SNAPSHOT_CUSTOM_TYPE,
+	type WorkspaceRestoreResult,
+	type WorkspaceSnapshotDetails,
+} from "./workspace-snapshot.ts";
 
 // ============================================================================
 // Skill Block Parsing
@@ -241,6 +252,10 @@ export interface SessionStats {
 	contextUsage?: ContextUsage;
 }
 
+export interface TreeWorkspaceRestoreResult extends WorkspaceRestoreResult {
+	mode: "filesystem" | "git";
+}
+
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
@@ -363,6 +378,8 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
+	private _currentPromptSnapshot?: WorkspaceSnapshotDetails;
+	private _promptSnapshots = new WeakMap<AgentMessage, WorkspaceSnapshotDetails>();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -444,23 +461,28 @@ export class AgentSession {
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			const runner = this._extensionRunner;
-			if (!runner.hasHandlers("tool_call")) {
-				return undefined;
+			let beforeResult: Awaited<ReturnType<ExtensionRunner["emitToolCall"]>> | undefined;
+
+			if (runner.hasHandlers("tool_call")) {
+				try {
+					beforeResult = await runner.emitToolCall({
+						type: "tool_call",
+						toolName: toolCall.name,
+						toolCallId: toolCall.id,
+						input: args as Record<string, unknown>,
+					});
+				} catch (err) {
+					if (err instanceof Error) {
+						throw err;
+					}
+					throw new Error(`Extension failed, blocking execution: ${String(err)}`);
+				}
 			}
 
-			try {
-				return await runner.emitToolCall({
-					type: "tool_call",
-					toolName: toolCall.name,
-					toolCallId: toolCall.id,
-					input: args as Record<string, unknown>,
-				});
-			} catch (err) {
-				if (err instanceof Error) {
-					throw err;
-				}
-				throw new Error(`Extension failed, blocking execution: ${String(err)}`);
+			if (!beforeResult?.block) {
+				await this._addToolTargetToCurrentSnapshot(toolCall.name, args as Record<string, unknown>);
 			}
+			return beforeResult;
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
@@ -519,6 +541,8 @@ export class AgentSession {
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
 			this._overflowRecoveryAttempted = false;
+			this._currentPromptSnapshot ??=
+				this._promptSnapshots.get(event.message) ?? (await this._capturePromptWorkspaceSnapshot());
 			const messageText = this._getUserMessageText(event.message);
 			if (messageText) {
 				// Check steering queue first
@@ -559,6 +583,12 @@ export class AgentSession {
 				event.message.role === "assistant" ||
 				event.message.role === "toolResult"
 			) {
+				if (event.message.role === "user") {
+					if (!this._currentPromptSnapshot) {
+						throw new Error("Missing workspace snapshot for user message");
+					}
+					this.sessionManager.appendCustomEntry(WORKSPACE_SNAPSHOT_CUSTOM_TYPE, this._currentPromptSnapshot);
+				}
 				// Regular LLM message - persist as SessionMessageEntry
 				this.sessionManager.appendMessage(event.message);
 			}
@@ -992,7 +1022,29 @@ export class AgentSession {
 			}
 		} finally {
 			this._flushPendingBashMessages();
+			this._currentPromptSnapshot = undefined;
 		}
+	}
+
+	private _getWorkspaceSnapshotRoot(): string {
+		const sessionDir = this.sessionManager.getSessionDir();
+		if (sessionDir) {
+			return join(sessionDir, "workspace-snapshots");
+		}
+		return join(tmpdir(), "pix-workspace-snapshots", this.sessionId);
+	}
+
+	private async _capturePromptWorkspaceSnapshot(): Promise<WorkspaceSnapshotDetails> {
+		return captureWorkspaceSnapshot(this._cwd, this._getWorkspaceSnapshotRoot());
+	}
+
+	private async _addToolTargetToCurrentSnapshot(toolName: string, args: Record<string, unknown>): Promise<void> {
+		if (toolName !== "edit" && toolName !== "write") return;
+		if (!this._currentPromptSnapshot) return;
+
+		const path = args.path;
+		if (typeof path !== "string" || path.length === 0) return;
+		await addPathToWorkspaceSnapshot(this._currentPromptSnapshot, resolveToCwd(path, this._cwd));
 	}
 
 	private async _handlePostAgentRun(): Promise<boolean> {
@@ -1129,17 +1181,20 @@ export class AgentSession {
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
+			this._currentPromptSnapshot = await this._capturePromptWorkspaceSnapshot();
 
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
 			if (currentImages) {
 				userContent.push(...currentImages);
 			}
-			messages.push({
+			const userMessage = {
 				role: "user",
 				content: userContent,
 				timestamp: Date.now(),
-			});
+			} satisfies Message;
+			this._promptSnapshots.set(userMessage, this._currentPromptSnapshot);
+			messages.push(userMessage);
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
 			for (const msg of this._pendingNextTurnMessages) {
@@ -1298,11 +1353,13 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer({
+		const message = {
 			role: "user",
 			content,
 			timestamp: Date.now(),
-		});
+		} satisfies Message;
+		this.agent.steer(message);
+		this._promptSnapshots.set(message, await this._capturePromptWorkspaceSnapshot());
 	}
 
 	/**
@@ -1315,11 +1372,13 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({
+		const message = {
 			role: "user",
 			content,
 			timestamp: Date.now(),
-		});
+		} satisfies Message;
+		this.agent.followUp(message);
+		this._promptSnapshots.set(message, await this._capturePromptWorkspaceSnapshot());
 	}
 
 	/**
@@ -2771,8 +2830,20 @@ export class AgentSession {
 	 */
 	async navigateTree(
 		targetId: string,
-		options: { summarize?: boolean; customInstructions?: string; replaceInstructions?: boolean; label?: string } = {},
-	): Promise<{ editorText?: string; cancelled: boolean; aborted?: boolean; summaryEntry?: BranchSummaryEntry }> {
+		options: {
+			summarize?: boolean;
+			customInstructions?: string;
+			replaceInstructions?: boolean;
+			label?: string;
+			restoreWorkspace?: boolean;
+		} = {},
+	): Promise<{
+		editorText?: string;
+		cancelled: boolean;
+		aborted?: boolean;
+		summaryEntry?: BranchSummaryEntry;
+		workspaceRestore?: TreeWorkspaceRestoreResult;
+	}> {
 		const oldLeafId = this.sessionManager.getLeafId();
 
 		// No-op if already at target
@@ -2905,6 +2976,10 @@ export class AgentSession {
 				newLeafId = targetId;
 			}
 
+			const workspaceRestore = options.restoreWorkspace
+				? await this._restoreWorkspaceSnapshotForLeaf(newLeafId)
+				: undefined;
+
 			// Switch leaf (with or without summary)
 			// Summary is attached at the navigation target position (newLeafId), not the old branch
 			let summaryEntry: BranchSummaryEntry | undefined;
@@ -2950,10 +3025,25 @@ export class AgentSession {
 
 			// Emit to custom tools
 
-			return { editorText, cancelled: false, summaryEntry };
+			return { editorText, cancelled: false, summaryEntry, workspaceRestore };
 		} finally {
 			this._branchSummaryAbortController = undefined;
 		}
+	}
+
+	private async _restoreWorkspaceSnapshotForLeaf(
+		leafId: string | null,
+	): Promise<TreeWorkspaceRestoreResult | undefined> {
+		if (!leafId) return undefined;
+		const entry = this.sessionManager.getEntry(leafId);
+		if (entry?.type !== "custom" || entry.customType !== WORKSPACE_SNAPSHOT_CUSTOM_TYPE) {
+			return undefined;
+		}
+		if (!isWorkspaceSnapshotDetails(entry.data)) {
+			return undefined;
+		}
+		const restored = await restoreWorkspaceSnapshot(entry.data);
+		return { ...restored, mode: entry.data.mode };
 	}
 
 	/**
