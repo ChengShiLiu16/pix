@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "@chengshiliu16/pix-ai";
 import { describe, expect, test } from "vitest";
+import { setOscPromptZonesEnabled } from "../src/core/builtin-extensions/lib/osc-prompt-zone.ts";
 import { AssistantMessageComponent } from "../src/modes/interactive/components/assistant-message.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
@@ -53,5 +54,20 @@ describe("AssistantMessageComponent", () => {
 		expect(rendered.includes(OSC133_ZONE_START)).toBe(false);
 		expect(rendered.includes(OSC133_ZONE_END)).toBe(false);
 		expect(rendered.includes(OSC133_ZONE_FINAL)).toBe(false);
+	});
+
+	test("suppresses OSC 133 zone markers when prompt zones are disabled (alternate screen)", () => {
+		initTheme("dark");
+		setOscPromptZonesEnabled(false);
+		try {
+			const component = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "hello" }]));
+			const rendered = component.render(40).join("\n");
+
+			expect(rendered.includes(OSC133_ZONE_START)).toBe(false);
+			expect(rendered.includes(OSC133_ZONE_END)).toBe(false);
+			expect(rendered.includes(OSC133_ZONE_FINAL)).toBe(false);
+		} finally {
+			setOscPromptZonesEnabled(true);
+		}
 	});
 });

@@ -5,14 +5,11 @@ import {
 	renderNarrativeMarkdown,
 	syncAssistantMarkdownStreamingState,
 } from "../../../core/builtin-extensions/lib/markdown-render.ts";
+import { wrapOscPromptZone } from "../../../core/builtin-extensions/lib/osc-prompt-zone.ts";
 import { ThinkingStepsComponent } from "../../../core/builtin-extensions/thinking-steps/render.ts";
 import { getCurrentThinkingScopeKey } from "../../../core/builtin-extensions/thinking-steps/state.ts";
 import type { ThinkingSourceBlock, ThinkingThemeLike } from "../../../core/builtin-extensions/thinking-steps/types.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
-
-const OSC133_ZONE_START = "\x1b]133;A\x07";
-const OSC133_ZONE_END = "\x1b]133;B\x07";
-const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
 function hasVisibleThinking(content: ThinkingContent): boolean {
 	return content.redacted === true || /\S/u.test(content.thinking);
@@ -91,9 +88,7 @@ export class AssistantMessageComponent extends Container {
 			return lines;
 		}
 
-		lines[0] = OSC133_ZONE_START + lines[0];
-		lines[lines.length - 1] = OSC133_ZONE_END + OSC133_ZONE_FINAL + lines[lines.length - 1];
-		return lines;
+		return wrapOscPromptZone(lines);
 	}
 
 	updateContent(message: AssistantMessage): void {

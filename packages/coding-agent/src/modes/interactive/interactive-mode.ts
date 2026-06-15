@@ -61,6 +61,7 @@ import {
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import { setOscPromptZonesEnabled } from "../../core/builtin-extensions/lib/osc-prompt-zone.ts";
 import type {
 	AutocompleteProviderFactory,
 	EditorFactory,
@@ -401,6 +402,11 @@ export class InteractiveMode {
 		// clicks (click-to-expand, drag-select). Controlled by the `terminal.mouseUI`
 		// setting, with the PIX_MOUSE_UI env var as a fallback override.
 		const mouseUI = this.settingsManager.getMouseUI();
+		// OSC 133 prompt-zone markers are only meaningful on the primary screen.
+		// Mouse UI runs on the alternate screen, where they desync the app-driven
+		// differential renderer (misaligned message borders, stale selection cells),
+		// so suppress them there and keep them for inline rendering.
+		setOscPromptZonesEnabled(!mouseUI);
 		this.ui = new TUI(new ProcessTerminal({ enableMouse: mouseUI }), this.settingsManager.getShowHardwareCursor(), {
 			appScroll: mouseUI,
 			marginX: mouseUI ? 2 : 0,
