@@ -11,6 +11,21 @@ class TestComponent implements Component {
 	invalidate(): void {}
 }
 
+class RecordingTerminal extends VirtualTerminal {
+	writes: string[] = [];
+
+	override write(data: string): void {
+		this.writes.push(data);
+		super.write(data);
+	}
+
+	takeWrites(): string[] {
+		const writes = this.writes;
+		this.writes = [];
+		return writes;
+	}
+}
+
 function makeLines(n: number): string[] {
 	return Array.from({ length: n }, (_, i) => `L${i}`);
 }
@@ -44,13 +59,15 @@ describe("TUI app-managed scroll", () => {
 		tui.start();
 		await term.waitForRender();
 
-		term.sendInput(WHEEL_UP); // step 3 -> offset 3 -> top = 5-3 = 2 -> L2..L6
+		term.sendInput(WHEEL_UP); // step 1 -> top = 4 -> L4..L8
 		await term.waitForRender();
 		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L2", "L3", "L4", "L5", "L6"]);
+		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
 
-		term.sendInput(WHEEL_UP); // offset 6 clamped to maxOffset 5 -> top 0 -> L0..L4
-		await term.waitForRender();
+		for (let i = 0; i < 4; i++) {
+			term.sendInput(WHEEL_UP);
+			await term.waitForRender();
+		}
 		view = (await term.flushAndGetViewport()).map((l) => l.trim());
 		assert.deepStrictEqual(view, ["L0", "L1", "L2", "L3", "L4"]);
 		tui.stop();
@@ -67,15 +84,119 @@ describe("TUI app-managed scroll", () => {
 
 		tui.scrollBy(5); // jump to top
 		await term.waitForRender();
-		term.sendInput(WHEEL_DOWN); // -3 -> offset 2 -> top 3 -> L3..L7
+		term.sendInput(WHEEL_DOWN); // -1 -> top 1 -> L1..L5
 		await term.waitForRender();
 		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L3", "L4", "L5", "L6", "L7"]);
+		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
 
-		term.sendInput(WHEEL_DOWN); // -3 -> offset 0 -> bottom L5..L9
-		await term.waitForRender();
+		for (let i = 0; i < 4; i++) {
+			term.sendInput(WHEEL_DOWN);
+			await term.waitForRender();
+		}
 		view = (await term.flushAndGetViewport()).map((l) => l.trim());
 		assert.deepStrictEqual(view, ["L5", "L6", "L7", "L8", "L9"]);
+		tui.stop();
+	});
+
+	it("renders wheel scrolling immediately when an output render is already queued", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+
+		c.lines = makeLines(11);
+		tui.requestRender();
+		term.sendInput(WHEEL_UP);
+		await new Promise<void>((resolve) => process.nextTick(resolve));
+		await term.flush();
+
+		const view = term.getViewport().map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		tui.stop();
+	});
+
+	it("rate-limits same-frame wheel bursts from touchpads", async () => {
+		const term = new VirtualTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+
+		term.sendInput(WHEEL_UP);
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		tui.stop();
+	});
+
+	it("still scrolls every wheel event when spaced beyond the frame interval", async () => {
+		const term = new VirtualTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+
+		// A sustained gesture (events spaced past the rate-limit window) must move
+		// one line per event — the throttle collapses same-frame bursts only, it
+		// must not drop legitimate sustained scrolling.
+		const gap = () => new Promise<void>((resolve) => setTimeout(resolve, 25));
+		for (let i = 0; i < 3; i++) {
+			term.sendInput(WHEEL_UP);
+			await gap();
+		}
+		await term.waitForRender();
+		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L2", "L3", "L4", "L5", "L6"]);
+		tui.stop();
+	});
+
+	it("uses a normal redraw for idle wheel scrolling at the bottom", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true, marginX: 1 });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(!data.includes("\x1b[1L") && !data.includes("\x1b[1M"), "expected no viewport shift when idle");
+		const view = await term.flushAndGetViewport();
+		assert.ok(view[0].includes("▲"), "expected upper indicator when older content remains above");
+		assert.ok(!view[4].includes("▼"), "expected no lower indicator on the first step away from bottom");
+		tui.stop();
+	});
+
+	it("uses a viewport-shift fast path for queued output renders", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		tui.requestRender();
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const upData = term.takeWrites().join("");
+		const upClearLineCount = (upData.match(/\x1b\[2K/g) ?? []).length;
+		assert.ok(upData.includes("\x1b[1L"), "expected insert-line viewport shift when revealing older content");
+		assert.ok(upClearLineCount < term.rows, "expected not to repaint the whole viewport");
+		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
 		tui.stop();
 	});
 
@@ -184,6 +305,125 @@ describe("TUI app-managed scroll", () => {
 		await term.waitForRender();
 		const view = (await term.flushAndGetViewport()).map((l) => l.trim()).filter(Boolean);
 		assert.deepStrictEqual(view, ["L0", "L1", "L2", "L3"]);
+		tui.stop();
+	});
+
+	it("reverts to normal redraw if a line contains a Kitty image", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		// \x1b_G is the Kitty graphics protocol prefix. Put it at index 5 so it is visible in the viewport [5..9] initially.
+		c.lines = ["L0", "L1", "L2", "L3", "L4", "\x1b_Gf=100;a=T;s=10;v=10;...\x1b\\", "L6", "L7", "L8", "L9"];
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		tui.requestRender();
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(
+			!data.includes("\x1b[1L") && !data.includes("\x1b[1M"),
+			"expected no viewport shift when Kitty image is present",
+		);
+		tui.stop();
+	});
+
+	it("reverts to normal redraw if scroll delta is greater than or equal to viewport height", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		// Scroll by 5 lines (which equals viewport height 5)
+		tui.requestRender();
+		tui.scrollBy(5);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(
+			!data.includes("\x1b[1L") && !data.includes("\x1b[1M"),
+			"expected no viewport shift when delta >= height",
+		);
+		tui.stop();
+	});
+
+	it("reverts to normal redraw if an overlay is present", async () => {
+		const term = new RecordingTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		// Show an overlay
+		const overlayComponent = new TestComponent();
+		overlayComponent.lines = ["Overlay"];
+		tui.showOverlay(overlayComponent);
+		await term.waitForRender();
+		term.takeWrites();
+
+		tui.requestRender();
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(
+			!data.includes("\x1b[1L") && !data.includes("\x1b[1M"),
+			"expected no viewport shift when overlay is present",
+		);
+		tui.stop();
+	});
+
+	it("reverts to normal redraw if a selection is active", async () => {
+		const term = new RecordingTerminal(20, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		// Set selection active
+		(tui as any).hasSelection = true;
+
+		tui.requestRender();
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(
+			!data.includes("\x1b[1L") && !data.includes("\x1b[1M"),
+			"expected no viewport shift when selection is active",
+		);
+		tui.stop();
+	});
+
+	it("reverts to normal redraw if contents change significantly along with scroll", async () => {
+		const term = new RecordingTerminal(10, 8); // height = 8
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(12);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+		term.takeWrites();
+
+		// Scroll up AND simultaneously change almost all lines to something new
+		tui.requestRender();
+		c.lines = ["N0", "N1", "N2", "N3", "N4", "N5", "N6", "N7", "N8", "N9", "N10", "N11"];
+		term.sendInput(WHEEL_UP);
+		await term.waitForRender();
+		const data = term.takeWrites().join("");
+		assert.ok(
+			!data.includes("\x1b[1L") && !data.includes("\x1b[1M"),
+			"expected no viewport shift when content changed significantly",
+		);
 		tui.stop();
 	});
 });

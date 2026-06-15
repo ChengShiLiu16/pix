@@ -349,6 +349,9 @@ export class TUI extends Container {
 	public onDebug?: () => void;
 	private renderRequested = false;
 	private renderTimer: NodeJS.Timeout | undefined;
+	private priorityRenderScheduled = false;
+	private scrollPrefersViewportShift = false;
+	private lastAcceptedWheelAt = Number.NEGATIVE_INFINITY;
 	private lastRenderAt = 0;
 	private static readonly MIN_RENDER_INTERVAL_MS = 16;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
@@ -425,8 +428,10 @@ export class TUI extends Container {
 		return this.appScroll;
 	}
 
-	/** Number of wheel-line steps per scroll-wheel notch. */
-	private static readonly WHEEL_STEP = 3;
+	/** Number of wheel-line steps per scroll-wheel notch. Keep this fine-grained; render coalescing handles speed. */
+	private static readonly WHEEL_STEP = 1;
+	/** Trackpads can emit many SGR wheel events per gesture; cap accepted events to roughly one per frame. */
+	private static readonly MIN_WHEEL_INTERVAL_MS = 16;
 
 	/**
 	 * Collapse full content into a height-sized window based on the current
@@ -472,7 +477,8 @@ export class TUI extends Container {
 		if (nextTop === curTop && this.stickToBottom === nextStick) return;
 		this.scrollTop = nextTop;
 		this.stickToBottom = nextStick;
-		this.requestRender();
+		this.scrollPrefersViewportShift = this.renderRequested || this.renderTimer !== undefined;
+		this.requestRender(false, true);
 	}
 
 	/** Re-pin the view to the latest content. */
@@ -480,7 +486,8 @@ export class TUI extends Container {
 		if (!this.appScroll) return;
 		if (this.stickToBottom) return;
 		this.stickToBottom = true;
-		this.requestRender();
+		this.scrollPrefersViewportShift = this.renderRequested || this.renderTimer !== undefined;
+		this.requestRender(false, true);
 	}
 
 	/**
@@ -491,9 +498,12 @@ export class TUI extends Container {
 	 */
 	private addScrollIndicators(lines: string[]): string[] {
 		if (this.marginX < 1 || lines.length === 0) return lines;
+		const maxTop = Math.max(0, this.lastFullLines.length - lines.length);
 		const moreAbove = this.lastWindowTop > 0;
-		// Not stuck to the bottom => the latest content is below the fold.
-		const moreBelow = !this.stickToBottom;
+		// Hide the lower indicator on the first step away from the bottom so a tiny
+		// scroll does not make the gutter twitch. Once the user moves farther into
+		// history, show it again.
+		const moreBelow = !this.stickToBottom && this.scrollTop < Math.max(0, maxTop - 1);
 		if (!moreAbove && !moreBelow) return lines;
 		const out = lines.slice();
 		const mark = (idx: number, glyph: string): void => {
@@ -517,6 +527,11 @@ export class TUI extends Container {
 		if (!evt) return undefined;
 		if (evt.shift) return { consume: true };
 		if (evt.wheel) {
+			const now = performance.now();
+			if (now - this.lastAcceptedWheelAt < TUI.MIN_WHEEL_INTERVAL_MS) {
+				return { consume: true };
+			}
+			this.lastAcceptedWheelAt = now;
 			this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
 			return { consume: true };
 		}
@@ -1022,7 +1037,7 @@ export class TUI extends Container {
 		this.terminal.stop();
 	}
 
-	requestRender(force = false): void {
+	requestRender(force = false, priority = false): void {
 		if (force) {
 			this.previousLines = [];
 			this.previousWidth = -1; // -1 triggers widthChanged, forcing a full clear
@@ -1031,6 +1046,9 @@ export class TUI extends Container {
 			this.hardwareCursorRow = 0;
 			this.maxLinesRendered = 0;
 			this.previousViewportTop = 0;
+			this.lastWindowTop = 0;
+			this.scrollPrefersViewportShift = false;
+			this.lastAcceptedWheelAt = Number.NEGATIVE_INFINITY;
 			if (this.renderTimer) {
 				clearTimeout(this.renderTimer);
 				this.renderTimer = undefined;
@@ -1043,6 +1061,32 @@ export class TUI extends Container {
 				this.renderRequested = false;
 				this.lastRenderAt = performance.now();
 				this.doRender();
+			});
+			return;
+		}
+		if (priority) {
+			this.renderRequested = true;
+			if (this.renderTimer) {
+				clearTimeout(this.renderTimer);
+				this.renderTimer = undefined;
+			}
+			if (this.priorityRenderScheduled) return;
+			this.priorityRenderScheduled = true;
+			process.nextTick(() => {
+				this.priorityRenderScheduled = false;
+				if (this.stopped || !this.renderRequested) {
+					return;
+				}
+				if (this.renderTimer) {
+					clearTimeout(this.renderTimer);
+					this.renderTimer = undefined;
+				}
+				this.renderRequested = false;
+				this.lastRenderAt = performance.now();
+				this.doRender();
+				if (this.renderRequested) {
+					this.scheduleRender();
+				}
 			});
 			return;
 		}
@@ -1396,6 +1440,72 @@ export class TUI extends Container {
 		return lines;
 	}
 
+	private tryRenderAppScrollShift(
+		newLines: string[],
+		cursorPos: { row: number; col: number } | null,
+		height: number,
+		previousWindowTop: number,
+		currentWindowTop: number,
+	): boolean {
+		const preferViewportShift = this.scrollPrefersViewportShift;
+		this.scrollPrefersViewportShift = false;
+		if (!preferViewportShift || !this.appScroll || this.overlayStack.length > 0 || this.hasSelection) {
+			return false;
+		}
+		if (height <= 0 || this.previousLines.length !== height || newLines.length !== height) {
+			return false;
+		}
+		const windowDelta = currentWindowTop - previousWindowTop;
+		if (windowDelta === 0) {
+			return false;
+		}
+		const scrollRows = Math.abs(windowDelta);
+		if (scrollRows >= height) {
+			return false;
+		}
+		if (this.previousLines.some(isImageLine) || newLines.some(isImageLine)) {
+			return false;
+		}
+
+		const shiftedLines =
+			windowDelta > 0
+				? this.previousLines.slice(scrollRows).concat(Array.from({ length: scrollRows }, () => ""))
+				: Array.from({ length: scrollRows }, () => "").concat(this.previousLines.slice(0, height - scrollRows));
+		const changedRows: number[] = [];
+		for (let row = 0; row < height; row++) {
+			if (shiftedLines[row] !== newLines[row]) {
+				changedRows.push(row);
+			}
+		}
+
+		// This path is meant for pure viewport movement. If content changed enough
+		// that most rows need repainting, the normal differential renderer is safer.
+		if (changedRows.length > Math.max(scrollRows + 4, Math.ceil(height / 2))) {
+			return false;
+		}
+
+		let buffer = "\x1b[?2026h\x1b[H";
+		buffer += windowDelta > 0 ? `\x1b[${scrollRows}M` : `\x1b[${scrollRows}L`;
+		let finalCursorRow = 0;
+		for (const row of changedRows) {
+			buffer += `\x1b[${row + 1};1H\x1b[2K${newLines[row]}`;
+			finalCursorRow = row;
+		}
+		buffer += "\x1b[?2026l";
+		this.terminal.write(buffer);
+
+		this.cursorRow = Math.max(0, newLines.length - 1);
+		this.hardwareCursorRow = finalCursorRow;
+		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+		this.previousViewportTop = 0;
+		this.positionHardwareCursor(cursorPos, newLines.length);
+		this.previousLines = newLines;
+		this.previousKittyImageIds = this.collectKittyImageIds(newLines);
+		this.previousWidth = this.terminal.columns;
+		this.previousHeight = height;
+		return true;
+	}
+
 	private collectKittyImageIds(lines: string[]): Set<number> {
 		const ids = new Set<number>();
 		for (const line of lines) {
@@ -1537,6 +1647,7 @@ export class TUI extends Container {
 		// mouse-hit ranges and collapse the full content to a height-sized window.
 		// In the alternate screen this window IS the screen, so the existing
 		// differential logic maps window row i directly to terminal row i.
+		const previousWindowTop = this.lastWindowTop;
 		let newLines: string[];
 		if (this.appScroll) {
 			// Reserve a blank column margin on each side for a "page" look. Content
@@ -1640,6 +1751,10 @@ export class TUI extends Container {
 		if (this.clearOnShrink && newLines.length < this.maxLinesRendered && this.overlayStack.length === 0) {
 			logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
 			fullRender(true);
+			return;
+		}
+
+		if (this.tryRenderAppScrollShift(newLines, cursorPos, height, previousWindowTop, this.lastWindowTop)) {
 			return;
 		}
 
