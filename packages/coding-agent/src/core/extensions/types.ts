@@ -460,6 +460,16 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	/** Controls whether ToolExecutionComponent renders the standard colored shell or the tool renders its own framing. */
 	renderShell?: "default" | "self";
 
+	/**
+	 * Marks an internal/bookkeeping tool that is hidden entirely from the user.
+	 * When true, ToolExecutionComponent renders nothing for it (no call line, no
+	 * result, no error shell) — the tool and its validation-retry traffic are
+	 * model-facing only. renderCall/renderResult are never invoked, so don't define
+	 * them. Equivalent to the name-based shouldHideToolEntirely list, but declared
+	 * on the tool definition itself.
+	 */
+	hidden?: boolean;
+
 	/** Optional compatibility shim to prepare raw tool call arguments before schema validation. Must return an object conforming to TParams. */
 	prepareArguments?: (args: unknown) => Static<TParams>;
 

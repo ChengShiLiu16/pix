@@ -2,10 +2,8 @@ import { createHash } from "node:crypto";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentTool } from "@chengshiliu16/pix-agent-core";
-import { Text } from "@chengshiliu16/pix-tui";
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
-import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
 const severitySchema = Type.Union([
@@ -428,17 +426,6 @@ function validateAdd(input: GitEvidenceFindingsToolInput): ValidatedFinding {
 	};
 }
 
-function formatGitEvidenceFindingsCall(
-	args: { action?: string; title?: string } | undefined,
-	theme: typeof import("../../modes/interactive/theme/theme.ts").theme,
-): string {
-	const action = str(args?.action);
-	const invalidArg = invalidArgText(theme);
-	let text = `${theme.fg("toolTitle", theme.bold("git_evidence_findings"))} ${action === null ? invalidArg : theme.fg("accent", action || "...")}`;
-	if (args?.title) text += theme.fg("toolOutput", ` ${args.title}`);
-	return text;
-}
-
 export function createGitEvidenceFindingsToolDefinition(
 	cwd: string,
 	options?: GitEvidenceFindingsToolOptions,
@@ -448,6 +435,7 @@ export function createGitEvidenceFindingsToolDefinition(
 	return {
 		name: "git_evidence_findings",
 		label: "git evidence findings",
+		hidden: true,
 		description:
 			"Accumulate compact, theme-level git evidence findings with explicit claim kind, basis, confidence, and raw/source spans.",
 		promptSnippet: "Record verified git evidence conclusions before final answers",
@@ -502,25 +490,7 @@ export function createGitEvidenceFindingsToolDefinition(
 				details: { action: "list", count: findings.length },
 			};
 		},
-		renderCall(args, theme, context) {
-			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-			text.setText(formatGitEvidenceFindingsCall(args, theme));
-			return text;
-		},
-		renderResult(result, _options, theme, context) {
-			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-			const output = getTextOutput(result, context.showImages).trim();
-			text.setText(
-				output
-					? `\n${output
-							.split("\n")
-							.slice(0, 20)
-							.map((line) => theme.fg("toolOutput", line))
-							.join("\n")}`
-					: "",
-			);
-			return text;
-		},
+		// hidden: true => ToolExecutionComponent renders nothing; no renderCall/renderResult needed.
 	};
 }
 

@@ -130,6 +130,10 @@ export class ToolExecutionComponent extends Container {
 		return this.toolDefinition.renderShell ?? this.builtInToolDefinition.renderShell ?? "default";
 	}
 
+	private getHidden(): boolean {
+		return (this.toolDefinition?.hidden ?? this.builtInToolDefinition?.hidden) === true;
+	}
+
 	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
 		return {
 			args: this.args,
@@ -355,7 +359,9 @@ export class ToolExecutionComponent extends Container {
 		ensureCompactSpacing(this as any);
 
 		// === Tool visibility: hide entirely (e.g. todo_manage shown in aboveEditor) ===
-		if (shouldHideToolEntirely(this.toolName)) {
+		// hidden:true tools (internal bookkeeping like git_evidence_findings) render
+		// nothing — no call line, result, or error shell.
+		if (shouldHideToolEntirely(this.toolName) || this.getHidden()) {
 			this.hideComponent = true;
 			logBatchDebug("hide entirely", { toolName: this.toolName, toolCallId: this.toolCallId });
 			return;
