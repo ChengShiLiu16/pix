@@ -96,6 +96,37 @@ describe("TUI app-managed scroll", () => {
 		tui.stop();
 	});
 
+	it("holds the scrolled-up view steady as new content appends below", async () => {
+		const term = new VirtualTerminal(10, 8);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(20);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+
+		// Scroll up to read history: top = maxTop(12) - 3 = 9 -> L9..L16.
+		tui.scrollBy(3);
+		await term.waitForRender();
+		let view = (await term.flushAndGetViewport()).map((l) => l.trim()).filter(Boolean);
+		assert.deepStrictEqual(view, ["L9", "L10", "L11", "L12", "L13", "L14", "L15", "L16"]);
+
+		// Stream content below. The visible window must NOT drift upward.
+		c.lines = makeLines(25);
+		tui.requestRender();
+		await term.waitForRender();
+		view = (await term.flushAndGetViewport()).map((l) => l.trim()).filter(Boolean);
+		assert.deepStrictEqual(view, ["L9", "L10", "L11", "L12", "L13", "L14", "L15", "L16"]);
+
+		// And again — still anchored to the same absolute lines.
+		c.lines = makeLines(40);
+		tui.requestRender();
+		await term.waitForRender();
+		view = (await term.flushAndGetViewport()).map((l) => l.trim()).filter(Boolean);
+		assert.deepStrictEqual(view, ["L9", "L10", "L11", "L12", "L13", "L14", "L15", "L16"]);
+		tui.stop();
+	});
+
 	it("pages up and down with PageUp/PageDown", async () => {
 		const term = new VirtualTerminal(10, 5);
 		const tui = new TUI(term, false, { appScroll: true });
@@ -253,26 +284,61 @@ describe("TUI expand anchoring", () => {
 	const down = (x: number, y: number) => `\x1b[<0;${x + 1};${y + 1}M`;
 	const up = (x: number, y: number) => `\x1b[<0;${x + 1};${y + 1}m`;
 
-	it("keeps the clicked block pinned at its screen row when expanding", async () => {
+	it("keeps following the live bottom when expanding while pinned to bottom", async () => {
 		const term = new VirtualTerminal(10, 6);
 		const tui = new TUI(term, false, { appScroll: true });
 		const head = new TestComponent();
 		head.lines = ["H0", "H1"]; // rows 0..1
-		const block = new ExpandableBlock(2, 6); // starts at full index 2
+		const block = new ExpandableBlock(2, 6); // expands to 6 lines -> overflows 6-row viewport
 		tui.addChild(head);
 		tui.addChild(block);
 		tui.start();
 		await term.waitForRender();
 
-		// Click (down+up, no movement) on the block's first line at screen row 2.
+		// Pinned to the live bottom: click expands the block. Because the user was
+		// following the bottom, the view should keep following it (not anchor),
+		// so the newest line of the expanded block stays visible.
 		term.sendInput(down(0, 2));
 		term.sendInput(up(0, 2));
 		await term.waitForRender();
 
 		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		// Anchored: head still visible at top, block header stays at row 2.
+		// 8 lines total (H0,H1,E0..E5), height 6 -> bottom window is E0..E5.
+		assert.strictEqual(view[view.length - 1], "E5", "expected newest expanded line pinned to bottom");
+		assert.ok(view.includes("E5") && view.includes("E0"), "expected full expanded block visible at bottom");
+		tui.stop();
+	});
+
+	it("anchors the clicked block at its screen row when scrolled up reading history", async () => {
+		const term = new VirtualTerminal(10, 6);
+		const tui = new TUI(term, false, { appScroll: true });
+		const head = new TestComponent();
+		head.lines = ["H0", "H1", "H2", "H3"]; // rows 0..3
+		const block = new ExpandableBlock(2, 6); // collapsed at full index 4..5 (+nothing)
+		const tail = new TestComponent();
+		tail.lines = ["F0", "F1", "F2", "F3"]; // trailing content so we can scroll up off-bottom
+		tui.addChild(head);
+		tui.addChild(block);
+		tui.addChild(tail);
+		tui.start();
+		await term.waitForRender();
+
+		// Scroll up so we are NOT pinned to the bottom (reading history). Total
+		// lines: 4 + 2 + 4 = 10, height 6 -> maxOffset 4. Scroll to the top.
+		tui.scrollBy(4);
+		await term.waitForRender();
+		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		// Window top = 0: rows H0,H1,H2,H3,C0,C1. Block (collapsed) header C0 at row 4.
+		assert.strictEqual(view[4], "C0");
+
+		// Click the block's first line at screen row 4 -> expands; anchored at row 4.
+		term.sendInput(down(0, 4));
+		term.sendInput(up(0, 4));
+		await term.waitForRender();
+		view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		// Anchored: the block's top stays at screen row 4 (history above unchanged).
 		assert.strictEqual(view[0], "H0");
-		assert.strictEqual(view[2], "E0");
+		assert.strictEqual(view[4], "E0");
 		tui.stop();
 	});
 });

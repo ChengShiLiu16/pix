@@ -366,8 +366,14 @@ export class TUI extends Container {
 	private appScroll = false;
 	/** Horizontal page margin (blank columns on each side) in app-scroll/alt-screen mode. */
 	private marginX = 0;
-	/** Lines scrolled up from the bottom. 0 means pinned to the latest content. */
-	private scrollOffset = 0;
+	/**
+	 * Absolute top line index (into the full line array) the view is anchored to
+	 * while reading history. Anchoring by an ABSOLUTE top — not by distance from
+	 * the bottom — keeps the visible content stable when new lines append below;
+	 * a distance-from-bottom anchor would slide the view toward the new content
+	 * and scroll the user's history off the top. Ignored while {@link stickToBottom}.
+	 */
+	private scrollTop = 0;
 	/** When true, new content keeps the view pinned to the bottom. */
 	private stickToBottom = true;
 	/** Top index (into the full line array) of the last rendered window. For hit-testing. */
@@ -432,21 +438,22 @@ export class TUI extends Container {
 			this.lastWindowTop = 0;
 			return [];
 		}
-		const maxOffset = Math.max(0, lines.length - height);
+		const maxTop = Math.max(0, lines.length - height);
 		if (this.pendingAnchor) {
 			// Keep the clicked block pinned at its screen row; content flows down.
 			const { fullIndex, screenRow } = this.pendingAnchor;
 			this.pendingAnchor = null;
-			const anchoredTop = Math.max(0, Math.min(fullIndex - Math.max(0, screenRow), maxOffset));
-			this.scrollOffset = maxOffset - anchoredTop;
-			this.stickToBottom = this.scrollOffset === 0;
+			this.scrollTop = Math.max(0, Math.min(fullIndex - Math.max(0, screenRow), maxTop));
+			this.stickToBottom = this.scrollTop >= maxTop;
 		} else if (this.stickToBottom) {
-			this.scrollOffset = 0;
+			this.scrollTop = maxTop;
 		} else {
-			this.scrollOffset = Math.min(Math.max(0, this.scrollOffset), maxOffset);
-			if (this.scrollOffset === 0) this.stickToBottom = true;
+			// Reading history: hold the ABSOLUTE top fixed so appended content below
+			// does not slide the view. Re-stick only once we reach the live bottom.
+			this.scrollTop = Math.min(Math.max(0, this.scrollTop), maxTop);
+			if (this.scrollTop >= maxTop) this.stickToBottom = true;
 		}
-		const top = maxOffset - this.scrollOffset;
+		const top = this.scrollTop;
 		this.lastWindowTop = top;
 		const windowLines = lines.slice(top, top + height);
 		// Pad to a full screen so stale rows below short content are cleared.
@@ -457,18 +464,21 @@ export class TUI extends Container {
 	/** Scroll by N lines: positive reveals older content, negative reveals newer. */
 	scrollBy(lines: number): void {
 		if (!this.appScroll || lines === 0) return;
-		const next = Math.max(0, this.scrollOffset + lines);
-		if (next === this.scrollOffset && this.stickToBottom === (next === 0)) return;
-		this.scrollOffset = next;
-		this.stickToBottom = next === 0;
+		const maxTop = Math.max(0, this.lastFullLines.length - this.terminal.rows);
+		// Positive reveals older content -> the top moves up (smaller index).
+		const curTop = this.stickToBottom ? maxTop : this.scrollTop;
+		const nextTop = Math.max(0, Math.min(curTop - lines, maxTop));
+		const nextStick = nextTop >= maxTop;
+		if (nextTop === curTop && this.stickToBottom === nextStick) return;
+		this.scrollTop = nextTop;
+		this.stickToBottom = nextStick;
 		this.requestRender();
 	}
 
 	/** Re-pin the view to the latest content. */
 	scrollToBottom(): void {
 		if (!this.appScroll) return;
-		if (this.scrollOffset === 0 && this.stickToBottom) return;
-		this.scrollOffset = 0;
+		if (this.stickToBottom) return;
 		this.stickToBottom = true;
 		this.requestRender();
 	}
@@ -482,7 +492,8 @@ export class TUI extends Container {
 	private addScrollIndicators(lines: string[]): string[] {
 		if (this.marginX < 1 || lines.length === 0) return lines;
 		const moreAbove = this.lastWindowTop > 0;
-		const moreBelow = this.scrollOffset > 0;
+		// Not stuck to the bottom => the latest content is below the fold.
+		const moreBelow = !this.stickToBottom;
 		if (!moreAbove && !moreBelow) return lines;
 		const out = lines.slice();
 		const mark = (idx: number, glyph: string): void => {
@@ -631,15 +642,20 @@ export class TUI extends Container {
 		const fullLineIndex = this.lastWindowTop + evt.y;
 		for (const hit of this.lastHits) {
 			if (fullLineIndex >= hit.start && fullLineIndex < hit.end) {
-				// Anchor the clicked block's top to its current screen row so an
-				// expand/collapse keeps it visually in place (content flows down),
-				// rather than snapping the view to the bottom.
 				const screenRow = Math.max(0, hit.start - this.lastWindowTop);
 				// Hand the component a content-space column (margin removed), matching
 				// the coordinate space its render output lives in.
 				const contentEvt = { ...evt, x: Math.max(0, evt.x - this.marginX) };
 				hit.component.handleMouse?.(contentEvt, fullLineIndex - hit.start);
-				this.pendingAnchor = { fullIndex: hit.start, screenRow };
+				// Anchor the clicked block's top to its current screen row so an
+				// expand/collapse keeps it visually in place — but ONLY when the user
+				// has scrolled up to read history. While pinned to the live bottom
+				// (following streaming output), keep following the bottom instead, so
+				// expanding/collapsing doesn't freeze the view with fresh output piling
+				// up off-screen below the fold.
+				if (!this.stickToBottom) {
+					this.pendingAnchor = { fullIndex: hit.start, screenRow };
+				}
 				this.requestRender();
 				return;
 			}
