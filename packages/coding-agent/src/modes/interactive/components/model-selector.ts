@@ -148,10 +148,6 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		sorted.sort((a, b) => {
 			const providerCompare = a.provider.localeCompare(b.provider);
 			if (providerCompare !== 0) return providerCompare;
-			const aIsCurrent = modelsAreEqual(this.currentModel, a.model);
-			const bIsCurrent = modelsAreEqual(this.currentModel, b.model);
-			if (aIsCurrent && !bIsCurrent) return -1;
-			if (!aIsCurrent && bIsCurrent) return 1;
 			return a.id.localeCompare(b.id);
 		});
 		return sorted;
