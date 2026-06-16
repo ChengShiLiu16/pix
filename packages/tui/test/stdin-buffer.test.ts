@@ -124,14 +124,17 @@ describe("StdinBuffer", () => {
 			assert.deepStrictEqual(emittedSequences, ["\x1b[<35;20;5m"]);
 		});
 
-		it("should flush incomplete sequence after timeout", async () => {
+		it("should drop an incomplete mouse sequence on timeout (never leaked as keystrokes)", async () => {
 			processInput("\x1b[<35");
 			assert.deepStrictEqual(emittedSequences, []);
 
 			// Wait for timeout
 			await wait(15);
 
-			assert.deepStrictEqual(emittedSequences, ["\x1b[<35"]);
+			// An incomplete mouse report is dropped, not flushed as data: emitting the
+			// raw bytes would feed "\x1b[<35" to the focused editor as keystrokes.
+			assert.deepStrictEqual(emittedSequences, []);
+			assert.strictEqual(buffer.getBuffer(), "");
 		});
 	});
 
@@ -335,10 +338,17 @@ describe("StdinBuffer", () => {
 	});
 
 	describe("Flush", () => {
-		it("should flush incomplete sequences", () => {
+		it("should drop an incomplete mouse sequence on flush (never leaked as keystrokes)", () => {
 			processInput("\x1b[<35");
 			const flushed = buffer.flush();
-			assert.deepStrictEqual(flushed, ["\x1b[<35"]);
+			assert.deepStrictEqual(flushed, []);
+			assert.strictEqual(buffer.getBuffer(), "");
+		});
+
+		it("should still flush a non-mouse incomplete sequence", () => {
+			processInput("\x1b");
+			const flushed = buffer.flush();
+			assert.deepStrictEqual(flushed, ["\x1b"]);
 			assert.strictEqual(buffer.getBuffer(), "");
 		});
 
@@ -347,14 +357,14 @@ describe("StdinBuffer", () => {
 			assert.deepStrictEqual(flushed, []);
 		});
 
-		it("should emit flushed data via timeout", async () => {
+		it("should not emit an incomplete mouse sequence via timeout", async () => {
 			processInput("\x1b[<35");
 			assert.deepStrictEqual(emittedSequences, []);
 
-			// Wait for timeout to flush
+			// Wait for timeout
 			await wait(15);
 
-			assert.deepStrictEqual(emittedSequences, ["\x1b[<35"]);
+			assert.deepStrictEqual(emittedSequences, []);
 		});
 	});
 

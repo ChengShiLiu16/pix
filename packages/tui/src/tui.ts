@@ -11,8 +11,10 @@ import type { Terminal } from "./terminal.ts";
 import { deleteKittyImage, getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.ts";
 import {
 	applyScopedStyle,
+	dimLineToScrim,
 	extractSegments,
 	normalizeTerminalOutput,
+	type ScrimOptions,
 	sliceByColumn,
 	sliceWithWidth,
 	visibleWidth,
@@ -71,8 +73,12 @@ export interface Component {
 	 * Optional handler for a mouse event whose target resolved to this component
 	 * (app-managed scroll mode only). `localY` is the 0-based row within this
 	 * component's own rendered output; `evt.x` is the 0-based column.
+	 *
+	 * Return `false` from a hover (move) event to signal "nothing changed, no
+	 * repaint needed" — this keeps any-motion tracking from flooding renders.
 	 */
-	handleMouse?(evt: MouseEvent, localY: number): void;
+	// biome-ignore lint/suspicious/noConfusingVoidType: most handlers return void; hover-aware ones return boolean to gate repaints
+	handleMouse?(evt: MouseEvent, localY: number): void | boolean;
 
 	/**
 	 * Invalidate any cached rendering state.
@@ -128,6 +134,15 @@ export function isFocusable(component: Component | null): component is Component
 export const CURSOR_MARKER = "\x1b_pi:c\x07";
 
 export { visibleWidth };
+
+// Backdrop scrim: blends the screen toward black at opencode's RGBA(0,0,0,150)
+// strength (factor = 1 - 150/255). Default-fg cells fade to a recessed gray;
+// default-bg cells go to black so explicit background blocks stay faintly visible.
+const BACKDROP_SCRIM: ScrimOptions = {
+	factor: 1 - 150 / 255,
+	defaultFg: [205, 205, 205],
+	defaultBg: [0, 0, 0],
+};
 
 /**
  * Anchor position for overlays
@@ -212,6 +227,10 @@ export interface OverlayOptions {
 	visible?: (termWidth: number, termHeight: number) => boolean;
 	/** If true, don't capture keyboard focus when shown */
 	nonCapturing?: boolean;
+	/** If true, dim the screen behind the overlay (semi-transparent scrim). */
+	backdrop?: boolean;
+	/** If true, enable any-motion mouse tracking so the overlay receives hover (move) events. */
+	trackMotion?: boolean;
 }
 
 /** Options for {@link OverlayHandle.unfocus}. */
@@ -534,7 +553,14 @@ export class TUI extends Container {
 	 */
 	private handleMouseInput(data: string): InputListenerResult {
 		const evt = parseMouse(data);
-		if (!evt) return undefined;
+		if (!evt) {
+			// Swallow anything that begins like a mouse report but didn't fully parse
+			// (e.g. a partial SGR sequence flushed mid-stream by the stdin buffer under
+			// a motion flood). Letting it fall through would feed raw bytes to the
+			// focused editor as stray keystrokes — e.g. spurious history navigation.
+			if (data.startsWith("\x1b[<") || data.startsWith("\x1b[M")) return { consume: true };
+			return undefined;
+		}
 		if (evt.shift) return { consume: true };
 		if (evt.wheel) {
 			// Only vertical wheel scrolls. Horizontal wheel (left/right) is consumed but
@@ -555,11 +581,19 @@ export class TUI extends Container {
 		const col = Math.max(0, evt.x - this.marginX);
 
 		if (evt.action === "down" && evt.button !== "right") {
-			this.beginSelection(line, col);
+			// While a modal overlay is up the dimmed background isn't selectable. Skip
+			// starting a text selection so a slightly-dragged press still resolves to a
+			// click on the overlay (and never starts a selection-drag render flood).
+			if (!this.getTopmostVisibleOverlay()) this.beginSelection(line, col);
 			return { consume: true };
 		}
-		if (evt.action === "move" && this.selecting) {
-			this.updateSelection(line, col);
+		if (evt.action === "move") {
+			if (this.selecting) {
+				this.updateSelection(line, col);
+			} else if (this.routeHoverToOverlay(evt)) {
+				// Free hover (any-motion tracking) over an overlay drives its highlight.
+				this.requestRender();
+			}
 			return { consume: true };
 		}
 		if (evt.action === "up" && evt.button !== "right") {
@@ -662,6 +696,23 @@ export class TUI extends Container {
 			result[row] = before + hl + after;
 		}
 		return result;
+	}
+
+	/**
+	 * Route a hover (move) event to the overlay under the cursor. Returns true only
+	 * when a repaint is needed — a component that returns `false` (e.g. the cursor
+	 * moved but the highlighted row is unchanged) suppresses the render so any-motion
+	 * tracking can't flood the event loop with full-screen re-renders.
+	 */
+	private routeHoverToOverlay(evt: MouseEvent): boolean {
+		if (!this.getTopmostVisibleOverlay()) return false;
+		for (let i = this.lastOverlayHits.length - 1; i >= 0; i--) {
+			const hit = this.lastOverlayHits[i];
+			if (evt.y >= hit.startRow && evt.y < hit.endRow && evt.x >= hit.col && evt.x < hit.col + hit.width) {
+				return hit.component.handleMouse?.({ ...evt, x: evt.x - hit.col }, evt.y - hit.startRow) !== false;
+			}
+		}
+		return false;
 	}
 
 	/** Map a click's screen row to the owning mouse-aware component and notify it. */
@@ -854,6 +905,12 @@ export class TUI extends Container {
 		return root.children.some((child) => this.containsComponent(child, target));
 	}
 
+	/** Enable any-motion mouse tracking when a visible overlay wants hover events. */
+	private syncMotionTracking(): void {
+		const want = this.overlayStack.some((e) => this.isOverlayVisible(e) && e.options?.trackMotion);
+		this.terminal.setMotionTracking(want);
+	}
+
 	/**
 	 * Show an overlay component with configurable positioning and sizing.
 	 * Returns a handle to control the overlay's visibility.
@@ -872,6 +929,7 @@ export class TUI extends Container {
 			this.setFocus(component);
 		}
 		this.terminal.hideCursor();
+		this.syncMotionTracking();
 		this.requestRender();
 
 		// Return handle for controlling this overlay
@@ -888,6 +946,7 @@ export class TUI extends Container {
 						this.setFocus(topVisible?.component ?? entry.preFocus);
 					}
 					if (this.overlayStack.length === 0) this.terminal.hideCursor();
+					this.syncMotionTracking();
 					this.requestRender();
 				}
 			},
@@ -909,6 +968,7 @@ export class TUI extends Container {
 						this.setFocus(component);
 					}
 				}
+				this.syncMotionTracking();
 				this.requestRender();
 			},
 			isHidden: () => entry.hidden,
@@ -1437,6 +1497,20 @@ export class TUI extends Container {
 		}
 
 		const viewportStart = Math.max(0, workingHeight - termHeight);
+
+		// Dim the visible background behind backdrop overlays (semi-transparent scrim).
+		// Each cell's fg/bg is resolved to RGB and blended toward black, so foreground
+		// text and background color blocks darken together. Applied before compositing:
+		// compositeLineAt resets style before the overlay text, so the overlay itself
+		// stays at full brightness. Image lines can't be alpha-blended (they're a
+		// graphics protocol, not cells), so they are hidden under a blank scrim row.
+		if (visibleEntries.some((e) => e.options?.backdrop)) {
+			const blank = dimLineToScrim("", termWidth, BACKDROP_SCRIM);
+			for (let idx = viewportStart; idx < result.length; idx++) {
+				const line = result[idx];
+				result[idx] = line && !isImageLine(line) ? dimLineToScrim(line, termWidth, BACKDROP_SCRIM) : blank;
+			}
+		}
 
 		// Composite each overlay
 		for (const { overlayLines, row, col, w } of rendered) {

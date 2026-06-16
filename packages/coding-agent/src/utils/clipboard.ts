@@ -3,17 +3,40 @@ import { platform } from "os";
 import { isWaylandSession } from "./clipboard-image.ts";
 import { clipboard } from "./clipboard-native.ts";
 
-type NativeClipboardExecOptions = {
-	input: string;
-	timeout: number;
-	stdio: ["pipe", "ignore", "ignore"];
-};
+const CLIPBOARD_TIMEOUT_MS = 5000;
 
-function copyToX11Clipboard(options: NativeClipboardExecOptions): void {
+// Write `text` to a clipboard helper's stdin without blocking the event loop.
+// execSync runs synchronously and can hang for clipboard helpers (e.g. wl-copy's
+// fork/daemonize behavior, or pbcopy under a raw-mode TUI), which freezes the
+// render loop. Always spawn asynchronously and bound it with a timeout so a
+// wedged helper can never lock up the UI.
+function spawnClipboardWrite(command: string, args: string[], text: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const proc = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"] });
+		const timer = setTimeout(() => {
+			proc.kill();
+			reject(new Error(`${command} timed out`));
+		}, CLIPBOARD_TIMEOUT_MS);
+		const settle = (err?: Error) => {
+			clearTimeout(timer);
+			if (err) reject(err);
+			else resolve();
+		};
+		proc.on("error", (err) => settle(err));
+		proc.on("close", (code) => settle(code === 0 ? undefined : new Error(`${command} exited with code ${code}`)));
+		proc.stdin.on("error", () => {
+			// Ignore EPIPE if the helper exits before we finish writing.
+		});
+		proc.stdin.write(text);
+		proc.stdin.end();
+	});
+}
+
+async function copyViaX11Clipboard(text: string): Promise<void> {
 	try {
-		execSync("xclip -selection clipboard", options);
+		await spawnClipboardWrite("xclip", ["-selection", "clipboard"], text);
 	} catch {
-		execSync("xsel --clipboard --input", options);
+		await spawnClipboardWrite("xsel", ["--clipboard", "--input"], text);
 	}
 }
 
@@ -61,21 +84,19 @@ export async function copyToClipboard(text: string): Promise<void> {
 		return;
 	}
 
-	const options: NativeClipboardExecOptions = { input: text, timeout: 5000, stdio: ["pipe", "ignore", "ignore"] };
-
 	if (!copied) {
 		try {
 			if (p === "darwin") {
-				execSync("pbcopy", options);
+				await spawnClipboardWrite("pbcopy", [], text);
 				copied = true;
 			} else if (p === "win32") {
-				execSync("clip", options);
+				await spawnClipboardWrite("clip", [], text);
 				copied = true;
 			} else {
 				// Linux. Try Termux, Wayland, or X11 clipboard tools.
 				if (process.env.TERMUX_VERSION) {
 					try {
-						execSync("termux-clipboard-set", options);
+						await spawnClipboardWrite("termux-clipboard-set", [], text);
 						copied = true;
 					} catch {
 						// Fall back to Wayland or X11 tools.
@@ -88,25 +109,18 @@ export async function copyToClipboard(text: string): Promise<void> {
 					const isWayland = isWaylandSession();
 					if (isWayland && hasWaylandDisplay) {
 						try {
-							// Verify wl-copy exists (spawn errors are async and won't be caught)
+							// Verify wl-copy exists first (spawn ENOENT is async and easy to miss).
 							execSync("which wl-copy", { stdio: "ignore" });
-							// wl-copy with execSync hangs due to fork behavior; use spawn instead
-							const proc = spawn("wl-copy", [], { stdio: ["pipe", "ignore", "ignore"] });
-							proc.stdin.on("error", () => {
-								// Ignore EPIPE errors if wl-copy exits early
-							});
-							proc.stdin.write(text);
-							proc.stdin.end();
-							proc.unref();
+							await spawnClipboardWrite("wl-copy", [], text);
 							copied = true;
 						} catch {
 							if (hasX11Display) {
-								copyToX11Clipboard(options);
+								await copyViaX11Clipboard(text);
 								copied = true;
 							}
 						}
 					} else if (hasX11Display) {
-						copyToX11Clipboard(options);
+						await copyViaX11Clipboard(text);
 						copied = true;
 					}
 				}

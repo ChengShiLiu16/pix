@@ -92,6 +92,11 @@ export interface Terminal {
 
 	// Progress indicator (OSC 9;4)
 	setProgress(active: boolean): void;
+
+	// Toggle any-motion mouse tracking (DEC 1003) so the app receives hover
+	// (move) events. No-op when mouse reporting is off; disabling falls back to
+	// button-event tracking (1002), which stays enabled.
+	setMotionTracking(enabled: boolean): void;
 }
 
 /**
@@ -132,6 +137,7 @@ export class ProcessTerminal implements Terminal {
 	private readonly enableMouse: boolean;
 	private readonly altScreen: boolean;
 	private mouseActive = false;
+	private motionTrackingActive = false;
 	private altScreenActive = false;
 
 	constructor(options: { enableMouse?: boolean; altScreen?: boolean } = {}) {
@@ -479,6 +485,10 @@ export class ProcessTerminal implements Terminal {
 
 		// Disable mouse reporting (mirror of start()).
 		if (this.mouseActive) {
+			if (this.motionTrackingActive) {
+				process.stdout.write("\x1b[?1003l"); // Disable any-motion tracking
+				this.motionTrackingActive = false;
+			}
 			process.stdout.write("\x1b[?1006l"); // Disable SGR extended coordinates
 			process.stdout.write("\x1b[?1002l"); // Disable button-event tracking
 			this.mouseActive = false;
@@ -573,6 +583,22 @@ export class ProcessTerminal implements Terminal {
 
 	showCursor(): void {
 		process.stdout.write("\x1b[?25h");
+	}
+
+	setMotionTracking(enabled: boolean): void {
+		if (!this.mouseActive || enabled === this.motionTrackingActive) return;
+		if (enabled) {
+			// 1003 = any-motion tracking, needed to receive hover (motion with no button held).
+			process.stdout.write("\x1b[?1003h");
+		} else {
+			// Disable any-motion AND re-assert button-event tracking. Many terminals
+			// treat 1000/1002/1003 as a single mouse mode, so a bare 1003l turns mouse
+			// reporting OFF entirely rather than falling back to 1002. With reporting
+			// off in the alt-screen, the wheel emits arrow keys (alternate-scroll mode),
+			// which the focused editor consumes as prompt-history navigation.
+			process.stdout.write("\x1b[?1003l\x1b[?1002h");
+		}
+		this.motionTrackingActive = enabled;
 	}
 
 	clearLine(): void {

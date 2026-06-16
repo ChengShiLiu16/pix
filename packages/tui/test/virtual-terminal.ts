@@ -102,6 +102,10 @@ export class VirtualTerminal implements Terminal {
 
 	setProgress(_active: boolean): void {}
 
+	setMotionTracking(enabled: boolean): void {
+		this.xterm.write(enabled ? "\x1b[?1003h" : "\x1b[?1003l");
+	}
+
 	// Test-specific methods not in Terminal interface
 
 	/**

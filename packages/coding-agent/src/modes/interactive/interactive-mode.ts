@@ -3185,6 +3185,8 @@ export class InteractiveMode {
 				width: dialog.width,
 				row: "30%",
 				col: "50%",
+				backdrop: true,
+				trackMotion: true,
 			});
 			this.ui.requestRender();
 		});

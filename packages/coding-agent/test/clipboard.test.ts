@@ -52,6 +52,26 @@ function osc52Writes(): string[] {
 	return stdoutWrites.filter((write) => write.startsWith("\x1b]52;c;"));
 }
 
+// Build a fake child process for the async `spawn` clipboard path. Fires its
+// close/error handler on the next microtask, after spawnClipboardWrite has
+// registered listeners.
+function makeSpawnChild(result: { code?: number; error?: Error }) {
+	const handlers: Record<string, (arg?: unknown) => void> = {};
+	const child = {
+		stdin: { write: vi.fn(), end: vi.fn(), on: vi.fn() },
+		kill: vi.fn(),
+		on(event: string, cb: (arg?: unknown) => void) {
+			handlers[event] = cb;
+			return child;
+		},
+	};
+	queueMicrotask(() => {
+		if (result.error) handlers.error?.(result.error);
+		else handlers.close?.(result.code ?? 0);
+	});
+	return child;
+}
+
 beforeEach(() => {
 	vi.unstubAllEnvs();
 	vi.stubEnv("SSH_CONNECTION", "");
@@ -111,25 +131,25 @@ describe("copyToClipboard", () => {
 		expect(mockedExecSync).not.toHaveBeenCalled();
 	});
 
-	test("local shell fallback success skips OSC 52", async () => {
+	test("local shell fallback writes via async spawn and skips OSC 52", async () => {
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockReturnValue(Buffer.alloc(0));
+		let lastChild: ReturnType<typeof makeSpawnChild> | undefined;
+		mockedSpawn.mockImplementation(() => {
+			lastChild = makeSpawnChild({ code: 0 });
+			return lastChild as unknown as ReturnType<typeof spawn>;
+		});
 
 		await copyToClipboard("hello");
 
-		expect(mockedExecSync).toHaveBeenCalledWith("pbcopy", {
-			input: "hello",
-			stdio: ["pipe", "ignore", "ignore"],
-			timeout: 5000,
-		});
+		expect(mockedSpawn).toHaveBeenCalledWith("pbcopy", [], { stdio: ["pipe", "ignore", "ignore"] });
+		expect(lastChild?.stdin.write).toHaveBeenCalledWith("hello");
+		expect(mockedExecSync).not.toHaveBeenCalled();
 		expect(osc52Writes()).toHaveLength(0);
 	});
 
 	test("uses OSC 52 fallback when native and shell tools fail", async () => {
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockImplementation(() => {
-			throw new Error("pbcopy failed");
-		});
+		mockedSpawn.mockImplementation(() => makeSpawnChild({ code: 1 }) as unknown as ReturnType<typeof spawn>);
 
 		await copyToClipboard("hello");
 
@@ -138,9 +158,7 @@ describe("copyToClipboard", () => {
 
 	test("does not emit oversized OSC 52 payloads", async () => {
 		mocks.clipboard.setText.mockRejectedValue(new Error("native failed"));
-		mockedExecSync.mockImplementation(() => {
-			throw new Error("pbcopy failed");
-		});
+		mockedSpawn.mockImplementation(() => makeSpawnChild({ code: 1 }) as unknown as ReturnType<typeof spawn>);
 
 		await expect(copyToClipboard("x".repeat(80_000))).rejects.toThrow("Failed to copy to clipboard");
 		expect(osc52Writes()).toHaveLength(0);

@@ -407,6 +407,17 @@ export class StdinBuffer extends EventEmitter<StdinBufferEventMap> {
 			return [];
 		}
 
+		// An incomplete mouse report stuck in the buffer — e.g. the stream paused
+		// mid-sequence under a motion flood — must never be emitted as data: the raw
+		// bytes (`\x1b[<35;10`) would be fed to the focused editor as keystrokes. A
+		// lost hover position is harmless; typed garbage is not. Other incomplete
+		// sequences (a lone ESC = Escape key, partial keys) are still emitted.
+		if (this.buffer.startsWith(`${ESC}[<`) || this.buffer.startsWith(`${ESC}[M`)) {
+			this.buffer = "";
+			this.pendingKittyPrintableCodepoint = undefined;
+			return [];
+		}
+
 		const sequences = [this.buffer];
 		this.buffer = "";
 		this.pendingKittyPrintableCodepoint = undefined;

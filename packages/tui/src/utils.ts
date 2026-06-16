@@ -1250,3 +1250,183 @@ export function wrapWithScopedStyle(segment: AnsiStyleSegment, body: string): st
 export function applyScopedStyle(apply: (text: string) => string, body: string): string {
 	return wrapWithScopedStyle(probeAnsiStyle(apply), body);
 }
+
+// ============================================================================
+// Backdrop scrim
+//
+// pix is a string renderer with no RGBA cell buffer, so a "real" translucent
+// scrim (the way opencode draws RGBA(0,0,0,150) over its cell buffer) is
+// emulated here: resolve each run's fg/bg to RGB, blend it toward black, and
+// re-emit truecolor. Foreground text and explicit background blocks darken
+// uniformly. Non-SGR sequences (OSC 8 links, the cursor marker) pass through.
+// ============================================================================
+
+export type Rgb = readonly [number, number, number];
+
+export interface ScrimOptions {
+	/** Multiply every color channel by this factor (e.g. 0.41 ≈ opencode's black @ alpha 150/255). */
+	factor: number;
+	/** RGB substituted for cells using the terminal-default foreground. */
+	defaultFg: Rgb;
+	/** RGB substituted for cells using the terminal-default background. */
+	defaultBg: Rgb;
+}
+
+// Standard xterm 16-color palette, used to resolve named SGR colors (30-37/90-97).
+const ANSI_16: readonly Rgb[] = [
+	[0, 0, 0],
+	[205, 0, 0],
+	[0, 205, 0],
+	[205, 205, 0],
+	[0, 0, 238],
+	[205, 0, 205],
+	[0, 205, 205],
+	[229, 229, 229],
+	[127, 127, 127],
+	[255, 0, 0],
+	[0, 255, 0],
+	[255, 255, 0],
+	[92, 92, 255],
+	[255, 0, 255],
+	[0, 255, 255],
+	[255, 255, 255],
+];
+
+function ansi256ToRgb(n: number): Rgb {
+	if (n < 16) return ANSI_16[n] ?? [0, 0, 0];
+	if (n < 232) {
+		const i = n - 16;
+		const channel = (v: number) => (v === 0 ? 0 : 55 + v * 40);
+		return [channel(Math.floor(i / 36)), channel(Math.floor((i % 36) / 6)), channel(i % 6)];
+	}
+	const v = 8 + (n - 232) * 10;
+	return [v, v, v];
+}
+
+// Resolve a tracked SGR color code ("31", "38;5;240", "38;2;r;g;b") to RGB.
+function resolveSgrColor(code: string | null, fallback: Rgb): Rgb {
+	if (code === null) return fallback;
+	const parts = code.split(";");
+	const first = Number.parseInt(parts[0] ?? "", 10);
+	if (first === 38 || first === 48) {
+		if (parts[1] === "5") return ansi256ToRgb(Number.parseInt(parts[2] ?? "0", 10));
+		if (parts[1] === "2") {
+			return [
+				Number.parseInt(parts[2] ?? "0", 10),
+				Number.parseInt(parts[3] ?? "0", 10),
+				Number.parseInt(parts[4] ?? "0", 10),
+			];
+		}
+		return fallback;
+	}
+	let idx: number | null = null;
+	if (first >= 30 && first <= 37) idx = first - 30;
+	else if (first >= 90 && first <= 97) idx = first - 90 + 8;
+	else if (first >= 40 && first <= 47) idx = first - 40;
+	else if (first >= 100 && first <= 107) idx = first - 100 + 8;
+	return idx === null ? fallback : (ANSI_16[idx] ?? fallback);
+}
+
+const clampByte = (v: number): number => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+
+/**
+ * Recolor a rendered line into a darkened "scrim" version, blending every cell's
+ * fg/bg toward black by `opts.factor`, then filling the row to `width` with the
+ * blended default background so the dim is edge-to-edge with no bright gaps.
+ */
+export function dimLineToScrim(line: string, width: number, opts: ScrimOptions): string {
+	let fg: string | null = null;
+	let bg: string | null = null;
+	let inverse = false;
+
+	const blend = (rgb: Rgb): Rgb => [
+		clampByte(rgb[0] * opts.factor),
+		clampByte(rgb[1] * opts.factor),
+		clampByte(rgb[2] * opts.factor),
+	];
+
+	const runSgr = (): string => {
+		const f = resolveSgrColor(inverse ? bg : fg, inverse ? opts.defaultBg : opts.defaultFg);
+		const b = resolveSgrColor(inverse ? fg : bg, inverse ? opts.defaultFg : opts.defaultBg);
+		const [fr, fg2, fb] = blend(f);
+		const [br, bg2, bb] = blend(b);
+		return `\x1b[38;2;${fr};${fg2};${fb};48;2;${br};${bg2};${bb}m`;
+	};
+
+	const updateState = (code: string): void => {
+		const m = code.match(/\x1b\[([\d;]*)m/);
+		if (!m) return;
+		const params = m[1] ?? "";
+		if (params === "" || params === "0") {
+			fg = null;
+			bg = null;
+			inverse = false;
+			return;
+		}
+		const parts = params.split(";");
+		let k = 0;
+		while (k < parts.length) {
+			const c = Number.parseInt(parts[k] ?? "", 10);
+			if ((c === 38 || c === 48) && parts[k + 1] === "5" && parts[k + 2] !== undefined) {
+				const resolved = `${c};5;${parts[k + 2]}`;
+				if (c === 38) fg = resolved;
+				else bg = resolved;
+				k += 3;
+				continue;
+			}
+			if ((c === 38 || c === 48) && parts[k + 1] === "2" && parts[k + 4] !== undefined) {
+				const resolved = `${c};2;${parts[k + 2]};${parts[k + 3]};${parts[k + 4]}`;
+				if (c === 38) fg = resolved;
+				else bg = resolved;
+				k += 5;
+				continue;
+			}
+			if (c === 0) {
+				fg = null;
+				bg = null;
+				inverse = false;
+			} else if (c === 7) inverse = true;
+			else if (c === 27) inverse = false;
+			else if (c === 39) fg = null;
+			else if (c === 49) bg = null;
+			else if ((c >= 30 && c <= 37) || (c >= 90 && c <= 97)) fg = String(c);
+			else if ((c >= 40 && c <= 47) || (c >= 100 && c <= 107)) bg = String(c);
+			k++;
+		}
+	};
+
+	let out = "";
+	let vis = 0;
+	let i = 0;
+	const len = line.length;
+	while (i < len) {
+		if (line[i] === "\x1b") {
+			const ansi = extractAnsiCode(line, i);
+			if (ansi) {
+				// Replace SGR (color/attribute) sequences; pass everything else
+				// (OSC 8 hyperlinks, the APC cursor marker, …) through untouched.
+				if (ansi.code.endsWith("m")) updateState(ansi.code);
+				else out += ansi.code;
+				i += ansi.length;
+				continue;
+			}
+		}
+		// Search from i + 1 so an ESC that extractAnsiCode rejected (malformed or
+		// truncated sequence) is consumed as literal text instead of stalling the
+		// loop — line.indexOf("\x1b", i) would return i and never advance.
+		let nextEsc = line.indexOf("\x1b", i + 1);
+		if (nextEsc === -1) nextEsc = len;
+		const text = line.slice(i, nextEsc);
+		if (text) {
+			out += runSgr() + text;
+			vis += visibleWidth(text);
+		}
+		i = nextEsc;
+	}
+
+	if (vis < width) {
+		const [br, bg2, bb] = blend(opts.defaultBg);
+		out += `\x1b[48;2;${br};${bg2};${bb}m${" ".repeat(width - vis)}`;
+	}
+	return `${out}\x1b[0m`;
+}
