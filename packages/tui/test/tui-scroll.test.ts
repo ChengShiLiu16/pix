@@ -33,6 +33,9 @@ function makeLines(n: number): string[] {
 // SGR wheel sequences (coords irrelevant for scrolling).
 const WHEEL_UP = "\x1b[<64;1;1M";
 const WHEEL_DOWN = "\x1b[<65;1;1M";
+// Horizontal wheel — emitted by trackpads during diagonal gestures. Must NOT scroll vertically.
+const WHEEL_LEFT = "\x1b[<66;1;1M";
+const WHEEL_RIGHT = "\x1b[<67;1;1M";
 
 describe("TUI app-managed scroll", () => {
 	it("pins to the bottom window when content exceeds the viewport", async () => {
@@ -115,6 +118,31 @@ describe("TUI app-managed scroll", () => {
 
 		const view = term.getViewport().map((l) => l.trim());
 		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
+		tui.stop();
+	});
+
+	it("ignores horizontal wheel events (no vertical jitter on diagonal scroll)", async () => {
+		const term = new VirtualTerminal(10, 5);
+		const tui = new TUI(term, false, { appScroll: true });
+		const c = new TestComponent();
+		c.lines = makeLines(10);
+		tui.addChild(c);
+		tui.start();
+		await term.waitForRender();
+
+		// Scroll up into history so any spurious vertical movement would be visible.
+		tui.scrollBy(2);
+		await term.waitForRender();
+		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L3", "L4", "L5", "L6", "L7"]);
+
+		// The trackpad's lateral component (SGR 66/67) must not move the view up or down.
+		for (const seq of [WHEEL_LEFT, WHEEL_RIGHT, WHEEL_LEFT, WHEEL_LEFT, WHEEL_RIGHT]) {
+			term.sendInput(seq);
+			await term.waitForRender();
+		}
+		view = (await term.flushAndGetViewport()).map((l) => l.trim());
+		assert.deepStrictEqual(view, ["L3", "L4", "L5", "L6", "L7"], "horizontal wheel must not scroll vertically");
 		tui.stop();
 	});
 

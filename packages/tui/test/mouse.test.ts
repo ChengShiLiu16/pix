@@ -48,6 +48,20 @@ describe("parseMouse", () => {
 		assert.strictEqual(down?.button, "none");
 	});
 
+	it("parses horizontal wheel left/right distinctly from vertical", () => {
+		// SGR wheel codes: 64=up, 65=down, 66=left, 67=right. Direction is the low TWO
+		// bits — a regression here (cb & 1) misreads 66 as "up" and 67 as "down", which
+		// turned diagonal trackpad scrolling into vertical jitter.
+		assert.strictEqual(parseMouse("\x1b[<66;10;10M")?.wheel, "left");
+		assert.strictEqual(parseMouse("\x1b[<67;10;10M")?.wheel, "right");
+	});
+
+	it("keeps direction across wheel modifiers (shift/ctrl)", () => {
+		assert.strictEqual(parseMouse("\x1b[<68;1;1M")?.wheel, "up"); // 64 + shift(4)
+		assert.strictEqual(parseMouse("\x1b[<81;1;1M")?.wheel, "down"); // 65 + ctrl(16)
+		assert.strictEqual(parseMouse("\x1b[<70;1;1M")?.wheel, "left"); // 66 + shift(4)
+	});
+
 	it("parses motion (drag) as action move", () => {
 		// 32 (motion) + 0 (left held)
 		const e = parseMouse("\x1b[<32;3;3M");

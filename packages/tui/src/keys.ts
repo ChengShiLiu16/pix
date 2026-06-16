@@ -1413,8 +1413,8 @@ export interface MouseEvent {
 	action: "down" | "up" | "move";
 	/** Which button is involved (the released button on "up"). */
 	button: "left" | "middle" | "right" | "none";
-	/** Set when this is a scroll-wheel event; `button` is "none" then. */
-	wheel?: "up" | "down";
+	/** Set when this is a scroll-wheel event; `button` is "none" then. "left"/"right" are horizontal wheel. */
+	wheel?: "up" | "down" | "left" | "right";
 	shift: boolean;
 	alt: boolean;
 	ctrl: boolean;
@@ -1442,8 +1442,13 @@ export function parseMouse(data: string): MouseEvent | null {
 	const isWheel = (cb & 64) !== 0;
 
 	if (isWheel) {
-		// Wheel buttons: 64 = up, 65 = down (low bit picks direction).
-		return { x, y, action: "down", button: "none", wheel: (cb & 1) === 0 ? "up" : "down", shift, alt, ctrl };
+		// Wheel button codes: 64=up, 65=down, 66=left, 67=right. The direction lives in
+		// the low TWO bits (cb & 3) — using only the low bit (cb & 1) misreads horizontal
+		// scroll (left/right) as vertical (up/down), which yanks the view the wrong way
+		// during diagonal trackpad gestures and shows up as scroll jitter.
+		const dir = cb & 3;
+		const wheel = dir === 0 ? "up" : dir === 1 ? "down" : dir === 2 ? "left" : "right";
+		return { x, y, action: "down", button: "none", wheel, shift, alt, ctrl };
 	}
 
 	const buttonBits = cb & 3;

@@ -537,12 +537,16 @@ export class TUI extends Container {
 		if (!evt) return undefined;
 		if (evt.shift) return { consume: true };
 		if (evt.wheel) {
-			const now = performance.now();
-			if (now - this.lastAcceptedWheelAt < TUI.MIN_WHEEL_INTERVAL_MS) {
-				return { consume: true };
+			// Only vertical wheel scrolls. Horizontal wheel (left/right) is consumed but
+			// ignored: pix has no horizontal scroll, and treating it as vertical turned
+			// diagonal trackpad gestures into up/down jitter.
+			if (evt.wheel === "up" || evt.wheel === "down") {
+				const now = performance.now();
+				if (now - this.lastAcceptedWheelAt >= TUI.MIN_WHEEL_INTERVAL_MS) {
+					this.lastAcceptedWheelAt = now;
+					this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
+				}
 			}
-			this.lastAcceptedWheelAt = now;
-			this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
 			return { consume: true };
 		}
 
