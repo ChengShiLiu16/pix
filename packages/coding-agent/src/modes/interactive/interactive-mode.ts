@@ -124,6 +124,7 @@ import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { TreeSelectorComponent } from "./components/tree-selector.ts";
 import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
+import { type UserMessageAction, UserMessageActionDialogComponent } from "./components/user-message-action-dialog.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
 import {
 	getAvailableThemes,
@@ -2845,7 +2846,7 @@ export class InteractiveMode {
 				} else if (event.message.role === "user") {
 					this.addMessageToChat(event.message);
 					this.updatePendingMessagesDisplay();
-					this.ui.requestRender();
+					this.ui.requestRender(false, true);
 				} else if (event.message.role === "assistant") {
 					this.streamingComponent = new AssistantMessageComponent(
 						undefined,
@@ -3135,6 +3136,116 @@ export class InteractiveMode {
 		return textBlocks.map((c) => (c as { text: string }).text).join("");
 	}
 
+	private getEntryIdForUserMessage(message: Message): string | undefined {
+		if (message.role !== "user") return undefined;
+		for (const entry of this.sessionManager.getEntries()) {
+			if (entry.type === "message" && entry.message === message) {
+				return entry.id;
+			}
+		}
+		return undefined;
+	}
+
+	private async showUserMessageActions(message: Message): Promise<void> {
+		if (this.session.isStreaming) {
+			return;
+		}
+
+		const entryId = this.getEntryIdForUserMessage(message);
+		if (!entryId) {
+			this.showWarning("User message is not ready yet.");
+			return;
+		}
+
+		const text = this.getUserMessageText(message);
+		const choice = await this.showUserMessageActionDialog();
+		if (choice === "revert") {
+			await this.revertToUserMessage(entryId, text);
+		} else if (choice === "copy") {
+			try {
+				await copyToClipboard(text);
+				this.showStatus("Copied user message");
+			} catch (error: unknown) {
+				this.showError(error instanceof Error ? error.message : String(error));
+			}
+		} else if (choice === "fork") {
+			await this.forkFromUserMessage(entryId);
+		}
+	}
+
+	private showUserMessageActionDialog(): Promise<UserMessageAction | undefined> {
+		return new Promise((resolve) => {
+			let handle: OverlayHandle | undefined;
+			const close = (action: UserMessageAction | undefined) => {
+				handle?.hide();
+				resolve(action);
+			};
+			const dialog = new UserMessageActionDialogComponent(close, () => close(undefined));
+			handle = this.ui.showOverlay(dialog, {
+				width: dialog.width,
+				row: "30%",
+				col: "50%",
+			});
+			this.ui.requestRender();
+		});
+	}
+
+	private async revertToUserMessage(entryId: string, fallbackText: string): Promise<void> {
+		const loader = new Loader(
+			this.ui,
+			(spinner) => theme.fg("accent", spinner),
+			(text) => theme.fg("muted", text),
+			"Reverting workspace...",
+		);
+		this.statusContainer.clear();
+		this.statusContainer.addChild(loader);
+		this.ui.requestRender(false, true);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		try {
+			const result = await this.session.navigateTree(entryId, { restoreWorkspace: true });
+			loader.stop();
+			this.statusContainer.clear();
+			if (result.cancelled) {
+				this.showStatus("Navigation cancelled");
+				return;
+			}
+
+			this.chatContainer.clear();
+			this.renderInitialMessages();
+			this.editor.setText(result.editorText ?? fallbackText);
+			const restore = result.workspaceRestore;
+			if (restore) {
+				this.showStatus(
+					`Reverted to user message; restored ${restore.restoredFiles} files, ${restore.restoredSymlinks} symlinks, removed ${restore.removedPaths} paths`,
+				);
+			} else {
+				this.showStatus("Reverted to user message; no workspace snapshot available");
+			}
+			void this.flushCompactionQueue({ willRetry: false });
+		} catch (error: unknown) {
+			loader.stop();
+			this.statusContainer.clear();
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async forkFromUserMessage(entryId: string): Promise<void> {
+		try {
+			const result = await this.runtimeHost.fork(entryId);
+			if (result.cancelled) {
+				this.ui.requestRender();
+				return;
+			}
+
+			this.renderCurrentSessionState();
+			this.editor.setText(result.selectedText ?? "");
+			this.showStatus("Forked to new session");
+		} catch (error: unknown) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
 	/**
 	 * Show a status message in the chat.
 	 *
@@ -3203,6 +3314,7 @@ export class InteractiveMode {
 			case "user": {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
+					const onUserMessageAction = () => void this.showUserMessageActions(message);
 					if (this.chatContainer.children.length > 0) {
 						this.chatContainer.addChild(new Spacer(1));
 					}
@@ -3212,6 +3324,7 @@ export class InteractiveMode {
 						const component = new SkillInvocationMessageComponent(
 							skillBlock,
 							this.getMarkdownThemeWithSettings(),
+							onUserMessageAction,
 						);
 						component.setExpanded(this.toolOutputExpanded);
 						this.chatContainer.addChild(component);
@@ -3221,11 +3334,16 @@ export class InteractiveMode {
 							const userComponent = new UserMessageComponent(
 								skillBlock.userMessage,
 								this.getMarkdownThemeWithSettings(),
+								onUserMessageAction,
 							);
 							this.chatContainer.addChild(userComponent);
 						}
 					} else {
-						const userComponent = new UserMessageComponent(textContent, this.getMarkdownThemeWithSettings());
+						const userComponent = new UserMessageComponent(
+							textContent,
+							this.getMarkdownThemeWithSettings(),
+							onUserMessageAction,
+						);
 						this.chatContainer.addChild(userComponent);
 					}
 					if (options?.populateHistory) {

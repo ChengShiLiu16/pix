@@ -12,11 +12,13 @@ export class SkillInvocationMessageComponent extends Box {
 	private expanded = false;
 	private skillBlock: ParsedSkillBlock;
 	private markdownTheme: MarkdownTheme;
+	private onAction?: () => void;
 
-	constructor(skillBlock: ParsedSkillBlock, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
+	constructor(skillBlock: ParsedSkillBlock, markdownTheme: MarkdownTheme = getMarkdownTheme(), onAction?: () => void) {
 		super(1, 1, (t) => theme.bg("customMessageBg", t));
 		this.skillBlock = skillBlock;
 		this.markdownTheme = markdownTheme;
+		this.onAction = onAction;
 		this.updateDisplay();
 	}
 
@@ -51,5 +53,9 @@ export class SkillInvocationMessageComponent extends Box {
 				theme.fg("dim", ` (${keyText("app.tools.expand")} to expand)`);
 			this.addChild(new Text(line, 0, 0));
 		}
+	}
+
+	handleMouse(): void {
+		this.onAction?.();
 	}
 }

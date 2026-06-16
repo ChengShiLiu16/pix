@@ -7,9 +7,11 @@ import { getMarkdownTheme, theme } from "../theme/theme.ts";
  */
 export class UserMessageComponent extends Container {
 	private contentBox: Box;
+	private onAction?: () => void;
 
-	constructor(text: string, markdownTheme: MarkdownTheme = getMarkdownTheme()) {
+	constructor(text: string, markdownTheme: MarkdownTheme = getMarkdownTheme(), onAction?: () => void) {
 		super();
+		this.onAction = onAction;
 		this.contentBox = new Box(1, 1, (content: string) => theme.bg("userMessageBg", content));
 		this.contentBox.addChild(
 			new Markdown(
@@ -29,5 +31,9 @@ export class UserMessageComponent extends Container {
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		return formatUserMessageCardLines(lines, theme);
+	}
+
+	handleMouse(): void {
+		this.onAction?.();
 	}
 }

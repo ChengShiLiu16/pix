@@ -378,8 +378,8 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
-	private _currentPromptSnapshot?: WorkspaceSnapshotDetails;
-	private _promptSnapshots = new WeakMap<AgentMessage, WorkspaceSnapshotDetails>();
+	private _currentPromptSnapshot?: Promise<WorkspaceSnapshotDetails>;
+	private _promptSnapshots = new WeakMap<AgentMessage, Promise<WorkspaceSnapshotDetails>>();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -542,7 +542,7 @@ export class AgentSession {
 		if (event.type === "message_start" && event.message.role === "user") {
 			this._overflowRecoveryAttempted = false;
 			this._currentPromptSnapshot ??=
-				this._promptSnapshots.get(event.message) ?? (await this._capturePromptWorkspaceSnapshot());
+				this._promptSnapshots.get(event.message) ?? this._beginPromptWorkspaceSnapshot();
 			const messageText = this._getUserMessageText(event.message);
 			if (messageText) {
 				// Check steering queue first
@@ -587,7 +587,7 @@ export class AgentSession {
 					if (!this._currentPromptSnapshot) {
 						throw new Error("Missing workspace snapshot for user message");
 					}
-					this.sessionManager.appendCustomEntry(WORKSPACE_SNAPSHOT_CUSTOM_TYPE, this._currentPromptSnapshot);
+					this.sessionManager.appendCustomEntry(WORKSPACE_SNAPSHOT_CUSTOM_TYPE, await this._currentPromptSnapshot);
 				}
 				// Regular LLM message - persist as SessionMessageEntry
 				this.sessionManager.appendMessage(event.message);
@@ -1038,13 +1038,19 @@ export class AgentSession {
 		return captureWorkspaceSnapshot(this._cwd, this._getWorkspaceSnapshotRoot());
 	}
 
+	private _beginPromptWorkspaceSnapshot(): Promise<WorkspaceSnapshotDetails> {
+		const snapshot = this._capturePromptWorkspaceSnapshot();
+		snapshot.catch(() => {});
+		return snapshot;
+	}
+
 	private async _addToolTargetToCurrentSnapshot(toolName: string, args: Record<string, unknown>): Promise<void> {
 		if (toolName !== "edit" && toolName !== "write") return;
 		if (!this._currentPromptSnapshot) return;
 
 		const path = args.path;
 		if (typeof path !== "string" || path.length === 0) return;
-		await addPathToWorkspaceSnapshot(this._currentPromptSnapshot, resolveToCwd(path, this._cwd));
+		await addPathToWorkspaceSnapshot(await this._currentPromptSnapshot, resolveToCwd(path, this._cwd));
 	}
 
 	private async _handlePostAgentRun(): Promise<boolean> {
@@ -1181,7 +1187,7 @@ export class AgentSession {
 
 			// Build messages array (custom message if any, then user message)
 			messages = [];
-			this._currentPromptSnapshot = await this._capturePromptWorkspaceSnapshot();
+			this._currentPromptSnapshot = this._beginPromptWorkspaceSnapshot();
 
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -1359,7 +1365,7 @@ export class AgentSession {
 			timestamp: Date.now(),
 		} satisfies Message;
 		this.agent.steer(message);
-		this._promptSnapshots.set(message, await this._capturePromptWorkspaceSnapshot());
+		this._promptSnapshots.set(message, this._beginPromptWorkspaceSnapshot());
 	}
 
 	/**
@@ -1378,7 +1384,7 @@ export class AgentSession {
 			timestamp: Date.now(),
 		} satisfies Message;
 		this.agent.followUp(message);
-		this._promptSnapshots.set(message, await this._capturePromptWorkspaceSnapshot());
+		this._promptSnapshots.set(message, this._beginPromptWorkspaceSnapshot());
 	}
 
 	/**
@@ -2846,11 +2852,6 @@ export class AgentSession {
 	}> {
 		const oldLeafId = this.sessionManager.getLeafId();
 
-		// No-op if already at target
-		if (targetId === oldLeafId) {
-			return { cancelled: false };
-		}
-
 		// Model required for summarization
 		if (options.summarize && !this.model) {
 			throw new Error("No model available for summarization");
@@ -2859,6 +2860,12 @@ export class AgentSession {
 		const targetEntry = this.sessionManager.getEntry(targetId);
 		if (!targetEntry) {
 			throw new Error(`Entry ${targetId} not found`);
+		}
+
+		// User message targets mean "before this input", so the current leaf can still move.
+		const rewindsInput = targetEntry.type === "message" && targetEntry.message.role === "user";
+		if (targetId === oldLeafId && !rewindsInput) {
+			return { cancelled: false };
 		}
 
 		// Collect entries to summarize (from old leaf to common ancestor)
