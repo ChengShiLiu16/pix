@@ -88,6 +88,14 @@ interface MouseHit {
 	end: number; // exclusive
 }
 
+interface OverlayMouseHit {
+	component: Component;
+	startRow: number;
+	endRow: number;
+	col: number;
+	width: number;
+}
+
 function isMouseAware(c: Component | null): c is Component & { handleMouse: NonNullable<Component["handleMouse"]> } {
 	return c !== null && typeof c.handleMouse === "function";
 }
@@ -390,6 +398,8 @@ export class TUI extends Container {
 	private pendingAnchor: { fullIndex: number; screenRow: number } | null = null;
 	/** Mouse-aware component line ranges from the last render (full-content indices). */
 	private lastHits: MouseHit[] = [];
+	/** Mouse-aware overlay ranges from the last render, in screen coordinates. */
+	private lastOverlayHits: OverlayMouseHit[] = [];
 	/** Full (pre-window) rendered lines from the last render, for selection text extraction. */
 	private lastFullLines: string[] = [];
 	private removeMouseListener?: () => void;
@@ -428,8 +438,8 @@ export class TUI extends Container {
 		return this.appScroll;
 	}
 
-	/** Number of wheel-line steps per scroll-wheel notch. Keep this fine-grained; render coalescing handles speed. */
-	private static readonly WHEEL_STEP = 1;
+	/** Number of lines to scroll per wheel notch. */
+	private static readonly WHEEL_STEP = 4;
 	/** Trackpads can emit many SGR wheel events per gesture; cap accepted events to roughly one per frame. */
 	private static readonly MIN_WHEEL_INTERVAL_MS = 16;
 
@@ -653,7 +663,17 @@ export class TUI extends Container {
 	/** Map a click's screen row to the owning mouse-aware component and notify it. */
 	private dispatchClick(evt: MouseEvent): void {
 		// While an overlay is up, the transcript underneath is not interactive.
-		if (this.getTopmostVisibleOverlay()) return;
+		if (this.getTopmostVisibleOverlay()) {
+			for (let i = this.lastOverlayHits.length - 1; i >= 0; i--) {
+				const hit = this.lastOverlayHits[i];
+				if (evt.y >= hit.startRow && evt.y < hit.endRow && evt.x >= hit.col && evt.x < hit.col + hit.width) {
+					hit.component.handleMouse?.({ ...evt, x: evt.x - hit.col }, evt.y - hit.startRow);
+					this.requestRender();
+					return;
+				}
+			}
+			return;
+		}
 		const fullLineIndex = this.lastWindowTop + evt.y;
 		for (const hit of this.lastHits) {
 			if (fullLineIndex >= hit.start && fullLineIndex < hit.end) {
@@ -1367,11 +1387,12 @@ export class TUI extends Container {
 
 	/** Composite all overlays into content lines (sorted by focusOrder, higher = on top). */
 	private compositeOverlays(lines: string[], termWidth: number, termHeight: number): string[] {
+		this.lastOverlayHits = [];
 		if (this.overlayStack.length === 0) return lines;
 		const result = [...lines];
 
 		// Pre-render all visible overlays and calculate positions
-		const rendered: { overlayLines: string[]; row: number; col: number; w: number }[] = [];
+		const rendered: { component: Component; overlayLines: string[]; row: number; col: number; w: number }[] = [];
 		let minLinesNeeded = result.length;
 
 		const visibleEntries = this.overlayStack.filter((e) => this.isOverlayVisible(e));
@@ -1394,7 +1415,10 @@ export class TUI extends Container {
 			// Get final row/col with actual overlay height
 			const { row, col } = this.resolveOverlayLayout(options, overlayLines.length, termWidth, termHeight);
 
-			rendered.push({ overlayLines, row, col, w: width });
+			rendered.push({ component, overlayLines, row, col, w: width });
+			if (isMouseAware(component)) {
+				this.lastOverlayHits.push({ component, startRow: row, endRow: row + overlayLines.length, col, width });
+			}
 			minLinesNeeded = Math.max(minLinesNeeded, row + overlayLines.length);
 		}
 

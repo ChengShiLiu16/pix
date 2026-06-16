@@ -59,10 +59,10 @@ describe("TUI app-managed scroll", () => {
 		tui.start();
 		await term.waitForRender();
 
-		term.sendInput(WHEEL_UP); // step 1 -> top = 4 -> L4..L8
+		term.sendInput(WHEEL_UP); // step 4 -> top = 1 -> L1..L5
 		await term.waitForRender();
 		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
 
 		for (let i = 0; i < 4; i++) {
 			term.sendInput(WHEEL_UP);
@@ -84,10 +84,10 @@ describe("TUI app-managed scroll", () => {
 
 		tui.scrollBy(5); // jump to top
 		await term.waitForRender();
-		term.sendInput(WHEEL_DOWN); // -1 -> top 1 -> L1..L5
+		term.sendInput(WHEEL_DOWN); // -4 -> top 4 -> L4..L8
 		await term.waitForRender();
 		let view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
+		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
 
 		for (let i = 0; i < 4; i++) {
 			term.sendInput(WHEEL_DOWN);
@@ -114,7 +114,7 @@ describe("TUI app-managed scroll", () => {
 		await term.flush();
 
 		const view = term.getViewport().map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
 		tui.stop();
 	});
 
@@ -131,7 +131,7 @@ describe("TUI app-managed scroll", () => {
 		term.sendInput(WHEEL_UP);
 		await term.waitForRender();
 		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
 		tui.stop();
 	});
 
@@ -139,13 +139,13 @@ describe("TUI app-managed scroll", () => {
 		const term = new VirtualTerminal(10, 5);
 		const tui = new TUI(term, false, { appScroll: true });
 		const c = new TestComponent();
-		c.lines = makeLines(10);
+		c.lines = makeLines(20);
 		tui.addChild(c);
 		tui.start();
 		await term.waitForRender();
 
 		// A sustained gesture (events spaced past the rate-limit window) must move
-		// one line per event — the throttle collapses same-frame bursts only, it
+		// one wheel step per event — the throttle collapses same-frame bursts only, it
 		// must not drop legitimate sustained scrolling.
 		const gap = () => new Promise<void>((resolve) => setTimeout(resolve, 25));
 		for (let i = 0; i < 3; i++) {
@@ -154,7 +154,7 @@ describe("TUI app-managed scroll", () => {
 		}
 		await term.waitForRender();
 		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L2", "L3", "L4", "L5", "L6"]);
+		assert.deepStrictEqual(view, ["L3", "L4", "L5", "L6", "L7"]);
 		tui.stop();
 	});
 
@@ -174,7 +174,7 @@ describe("TUI app-managed scroll", () => {
 		assert.ok(!data.includes("\x1b[1L") && !data.includes("\x1b[1M"), "expected no viewport shift when idle");
 		const view = await term.flushAndGetViewport();
 		assert.ok(view[0].includes("▲"), "expected upper indicator when older content remains above");
-		assert.ok(!view[4].includes("▼"), "expected no lower indicator on the first step away from bottom");
+		assert.ok(view[4].includes("▼"), "expected lower indicator after a multi-line wheel step");
 		tui.stop();
 	});
 
@@ -193,10 +193,10 @@ describe("TUI app-managed scroll", () => {
 		await term.waitForRender();
 		const upData = term.takeWrites().join("");
 		const upClearLineCount = (upData.match(/\x1b\[2K/g) ?? []).length;
-		assert.ok(upData.includes("\x1b[1L"), "expected insert-line viewport shift when revealing older content");
+		assert.ok(upData.includes("\x1b[4L"), "expected insert-line viewport shift when revealing older content");
 		assert.ok(upClearLineCount < term.rows, "expected not to repaint the whole viewport");
 		const view = (await term.flushAndGetViewport()).map((l) => l.trim());
-		assert.deepStrictEqual(view, ["L4", "L5", "L6", "L7", "L8"]);
+		assert.deepStrictEqual(view, ["L1", "L2", "L3", "L4", "L5"]);
 		tui.stop();
 	});
 
@@ -497,6 +497,27 @@ describe("TUI click hit-testing", () => {
 		term.sendInput(clickAt(0, 2)); // screen row 0 -> fullLine 4 -> block localY 0
 		await term.waitForRender();
 		assert.deepStrictEqual(block.clicks, [{ localY: 0, x: 2 }]);
+		tui.stop();
+	});
+
+	it("routes clicks to mouse-aware overlays without routing through to the transcript", async () => {
+		const term = new VirtualTerminal(20, 8);
+		const tui = new TUI(term, false, { appScroll: true });
+		const block = new ClickBlock(3);
+		const overlay = new ClickBlock(2);
+		tui.addChild(block);
+		tui.start();
+		tui.showOverlay(overlay, { width: 6, row: 2, col: 5 });
+		await term.waitForRender();
+
+		term.sendInput(clickAt(3, 7));
+		await term.waitForRender();
+		assert.deepStrictEqual(overlay.clicks, [{ localY: 1, x: 2 }]);
+		assert.deepStrictEqual(block.clicks, []);
+
+		term.sendInput(clickAt(0, 0));
+		await term.waitForRender();
+		assert.deepStrictEqual(block.clicks, []);
 		tui.stop();
 	});
 });
