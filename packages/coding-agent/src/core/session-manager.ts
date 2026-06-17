@@ -136,6 +136,20 @@ export interface CustomMessageEntry<T = unknown> extends SessionEntryBase {
 	display: boolean;
 }
 
+/**
+ * Persisted leaf pointer. Recorded by durable navigations (e.g. revert) so the
+ * session head survives a reload instead of defaulting to the last entry.
+ *
+ * Not a conversation node: it is excluded from getEntries(), so it never reaches
+ * the tree view (getTree) or the LLM context (buildSessionContext). On reload,
+ * _buildIndex applies the latest leaf_move to restore the leaf position.
+ */
+export interface LeafMoveEntry extends SessionEntryBase {
+	type: "leaf_move";
+	/** Entry the leaf was moved to; null means before the first entry (root). */
+	targetId: string | null;
+}
+
 /** Session entry - has id/parentId for tree structure (returned by "read" methods in SessionManager) */
 export type SessionEntry =
 	| SessionMessageEntry
@@ -148,8 +162,8 @@ export type SessionEntry =
 	| LabelEntry
 	| SessionInfoEntry;
 
-/** Raw file entry (includes header) */
-export type FileEntry = SessionHeader | SessionEntry;
+/** Raw file entry (includes the header and non-conversation metadata entries) */
+export type FileEntry = SessionHeader | SessionEntry | LeafMoveEntry;
 
 /** Tree node for getTree() - defensive copy of session structure */
 export interface SessionTreeNode {
@@ -855,6 +869,12 @@ export class SessionManager {
 		this.leafId = null;
 		for (const entry of this.fileEntries) {
 			if (entry.type === "session") continue;
+			if (entry.type === "leaf_move") {
+				// Restore a persisted leaf position. The marker is metadata, not a
+				// conversation node: don't index it and don't advance the leaf to it.
+				this.leafId = entry.targetId;
+				continue;
+			}
 			this.byId.set(entry.id, entry);
 			this.leafId = entry.id;
 			if (entry.type === "label") {
@@ -905,7 +925,7 @@ export class SessionManager {
 		return this.sessionFile;
 	}
 
-	_persist(entry: SessionEntry): void {
+	_persist(entry: FileEntry): void {
 		if (!this.persist || !this.sessionFile) return;
 
 		const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
@@ -1180,7 +1200,8 @@ export class SessionManager {
 	 * change the leaf pointer. Entries cannot be modified or deleted.
 	 */
 	getEntries(): SessionEntry[] {
-		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session");
+		// leaf_move markers are file-level metadata, not conversation entries.
+		return this.fileEntries.filter((e): e is SessionEntry => e.type !== "session" && e.type !== "leaf_move");
 	}
 
 	/**
@@ -1252,6 +1273,33 @@ export class SessionManager {
 	 */
 	resetLeaf(): void {
 		this.leafId = null;
+	}
+
+	/**
+	 * Persist the current leaf position via a leaf_move marker so it survives a
+	 * reload. Use for durable navigations (revert), which also restore the
+	 * workspace — keeping the persisted head consistent with the files on disk.
+	 * Plain tree browsing should stay ephemeral via branch()/resetLeaf(), which
+	 * reset to the latest entry on reload.
+	 *
+	 * Points the in-memory leaf at targetId without making the marker itself the
+	 * leaf. targetId === null means "before the first entry" (revert to root).
+	 */
+	recordLeafMove(targetId: string | null): string {
+		if (targetId !== null && !this.byId.has(targetId)) {
+			throw new Error(`Entry ${targetId} not found`);
+		}
+		const entry: LeafMoveEntry = {
+			type: "leaf_move",
+			id: generateId(this.byId),
+			parentId: null,
+			timestamp: new Date().toISOString(),
+			targetId,
+		};
+		this.fileEntries.push(entry);
+		this.leafId = targetId;
+		this._persist(entry);
+		return entry.id;
 	}
 
 	/**

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import type { Stats } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, type Stats } from "node:fs";
 import {
 	chmod,
 	copyFile,
@@ -60,7 +60,8 @@ interface WorkspaceSnapshotManifest {
 	missing?: SnapshotMissingRecord[];
 }
 
-export interface WorkspaceSnapshotDetails {
+/** Legacy file-copy snapshot (still restorable for sessions created before the git-shadow rewrite). */
+interface WorkspaceSnapshotDetailsV1 {
 	version: 1;
 	id: string;
 	cwd: string;
@@ -69,6 +70,22 @@ export interface WorkspaceSnapshotDetails {
 	manifestPath: string;
 	capturedAt: string;
 }
+
+/** Git-shadow snapshot: a dangling tree object in a per-workspace shadow git repo. */
+interface WorkspaceSnapshotDetailsV2 {
+	version: 2;
+	/** The cwd the snapshot was captured from (informational; may be a subdirectory of the repo). */
+	cwd: string;
+	/** Git toplevel used as the shadow worktree for capture/restore (honors the repo-root .gitignore). */
+	worktree: string;
+	/** Absolute path to the per-repo shadow git dir that holds the snapshot objects. */
+	gitdir: string;
+	/** git tree hash for this snapshot; null when snapshots are unavailable (non-git workspace). */
+	tree: string | null;
+	capturedAt: string;
+}
+
+export type WorkspaceSnapshotDetails = WorkspaceSnapshotDetailsV1 | WorkspaceSnapshotDetailsV2;
 
 export interface WorkspaceRestoreResult {
 	restoredFiles: number;
@@ -87,6 +104,111 @@ function execGit(cwd: string, args: string[]): Promise<string | undefined> {
 			resolvePromise(error ? undefined : stdout);
 		});
 	});
+}
+
+function runGit(args: string[], opts?: { cwd?: string; env?: Record<string, string> }): Promise<{ code: number }> {
+	return new Promise((resolvePromise) => {
+		execFile(
+			"git",
+			args,
+			{
+				encoding: "utf8",
+				maxBuffer: 64 * 1024 * 1024,
+				cwd: opts?.cwd,
+				env: opts?.env ? { ...process.env, ...opts.env } : process.env,
+			},
+			(error) => {
+				const code = (error as (NodeJS.ErrnoException & { code?: number }) | null)?.code;
+				resolvePromise({ code: error ? (typeof code === "number" ? code : 1) : 0 });
+			},
+		);
+	});
+}
+
+interface ShadowGitResult {
+	code: number;
+	stdout: string;
+	stderr: string;
+}
+
+/** Run a shadow-git command (git dir separate from the worktree), returning exit code + output. */
+function execShadowGitResult(gitdir: string, worktree: string, args: string[]): Promise<ShadowGitResult> {
+	return new Promise((resolvePromise) => {
+		execFile(
+			"git",
+			["--git-dir", gitdir, "--work-tree", worktree, ...args],
+			{ encoding: "utf8", maxBuffer: 64 * 1024 * 1024, cwd: worktree },
+			(error, stdout, stderr) => {
+				const code = (error as (NodeJS.ErrnoException & { code?: number }) | null)?.code;
+				resolvePromise({
+					code: error ? (typeof code === "number" ? code : 1) : 0,
+					stdout: stdout ?? "",
+					stderr: stderr ?? "",
+				});
+			},
+		);
+	});
+}
+
+/** Run a shadow-git command, returning stdout or undefined on failure (best-effort callers). */
+async function execShadowGit(gitdir: string, worktree: string, args: string[]): Promise<string | undefined> {
+	const result = await execShadowGitResult(gitdir, worktree, args);
+	return result.code === 0 ? result.stdout : undefined;
+}
+
+const SHADOW_GIT_LOCK_RETRIES = 5;
+const SHADOW_GIT_LOCK_DELAY_MS = 60;
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+/** index.lock / ref-lock contention from a concurrent pix session sharing this per-repo shadow git. */
+function isGitLockError(stderr: string): boolean {
+	return /\.lock|another git process seems to be running/i.test(stderr);
+}
+
+/** Like execShadowGitResult, but retries briefly on lock contention (shared shadow repo, concurrent sessions). */
+async function execShadowGitWithLockRetry(gitdir: string, worktree: string, args: string[]): Promise<ShadowGitResult> {
+	let result = await execShadowGitResult(gitdir, worktree, args);
+	for (
+		let attempt = 1;
+		attempt < SHADOW_GIT_LOCK_RETRIES && result.code !== 0 && isGitLockError(result.stderr);
+		attempt++
+	) {
+		await delay(SHADOW_GIT_LOCK_DELAY_MS);
+		result = await execShadowGitResult(gitdir, worktree, args);
+	}
+	return result;
+}
+
+/** Resolve the git worktree root (toplevel) for a cwd, or undefined for a non-git workspace. */
+async function resolveGitWorkTreeRoot(cwd: string): Promise<string | undefined> {
+	const out = await execGit(cwd, ["rev-parse", "--show-toplevel"]);
+	const root = out?.trim();
+	return root ? resolvePath(root) : undefined;
+}
+
+/** Initialize the shadow git repo (idempotent). The git dir lives outside the worktree, so it is never snapshotted. */
+async function ensureShadowGit(gitdir: string, worktree: string): Promise<void> {
+	if (existsSync(join(gitdir, "HEAD"))) return;
+	await mkdir(gitdir, { recursive: true });
+	await runGit(["init", "--quiet"], { cwd: worktree, env: { GIT_DIR: gitdir, GIT_WORK_TREE: worktree } });
+	const config: Array<[string, string]> = [
+		["core.autocrlf", "false"],
+		["core.longpaths", "true"],
+		["core.symlinks", "true"],
+		["core.fsmonitor", "false"],
+	];
+	for (const [key, value] of config) {
+		await runGit(["--git-dir", gitdir, "config", key, value]);
+	}
+}
+
+/** Stable per-repo shadow git dir under baseDir, keyed by the git toplevel so all sessions of the same repo share one object store. */
+function workspaceShadowGitDir(baseDir: string, worktreeRoot: string): string {
+	const key = createHash("sha256").update(resolvePath(worktreeRoot)).digest("hex").slice(0, 16);
+	return join(resolvePath(baseDir), key);
 }
 
 function isInsidePath(childPath: string, parentPath: string): boolean {
@@ -223,70 +345,38 @@ async function recreateDirectory(absPath: string, mode: number): Promise<void> {
 
 export async function captureWorkspaceSnapshot(
 	cwdInput: string,
-	snapshotRootInput: string,
+	baseDirInput: string,
 ): Promise<WorkspaceSnapshotDetails> {
 	const cwd = resolvePath(cwdInput);
-	const snapshotRoot = resolvePath(snapshotRootInput);
-	const id = randomUUID();
-	const snapshotDir = join(snapshotRoot, id);
-	await mkdir(join(snapshotDir, "files"), { recursive: true });
+	const baseDir = resolvePath(baseDirInput);
+	const capturedAt = new Date().toISOString();
 
-	const gitPaths = await collectGitPaths(cwd, snapshotRoot);
-	const mode: SnapshotMode = gitPaths ? "git" : "filesystem";
-	const paths = gitPaths ?? (await collectFilesystemPaths(cwd, snapshotRoot));
-
-	const manifest: WorkspaceSnapshotManifest = {
-		version: 1,
-		cwd,
-		mode,
-		files: [],
-		symlinks: [],
-		directories: [],
-		missing: [],
-	};
-
-	for (const path of paths) {
-		let stat: Stats;
-		try {
-			stat = await lstat(path.absPath);
-		} catch {
-			continue;
-		}
-
-		if (stat.isDirectory()) {
-			manifest.directories.push({ type: "directory", path: path.relPath, mode: stat.mode & 0o777 });
-			continue;
-		}
-
-		if (stat.isSymbolicLink()) {
-			manifest.symlinks.push({ type: "symlink", path: path.relPath, target: await readlink(path.absPath) });
-			continue;
-		}
-
-		if (!stat.isFile()) continue;
-
-		const storagePath = snapshotFileStoragePath(snapshotDir, path.relPath);
-		await copyFile(path.absPath, storagePath.absPath);
-		manifest.files.push({
-			type: "file",
-			path: path.relPath,
-			mode: stat.mode & 0o777,
-			storagePath: storagePath.storedPath,
-		});
+	// opencode parity: snapshots are git-only and span the whole repository. Anchor the shadow
+	// worktree at the git toplevel (not cwd) so the repo-root .gitignore is honored even when pix
+	// is launched from a subdirectory — otherwise node_modules etc. would be snapshotted and a
+	// later revert's `git clean` would delete them.
+	const worktree = await resolveGitWorkTreeRoot(cwd);
+	if (!worktree) {
+		// Non-git workspace: record a placeholder (tree: null); restore is a no-op.
+		return { version: 2, cwd, worktree: cwd, gitdir: workspaceShadowGitDir(baseDir, cwd), tree: null, capturedAt };
 	}
+	// Key the shadow repo by the toplevel so all sessions of the same repo share one object store.
+	const gitdir = workspaceShadowGitDir(baseDir, worktree);
 
-	const manifestPath = join(snapshotDir, "manifest.json");
-	await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
-
-	return {
-		version: 1,
-		id,
-		cwd,
-		mode,
-		rootPath: snapshotDir,
-		manifestPath,
-		capturedAt: new Date().toISOString(),
-	};
+	try {
+		await ensureShadowGit(gitdir, worktree);
+		// `add --all` stages the whole worktree into the shadow index. It honors the worktree's
+		// .gitignore (so node_modules etc. stay out) and never adds the real .git directory.
+		const added = await execShadowGitWithLockRetry(gitdir, worktree, ["add", "--all"]);
+		if (added.code !== 0) {
+			return { version: 2, cwd, worktree, gitdir, tree: null, capturedAt };
+		}
+		const written = await execShadowGitWithLockRetry(gitdir, worktree, ["write-tree"]);
+		const tree = written.code === 0 ? written.stdout.trim() : "";
+		return { version: 2, cwd, worktree, gitdir, tree: tree || null, capturedAt };
+	} catch {
+		return { version: 2, cwd, worktree, gitdir, tree: null, capturedAt };
+	}
 }
 
 async function readManifest(path: string): Promise<WorkspaceSnapshotManifest> {
@@ -307,7 +397,21 @@ function parseManifest(raw: string): WorkspaceSnapshotManifest {
 
 export function isWorkspaceSnapshotDetails(value: unknown): value is WorkspaceSnapshotDetails {
 	if (!value || typeof value !== "object") return false;
-	const snapshot = value as WorkspaceSnapshotDetails;
+	const snapshot = value as {
+		version?: unknown;
+		cwd?: unknown;
+		worktree?: unknown;
+		gitdir?: unknown;
+		rootPath?: unknown;
+		manifestPath?: unknown;
+	};
+	if (snapshot.version === 2) {
+		return (
+			typeof snapshot.cwd === "string" &&
+			typeof snapshot.worktree === "string" &&
+			typeof snapshot.gitdir === "string"
+		);
+	}
 	return (
 		snapshot.version === 1 &&
 		typeof snapshot.cwd === "string" &&
@@ -316,7 +420,22 @@ export function isWorkspaceSnapshotDetails(value: unknown): value is WorkspaceSn
 	);
 }
 
+/** Whether a snapshot can actually restore the workspace (false for non-git placeholders). */
+export function isRestorableWorkspaceSnapshot(details: WorkspaceSnapshotDetails): boolean {
+	return details.version === 2 ? details.tree !== null : true;
+}
+
+/** Run git gc on the shadow repo to bound disk usage. Dangling snapshot trees older than the prune window are reclaimed. */
+export async function gcWorkspaceShadowGit(gitdir: string): Promise<void> {
+	const resolved = resolvePath(gitdir);
+	if (!existsSync(join(resolved, "HEAD"))) return;
+	await runGit(["--git-dir", resolved, "gc", "--prune=7.days", "--quiet"]);
+}
+
 export async function addPathToWorkspaceSnapshot(details: WorkspaceSnapshotDetails, pathInput: string): Promise<void> {
+	// v2 (git shadow) captures the entire worktree at snapshot time, so per-file bookkeeping is
+	// unnecessary. Out-of-worktree targets are intentionally not tracked (matches opencode).
+	if (details.version === 2) return;
 	const manifest = await readManifest(details.manifestPath);
 	const absolutePath = resolvePath(pathInput);
 	const cwdPath = relativeToCwd(absolutePath, manifest.cwd);
@@ -375,7 +494,56 @@ export async function addPathToWorkspaceSnapshot(details: WorkspaceSnapshotDetai
 	await writeManifest(details.manifestPath, manifest);
 }
 
+async function restoreGitShadowSnapshot(details: WorkspaceSnapshotDetailsV2): Promise<WorkspaceRestoreResult> {
+	if (!details.tree) {
+		return { restoredFiles: 0, restoredSymlinks: 0, removedPaths: 0 };
+	}
+	const worktree = resolvePath(details.worktree);
+	const gitdir = resolvePath(details.gitdir);
+	const splitLines = (value: string | undefined): string[] =>
+		value
+			?.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean) ?? [];
+
+	// Fail loudly if the snapshot tree is gone (e.g. reclaimed by `git gc`). We must NOT run a
+	// destructive `git clean` against a stale index when we cannot actually restore the tree.
+	if ((await execShadowGit(gitdir, worktree, ["cat-file", "-e", `${details.tree}^{tree}`])) === undefined) {
+		throw new Error(
+			`Workspace snapshot ${details.tree} is no longer available (it may have been garbage-collected).`,
+		);
+	}
+
+	// Best-effort "changed" count, gathered before mutating the worktree.
+	const changed = splitLines(await execShadowGit(gitdir, worktree, ["diff", "--name-only", details.tree, "--"]));
+
+	// Reset tracked files to the snapshot tree (restores them and removes tracked files that did not
+	// exist in the snapshot). Only proceed to clean if this succeeds, otherwise we would delete
+	// post-snapshot files without having restored anything.
+	const readTree = await execShadowGitWithLockRetry(gitdir, worktree, ["read-tree", "--reset", "-u", details.tree]);
+	if (readTree.code !== 0) {
+		throw new Error(`Failed to restore workspace snapshot: ${readTree.stderr.trim() || "git read-tree failed"}`);
+	}
+
+	// Count, then drop, files created after the snapshot. `-fd` (without `-x`) preserves gitignored
+	// paths (node_modules etc.). Counting after read-tree reflects exactly what clean will remove.
+	const removable = splitLines(await execShadowGit(gitdir, worktree, ["clean", "-nd"]));
+	const cleaned = await execShadowGitWithLockRetry(gitdir, worktree, ["clean", "-fd"]);
+	if (cleaned.code !== 0) {
+		throw new Error(`Failed to clean workspace after restore: ${cleaned.stderr.trim() || "git clean failed"}`);
+	}
+
+	return { restoredFiles: changed.length, restoredSymlinks: 0, removedPaths: removable.length };
+}
+
 export async function restoreWorkspaceSnapshot(details: WorkspaceSnapshotDetails): Promise<WorkspaceRestoreResult> {
+	if (details.version === 2) {
+		return restoreGitShadowSnapshot(details);
+	}
+	return restoreFilesystemSnapshot(details);
+}
+
+async function restoreFilesystemSnapshot(details: WorkspaceSnapshotDetailsV1): Promise<WorkspaceRestoreResult> {
 	const manifest = await readManifest(details.manifestPath);
 	const cwd = normalizePath(manifest.cwd);
 	const snapshotRoot = normalizePath(details.rootPath);

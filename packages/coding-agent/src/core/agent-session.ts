@@ -34,6 +34,7 @@ import {
 	resetApiProviders,
 	streamSimple,
 } from "@chengshiliu16/pix-ai";
+import { getAgentDir } from "../config.ts";
 import { theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
@@ -105,6 +106,8 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import {
 	addPathToWorkspaceSnapshot,
 	captureWorkspaceSnapshot,
+	gcWorkspaceShadowGit,
+	isRestorableWorkspaceSnapshot,
 	isWorkspaceSnapshotDetails,
 	restoreWorkspaceSnapshot,
 	WORKSPACE_SNAPSHOT_CUSTOM_TYPE,
@@ -1026,21 +1029,33 @@ export class AgentSession {
 		}
 	}
 
-	private _getWorkspaceSnapshotRoot(): string {
-		const sessionDir = this.sessionManager.getSessionDir();
-		if (sessionDir) {
-			return join(sessionDir, "workspace-snapshots");
-		}
-		return join(tmpdir(), "pix-workspace-snapshots", this.sessionId);
+	private _workspaceSnapshotGcScheduled = false;
+
+	private _getWorkspaceSnapshotBaseDir(): string {
+		// Base dir for the per-repo shadow git repos (capture keys them by the git toplevel, so
+		// sessions of the same repo dedupe). Persisted sessions keep them under the agent dir;
+		// ephemeral ones use a temp dir.
+		return this.sessionManager.isPersisted()
+			? join(getAgentDir(), "workspace-snapshots")
+			: join(tmpdir(), "pix-workspace-snapshots");
 	}
 
 	private async _capturePromptWorkspaceSnapshot(): Promise<WorkspaceSnapshotDetails> {
-		return captureWorkspaceSnapshot(this._cwd, this._getWorkspaceSnapshotRoot());
+		return captureWorkspaceSnapshot(this._cwd, this._getWorkspaceSnapshotBaseDir());
 	}
 
 	private _beginPromptWorkspaceSnapshot(): Promise<WorkspaceSnapshotDetails> {
 		const snapshot = this._capturePromptWorkspaceSnapshot();
 		snapshot.catch(() => {});
+		// Bound disk usage: run git gc on the shadow repo once per session, after the first
+		// capture settles (so it does not race the init/add), fire-and-forget. Use the gitdir the
+		// capture actually resolved (keyed by the git toplevel).
+		if (!this._workspaceSnapshotGcScheduled) {
+			this._workspaceSnapshotGcScheduled = true;
+			void snapshot
+				.then((details) => (details.version === 2 ? gcWorkspaceShadowGit(details.gitdir) : undefined))
+				.catch(() => {});
+		}
 		return snapshot;
 	}
 
@@ -3004,6 +3019,11 @@ export class AgentSession {
 				if (label) {
 					this.sessionManager.appendLabelChange(summaryId, label);
 				}
+			} else if (options.restoreWorkspace) {
+				// Durable navigation (revert): persist the leaf so it survives a reload,
+				// keeping the session head consistent with the restored workspace.
+				// Plain tree browsing skips this and stays ephemeral (branch/resetLeaf below).
+				this.sessionManager.recordLeafMove(newLeafId);
 			} else if (newLeafId === null) {
 				// No summary, navigating to root - reset leaf
 				this.sessionManager.resetLeaf();
@@ -3046,11 +3066,11 @@ export class AgentSession {
 		if (entry?.type !== "custom" || entry.customType !== WORKSPACE_SNAPSHOT_CUSTOM_TYPE) {
 			return undefined;
 		}
-		if (!isWorkspaceSnapshotDetails(entry.data)) {
+		if (!isWorkspaceSnapshotDetails(entry.data) || !isRestorableWorkspaceSnapshot(entry.data)) {
 			return undefined;
 		}
 		const restored = await restoreWorkspaceSnapshot(entry.data);
-		return { ...restored, mode: entry.data.mode };
+		return { ...restored, mode: entry.data.version === 2 ? "git" : entry.data.mode };
 	}
 
 	/**
