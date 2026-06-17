@@ -1,0 +1,10 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="pix">
+  <defs>
+    <linearGradient id="pix-g" x1="60" y1="80" x2="196" y2="188" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8A5CF6"/><stop offset=".5" stop-color="#5A8CF0"/><stop offset="1" stop-color="#22C6CC"/>
+    </linearGradient>
+  </defs>
+  <rect x="60" y="80" width="136" height="18" rx="9" fill="url(#pix-g)"/>
+  <path d="M81.9 100.2 C103.1 137.0 138.0 170.4 173.9 188.2 L178.1 183.8 C158.8 148.8 123.8 115.3 86.1 95.8 Z" fill="url(#pix-g)"/>
+  <path d="M169.9 95.8 C132.2 115.3 97.2 148.8 77.9 183.8 L82.1 188.2 C118.0 170.4 152.9 137.0 174.1 100.2 Z" fill="url(#pix-g)"/>
+</svg>
