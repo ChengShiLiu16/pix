@@ -1126,6 +1126,14 @@ export function extractSegments(
 			const w = graphemeWidth(segment);
 
 			if (currentCol < beforeEnd) {
+				// 宽字符跨越 beforeEnd 边界时，不要把整个宽字符算入 before，
+				// 否则 beforeWidth 会超出 beforeEnd，导致 overlay 起点右移。
+				// 该跨越字符位于 overlay 覆盖区域内，直接丢弃。
+				if (currentCol + w > beforeEnd) {
+					currentCol += w;
+					if (afterLen <= 0 ? currentCol >= beforeEnd : currentCol >= afterEnd) break;
+					continue;
+				}
 				if (pendingAnsiBefore) {
 					before += pendingAnsiBefore;
 					pendingAnsiBefore = "";

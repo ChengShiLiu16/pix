@@ -563,14 +563,17 @@ export class TUI extends Container {
 		}
 		if (evt.shift) return { consume: true };
 		if (evt.wheel) {
-			// Only vertical wheel scrolls. Horizontal wheel (left/right) is consumed but
-			// ignored: pix has no horizontal scroll, and treating it as vertical turned
-			// diagonal trackpad gestures into up/down jitter.
-			if (evt.wheel === "up" || evt.wheel === "down") {
-				const now = performance.now();
-				if (now - this.lastAcceptedWheelAt >= TUI.MIN_WHEEL_INTERVAL_MS) {
-					this.lastAcceptedWheelAt = now;
-					this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
+			// 有 modal overlay 显示时禁止滚动其下方内容（与点击时不开始选择一致）
+			if (!this.getTopmostVisibleOverlay()) {
+				// Only vertical wheel scrolls. Horizontal wheel (left/right) is consumed but
+				// ignored: pix has no horizontal scroll, and treating it as vertical turned
+				// diagonal trackpad gestures into up/down jitter.
+				if (evt.wheel === "up" || evt.wheel === "down") {
+					const now = performance.now();
+					if (now - this.lastAcceptedWheelAt >= TUI.MIN_WHEEL_INTERVAL_MS) {
+						this.lastAcceptedWheelAt = now;
+						this.scrollBy(evt.wheel === "up" ? TUI.WHEEL_STEP : -TUI.WHEEL_STEP);
+					}
 				}
 			}
 			return { consume: true };
