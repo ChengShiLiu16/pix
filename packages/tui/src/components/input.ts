@@ -36,6 +36,12 @@ export class Input implements Component, Focusable {
 	// Undo support
 	private undoStack = new UndoStack<InputState>();
 
+	/** 空值时显示的占位文字（仅在该 Input 未聚焦时渲染） */
+	placeholder: string = "";
+
+	/** 渲染在内容前的固定前缀（默认 "> "） */
+	prefix: string = "> ";
+
 	getValue(): string {
 		return this.value;
 	}
@@ -377,11 +383,19 @@ export class Input implements Component, Focusable {
 
 	render(width: number): string[] {
 		// Calculate visible window
-		const prompt = "> ";
-		const availableWidth = width - prompt.length;
+		const prompt = this.prefix;
+		const availableWidth = width - visibleWidth(prompt);
 
 		if (availableWidth <= 0) {
 			return [prompt];
+		}
+
+		// 空值且未聚焦时显示占位文字
+		if (this.value.length === 0 && this.placeholder && !this.focused) {
+			const placeholderText = `\x1b[2m${this.placeholder}\x1b[22m`;
+			const visualLength = visibleWidth(this.placeholder);
+			const padding = " ".repeat(Math.max(0, availableWidth - visualLength));
+			return [prompt + placeholderText + padding];
 		}
 
 		let visibleText = "";

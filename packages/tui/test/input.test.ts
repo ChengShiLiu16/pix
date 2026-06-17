@@ -81,6 +81,35 @@ describe("Input component", () => {
 			assert.ok(line);
 			assert.ok(visibleWidth(line) <= width);
 		});
+
+		it("renders placeholder when empty and not focused", () => {
+			const input = new Input();
+			input.placeholder = "输入你的回复";
+			input.focused = false;
+
+			const [line] = input.render(40);
+			assert.ok(line.includes("输入你的回复"), "placeholder should be rendered when empty and not focused");
+			assert.ok(visibleWidth(line) <= 40);
+		});
+
+		it("does not render placeholder when focused", () => {
+			const input = new Input();
+			input.placeholder = "输入你的回复";
+			input.focused = true;
+
+			const [line] = input.render(40);
+			assert.ok(!line.includes("输入你的回复"), "placeholder should not be rendered when focused");
+		});
+
+		it("does not render placeholder when it has a value", () => {
+			const input = new Input();
+			input.placeholder = "输入你的回复";
+			input.setValue("hello");
+			input.focused = false;
+
+			const [line] = input.render(40);
+			assert.ok(!line.includes("输入你的回复"), "placeholder should not be rendered when there is a value");
+		});
 	});
 
 	describe("Kill ring", () => {

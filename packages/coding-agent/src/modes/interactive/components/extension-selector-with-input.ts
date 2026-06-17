@@ -92,6 +92,7 @@ export class ExtensionSelectorWithInputComponent extends Container implements Fo
 
 		this.customInput = new Input();
 		this.customInput.focused = false;
+		this.customInput.placeholder = this.customInputPlaceholder;
 
 		this.listContainer = new Container();
 		this.addChild(this.listContainer);
@@ -122,15 +123,13 @@ export class ExtensionSelectorWithInputComponent extends Container implements Fo
 
 		for (let i = 0; i < this.options.length; i++) {
 			if (this.isCustomInputRow(i)) {
-				// 自定义输入行：显示标签 + 内嵌 Input
+				// 自定义输入行：直接使用内嵌 Input 占整行，
+				// 通过 Input.prefix 体现选中箭头（与其它选项行的“→ ”一致），
+				// 避免 Container 垂直堆叠导致箭头与输入框分行。
 				const isSelected = i === this.selectedIndex;
-				const prefix = isSelected ? theme.fg("accent", "→ ") : "  ";
-				const labelText = isSelected ? theme.fg("accent", this.options[i]) : theme.fg("text", this.options[i]);
-
-				const row = new Container();
-				row.addChild(new Text(`${prefix}${labelText} `, 0, 0));
-				row.addChild(this.customInput);
-				this.listContainer.addChild(row);
+				// 前缀多一个空格，对齐其它选项行 Text 的 paddingX=1 左缩进
+				this.customInput.prefix = isSelected ? ` ${theme.fg("accent", "→ ")}` : "   ";
+				this.listContainer.addChild(this.customInput);
 
 				// 更新 Input focus 状态
 				this.customInput.focused = this._focused && isSelected;
@@ -182,10 +181,8 @@ export class ExtensionSelectorWithInputComponent extends Container implements Fo
 				const value = this.customInput.getValue().trim();
 				if (value.length > 0) {
 					this.onSelectCallback({ customValue: value, cancelled: false });
-				} else {
-					// 输入为空视为取消
-					this.onSelectCallback({ cancelled: true });
 				}
+				// 输入为空时不提交、不取消，停留在原地等待输入；取消统一走 Esc
 			} else {
 				this.onSelectCallback({ optionIndex: this.selectedIndex, cancelled: false });
 			}
