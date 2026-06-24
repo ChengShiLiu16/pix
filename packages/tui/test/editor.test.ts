@@ -79,16 +79,24 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "first");
 		});
 
-		it("returns to empty editor on Down arrow after browsing history", () => {
+		it("jumps to start before entering history from a non-empty draft", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("prompt");
+			editor.setText("draft");
+			editor.handleInput("\x1b[D");
+			editor.handleInput("\x1b[D");
 
-			editor.handleInput("\x1b[A"); // Up - shows "prompt"
+			editor.handleInput("\x1b[A"); // Up - jumps to start before history browsing
+			assert.strictEqual(editor.getText(), "draft");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
+
+			editor.handleInput("\x1b[A"); // Up at start - shows "prompt"
 			assert.strictEqual(editor.getText(), "prompt");
 
-			editor.handleInput("\x1b[B"); // Down - clears editor
-			assert.strictEqual(editor.getText(), "");
+			editor.handleInput("\x1b[B"); // Down - restores draft
+			assert.strictEqual(editor.getText(), "draft");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 		});
 
 		it("navigates forward through history with Down arrow", () => {
@@ -97,8 +105,10 @@ describe("Editor component", () => {
 			editor.addToHistory("first");
 			editor.addToHistory("second");
 			editor.addToHistory("third");
+			editor.setText("draft");
 
 			// Go to oldest
+			editor.handleInput("\x1b[A"); // start of draft
 			editor.handleInput("\x1b[A"); // third
 			editor.handleInput("\x1b[A"); // second
 			editor.handleInput("\x1b[A"); // first
@@ -110,8 +120,8 @@ describe("Editor component", () => {
 			editor.handleInput("\x1b[B"); // third
 			assert.strictEqual(editor.getText(), "third");
 
-			editor.handleInput("\x1b[B"); // empty
-			assert.strictEqual(editor.getText(), "");
+			editor.handleInput("\x1b[B"); // draft
+			assert.strictEqual(editor.getText(), "draft");
 		});
 
 		it("exits history mode when typing a character", () => {
@@ -122,7 +132,7 @@ describe("Editor component", () => {
 			editor.handleInput("\x1b[A"); // Up - shows "old prompt"
 			editor.handleInput("x"); // Type a character - exits history mode
 
-			assert.strictEqual(editor.getText(), "old promptx");
+			assert.strictEqual(editor.getText(), "xold prompt");
 		});
 
 		it("exits history mode on setText", () => {
@@ -185,32 +195,20 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "first");
 		});
 
-		it("moves the cursor within a draft when it is off the buffer end", () => {
+		it("uses cursor movement instead of history when editor has content", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("history item");
-			editor.setText("line1\nline2"); // cursor at the buffer end
+			editor.setText("line1\nline2");
 
-			editor.handleInput("\x1b[D"); // Left - leave the buffer end (edit intent)
-			editor.handleInput("\x1b[A"); // Up - now moves the cursor up, not history
+			// Cursor is at end of line2, Up should move to line1
+			editor.handleInput("\x1b[A"); // Up - cursor movement
 
-			assert.strictEqual(editor.getText(), "line1\nline2"); // unchanged, not history
-			assert.strictEqual(editor.getCursor().line, 0);
-		});
+			// Insert character to verify cursor position
+			editor.handleInput("X");
 
-		it("enters history from a multi-line draft when the cursor is at the buffer end", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-
-			editor.addToHistory("history item");
-			editor.setText("draft line1\ndraft line2"); // cursor at the buffer end
-
-			// At the buffer end, Up reaches history in one keystroke (no climbing)
-			// and stashes the draft.
-			editor.handleInput("\x1b[A");
-			assert.strictEqual(editor.getText(), "history item");
-
-			editor.handleInput("\x1b[B"); // Down past newest - restore the draft
-			assert.strictEqual(editor.getText(), "draft line1\ndraft line2");
+			// X should be inserted in line1, not replace with history
+			assert.strictEqual(editor.getText(), "line1X\nline2");
 		});
 
 		it("limits history to 100 entries", () => {
@@ -234,98 +232,55 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.getText(), "prompt 5");
 		});
 
-		it("switches to older history on Up from a multi-line entry without climbing", () => {
+		it("places cursor at start after browsing history upward", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
 			editor.addToHistory("older entry");
 			editor.addToHistory("line1\nline2\nline3");
 
-			editor.handleInput("\x1b[A"); // Up - recall multi-line (cursor at bottom)
+			editor.handleInput("\x1b[A"); // Up - shows multi-line entry at start
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 
-			// While browsing, Up switches entries regardless of cursor position -
-			// one keystroke, no climbing through the lines first.
-			editor.handleInput("\x1b[A");
+			editor.handleInput("\x1b[A"); // Up again - immediately navigates to older entry
 			assert.strictEqual(editor.getText(), "older entry");
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 		});
 
-		it("switches to newer history on Down from a multi-line entry without climbing", () => {
+		it("places cursor at end after browsing history downward", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
+			editor.addToHistory("older entry");
 			editor.addToHistory("line1\nline2\nline3");
 			editor.addToHistory("newer entry");
 
-			editor.handleInput("\x1b[A"); // Up - "newer entry"
-			editor.handleInput("\x1b[A"); // Up - "line1\nline2\nline3" (cursor bottom)
-			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
+			editor.handleInput("\x1b[A"); // newer entry
+			editor.handleInput("\x1b[A"); // multi-line entry
+			editor.handleInput("\x1b[A"); // older entry
 
-			// Down switches to the newer entry in one keystroke.
-			editor.handleInput("\x1b[B");
+			editor.handleInput("\x1b[B"); // Down - shows multi-line entry at end
+			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
+			assert.deepStrictEqual(editor.getCursor(), { line: 2, col: 5 });
+
+			editor.handleInput("\x1b[B"); // Down again - immediately navigates to newer entry
 			assert.strictEqual(editor.getText(), "newer entry");
 		});
 
-		it("moves between lines (not switch) once the cursor leaves the buffer end", () => {
+		it("allows opposite-direction cursor movement within multi-line history entry", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 
-			editor.addToHistory("older entry");
 			editor.addToHistory("line1\nline2\nline3");
 
-			editor.handleInput("\x1b[A"); // recall multi-line (cursor at buffer end)
-			editor.handleInput("\x1b[D"); // Left - cursor leaves the end (edit intent)
+			editor.handleInput("\x1b[A"); // Up - shows entry at start
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 
-			// Off the end, Up moves up a line within the entry instead of switching.
-			editor.handleInput("\x1b[A"); // -> line 1, still same entry
+			editor.handleInput("\x1b[B"); // Down - cursor moves to line2
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
-			assert.strictEqual(editor.getCursor().line, 1);
-		});
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 0 });
 
-		it("resumes switching once the cursor is back at the buffer end", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-
-			editor.addToHistory("older entry");
-			editor.addToHistory("line1\nline2\nline3");
-
-			editor.handleInput("\x1b[A"); // recall (cursor at buffer end)
-			editor.handleInput("\x1b[D"); // Left - leave the end
-			editor.handleInput("\x1b[A"); // Up - move to line 1 (editing nav)
+			editor.handleInput("\x1b[A"); // Up - cursor moves back to line1
 			assert.strictEqual(editor.getText(), "line1\nline2\nline3");
-
-			// Move back down: lands on the last line, then snaps to the buffer end.
-			editor.handleInput("\x1b[B"); // -> line 2
-			editor.handleInput("\x1b[B"); // -> snap to buffer end (last line, end)
-			assert.deepStrictEqual(editor.getCursor(), { line: 2, col: "line3".length });
-			// Now at the buffer end: Up switches to the older entry in one press.
-			editor.handleInput("\x1b[A");
-			assert.strictEqual(editor.getText(), "older entry");
-		});
-
-		it("stashes and restores a typed draft across history browsing", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-
-			editor.addToHistory("history entry");
-			editor.setText("my unsent draft");
-
-			editor.handleInput("\x1b[A"); // Up - enter history, stash the draft
-			assert.strictEqual(editor.getText(), "history entry");
-
-			editor.handleInput("\x1b[B"); // Down past newest - restore the draft
-			assert.strictEqual(editor.getText(), "my unsent draft");
-		});
-
-		it("preserves a multi-line pasted draft after browsing history", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-
-			editor.addToHistory("history entry");
-			const draft = "pasted A\npasted B\npasted C";
-			editor.setText(draft); // cursor lands at the buffer end
-
-			// From the buffer end, a single Up reaches history (no climbing) and
-			// the draft is stashed, never lost.
-			editor.handleInput("\x1b[A");
-			assert.strictEqual(editor.getText(), "history entry");
-
-			editor.handleInput("\x1b[B"); // back down - restore the full draft
-			assert.strictEqual(editor.getText(), draft);
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 0 });
 		});
 	});
 
@@ -2305,6 +2260,65 @@ describe("Editor component", () => {
 			assert.strictEqual(editor.isShowingAutocomplete(), true);
 		});
 
+		it("re-queries the autocomplete picker when the cursor moves back into the command name", async () => {
+			// Regression for earendil-works/pi#5496: arrowing left out of a slash
+			// command's argument region must re-query the picker, not leave the
+			// stale argument list showing. Before the fix, moveCursor() never
+			// called updateAutocomplete(), so `/cmd ` (argument menu) + Left kept
+			// displaying the arguments against a `/cmd` prefix — and a Tab there
+			// would concatenate the stale suggestion onto the partial command name.
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+
+			const mockProvider: AutocompleteProvider = {
+				getSuggestions: async (lines, _cursorLine, cursorCol) => {
+					const before = (lines[0] || "").slice(0, cursorCol);
+					if (!before.startsWith("/")) return null;
+					// Past the command name (a space before the cursor): offer arguments.
+					if (before.includes(" ")) {
+						return {
+							items: [
+								{ value: "repo", label: "repo" },
+								{ value: "message", label: "message" },
+								{ value: "help", label: "help" },
+							],
+							prefix: before.slice(before.indexOf(" ") + 1),
+						};
+					}
+					// Inside the command name: offer the command name only.
+					return { items: [{ value: "cmd", label: "cmd" }], prefix: before };
+				},
+				applyCompletion,
+			};
+
+			editor.setAutocompleteProvider(mockProvider);
+
+			// Type `/cmd ` so the picker ends up showing the argument list.
+			for (const ch of "/cmd ") {
+				editor.handleInput(ch);
+				await flushAutocomplete();
+			}
+			assert.strictEqual(editor.getText(), "/cmd ");
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+			const atArg = editor
+				.render(80)
+				.map((l) => stripVTControlCharacters(l))
+				.join("\n");
+			assert.ok(atArg.includes("repo"), "argument menu should be visible at `/cmd `");
+
+			// Arrow Left back into the command name (`/cmd`).
+			editor.handleInput("\x1b[D");
+			await flushAutocomplete();
+
+			// The picker must have re-queried: the stale argument items are gone
+			// (replaced by the command-name suggestion, or the picker closed).
+			const afterMove = editor
+				.render(80)
+				.map((l) => stripVTControlCharacters(l))
+				.join("\n");
+			assert.ok(!afterMove.includes("repo"), "stale argument menu must not survive the cursor move");
+			assert.ok(!afterMove.includes("message"), "stale argument menu must not survive the cursor move");
+		});
+
 		it("debounces # autocomplete while typing", async () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
 			let suggestionCalls = 0;
@@ -2336,6 +2350,58 @@ describe("Editor component", () => {
 
 			assert.strictEqual(suggestionCalls, 1);
 			assert.strictEqual(editor.isShowingAutocomplete(), true);
+		});
+
+		it("debounces custom triggerCharacters autocomplete while typing", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let suggestionCalls = 0;
+
+			editor.setAutocompleteProvider({
+				triggerCharacters: ["$"],
+				getSuggestions: async (lines, _cursorLine, cursorCol) => {
+					suggestionCalls += 1;
+					const prefix = (lines[0] || "").slice(0, cursorCol);
+					return { items: [{ value: "$skill-name", label: "skill-name" }], prefix };
+				},
+				applyCompletion,
+			});
+
+			editor.handleInput("$");
+			editor.handleInput("s");
+			editor.handleInput("k");
+
+			assert.strictEqual(suggestionCalls, 0);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			await flushAutocomplete();
+
+			assert.strictEqual(suggestionCalls, 1);
+			assert.strictEqual(editor.isShowingAutocomplete(), true);
+		});
+
+		it("resets custom triggerCharacters when provider changes", async () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			let suggestionCalls = 0;
+
+			editor.setAutocompleteProvider({
+				triggerCharacters: ["$"],
+				getSuggestions: async () => ({ items: [{ value: "$skill-name", label: "skill-name" }], prefix: "$" }),
+				applyCompletion,
+			});
+			editor.setAutocompleteProvider({
+				getSuggestions: async () => {
+					suggestionCalls += 1;
+					return { items: [{ value: "$skill-name", label: "skill-name" }], prefix: "$" };
+				},
+				applyCompletion,
+			});
+
+			editor.handleInput("$");
+			editor.handleInput("s");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			await flushAutocomplete();
+
+			assert.strictEqual(suggestionCalls, 0);
+			assert.strictEqual(editor.isShowingAutocomplete(), false);
 		});
 
 		it("aborts active @ autocomplete when typing continues", async () => {
@@ -3980,62 +4046,6 @@ describe("Editor component", () => {
 			editor.handleInput("\r");
 
 			assert.strictEqual(submitted, pastedText);
-		});
-	});
-
-	describe("Mouse click to move cursor", () => {
-		const click = (x: number) =>
-			({ x, y: 0, action: "up", button: "left", shift: false, alt: false, ctrl: false }) as const;
-
-		it("moves the cursor to the clicked column on a single line", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-			editor.setText("hello world");
-			editor.render(80);
-
-			editor.handleMouse(click(6), 1); // row 0 is the top border, text starts at row 1
-
-			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 6 });
-		});
-
-		it("clamps the cursor to end of line when clicking past the text", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-			editor.setText("hi");
-			editor.render(80);
-
-			editor.handleMouse(click(40), 1);
-
-			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
-		});
-
-		it("resolves the logical line when clicking a lower row", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-			editor.setText("abc\ndefgh");
-			editor.render(80);
-
-			editor.handleMouse(click(3), 2); // row 2 -> second logical line
-
-			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 3 });
-		});
-
-		it("ignores clicks on the top border row", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-			editor.setText("hello");
-			editor.render(80);
-			editor.handleMouse(click(2), 1); // place cursor at col 2 first
-			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
-
-			editor.handleMouse(click(4), 0); // border row -> no change
-
-			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
-		});
-
-		it("snaps to the nearer grapheme edge", () => {
-			const editor = new Editor(createTestTUI(), defaultEditorTheme);
-			editor.setText("abcd");
-			editor.render(80);
-
-			editor.handleMouse(click(2), 1); // exactly on 'c' left edge -> col 2
-			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
 		});
 	});
 });

@@ -4,7 +4,7 @@ import {
 	type Model,
 	streamSimple,
 	type UserMessage,
-} from "@chengshiliu16/pix-ai";
+} from "@chengshiliu16/pix-ai/base";
 import { runAgentLoop } from "../agent-loop.ts";
 import type {
 	AgentContext,
@@ -17,12 +17,7 @@ import type {
 	ThinkingLevel,
 } from "../types.ts";
 import { collectEntriesForBranchSummary, generateBranchSummary } from "./compaction/branch-summarization.ts";
-import {
-	compact,
-	DEFAULT_COMPACTION_SETTINGS,
-	prepareCompaction,
-	resolveCompactionSettings,
-} from "./compaction/compaction.ts";
+import { compact, DEFAULT_COMPACTION_SETTINGS, prepareCompaction } from "./compaction/compaction.ts";
 import { convertToLlm } from "./messages.ts";
 import { formatPromptTemplateInvocation } from "./prompt-templates.ts";
 import { formatSkillInvocation } from "./skills.ts";
@@ -721,8 +716,7 @@ export class AgentHarness<
 			const auth = await this.getApiKeyAndHeaders?.(model);
 			if (!auth) throw new AgentHarnessError("auth", "No auth available for compaction");
 			const branchEntries = await this.session.getBranch();
-			const compactionSettings = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, model.contextWindow ?? 0);
-			const preparationResult = prepareCompaction(branchEntries, compactionSettings);
+			const preparationResult = prepareCompaction(branchEntries, DEFAULT_COMPACTION_SETTINGS);
 			if (!preparationResult.ok) throw preparationResult.error;
 			const preparation = preparationResult.value;
 			if (!preparation) throw new AgentHarnessError("compaction", "Nothing to compact");

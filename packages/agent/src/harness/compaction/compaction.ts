@@ -1,5 +1,11 @@
-import type { AssistantMessage, ImageContent, Model, TextContent, Usage } from "@chengshiliu16/pix-ai";
-import { completeSimple } from "@chengshiliu16/pix-ai";
+import {
+	type AssistantMessage,
+	completeSimple,
+	type ImageContent,
+	type Model,
+	type TextContent,
+	type Usage,
+} from "@chengshiliu16/pix-ai/base";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
 import {
 	convertToLlm,
@@ -18,6 +24,8 @@ import {
 	safeJsonStringifyForTokens,
 	serializeConversation,
 } from "./utils.ts";
+
+export { safeJsonStringifyForTokens, serializeConversation } from "./utils.ts";
 
 /** File-operation details stored on generated compaction entries. */
 export interface CompactionDetails {
@@ -156,13 +164,11 @@ function getLastAssistantUsageInfo(messages: AgentMessage[]): { usage: Usage; in
 }
 
 /** Estimate context tokens for messages using provider usage when available. */
-export function estimateContextTokens(messages: AgentMessage[], baselineTokens = 0): ContextUsageEstimate {
+export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEstimate {
 	const usageInfo = getLastAssistantUsageInfo(messages);
 
 	if (!usageInfo) {
-		// No usage data (first turn / persistent errors): fold in the fixed
-		// baseline (system prompt + tool schemas) the provider would also count.
-		let estimated = baselineTokens;
+		let estimated = 0;
 		for (const message of messages) {
 			estimated += estimateTokens(message);
 		}
@@ -194,20 +200,9 @@ export function shouldCompact(contextTokens: number, contextWindow: number, sett
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
 
-/**
- * Clamp compaction settings into a window-safe band.
- *
- * The threshold is `contextWindow - reserveTokens`, and after compaction the
- * retained tail is up to `keepRecentTokens`. On small-context models the
- * absolute defaults (reserve 16384, keepRecent 20000) can make the retained
- * tail exceed the threshold (e.g. window=32768 → threshold=16384 <
- * keepRecent=20000), so compaction immediately re-triggers without progress.
- * This clamps both so the tail can never exceed the threshold; large windows
- * pass the defaults through unchanged. Idempotent; no-op when window <= 0.
- */
+/** Clamp compaction settings to fit the model context window. */
 export function resolveCompactionSettings(settings: CompactionSettings, contextWindow: number): CompactionSettings {
 	if (contextWindow <= 0) return settings;
-	// Math.min outermost: when hi < lo (tiny windows) this yields hi, not lo.
 	const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 	const reserveTokens = clamp(settings.reserveTokens, 4096, Math.floor(contextWindow * 0.25));
 	const maxKeep = Math.floor((contextWindow - reserveTokens) * 0.6);
@@ -226,8 +221,6 @@ export function estimateTextTokens(text: string): number {
 	let cjk = 0;
 	for (const ch of text) {
 		const c = ch.codePointAt(0) ?? 0;
-		// CJK ideographs/punctuation/kana (0x3000-0x9fff), Hangul (0xac00-0xd7af),
-		// fullwidth & halfwidth forms (0xff00-0xffef).
 		if ((c >= 0x3000 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef)) {
 			cjk++;
 		}
@@ -249,6 +242,8 @@ export function estimateTokens(message: AgentMessage): number {
 				for (const block of content) {
 					if (block.type === "text" && block.text) {
 						tokens += estimateTextTokens(block.text);
+					} else if (block.type === "image") {
+						tokens += 1200;
 					}
 				}
 			}
@@ -413,7 +408,7 @@ export function findCutPoint(
 	};
 }
 
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 
@@ -489,47 +484,6 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
-// Used instead of UPDATE_SUMMARIZATION_PROMPT once the previous summary itself
-// grows large, so summaries do not grow monotonically across compactions until
-// they consume the reserve.
-const COMPACT_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags. The existing summary has grown large and MUST be compacted while merging in the new messages.
-
-RULES:
-- PRESERVE the Goal, Constraints & Preferences, Key Decisions, Blocked items, and Next Steps.
-- COMPACT the Progress/Done list: merge related completed items into concise single lines; drop intermediate steps that have been superseded by later work.
-- Drop low-value historical detail that is not needed to continue the work.
-- PRESERVE exact file paths, function names, and error messages that are still relevant.
-- The result MUST be shorter than the previous summary.
-
-Use this EXACT format:
-
-## Goal
-[Preserve existing goals]
-
-## Constraints & Preferences
-- [Preserve existing]
-
-## Progress
-### Done
-- [x] [Merged, compacted completed items]
-
-### In Progress
-- [ ] [Current work]
-
-### Blocked
-- [Current blockers]
-
-## Key Decisions
-- **[Decision]**: [Brief rationale]
-
-## Next Steps
-1. [Update based on current state]
-
-## Critical Context
-- [Only context still needed to continue]
-
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
-
 /** Generate or update a conversation summary for compaction. */
 export async function generateSummary(
 	currentMessages: AgentMessage[],
@@ -546,17 +500,7 @@ export async function generateSummary(
 		Math.floor(0.8 * reserveTokens),
 		model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
 	);
-	// Switch to the compaction prompt once the previous summary itself has grown
-	// past a soft cap (half the reserve budget), to bound monotonic growth.
-	const prevSummaryTokens = previousSummary ? estimateTextTokens(previousSummary) : 0;
-	let basePrompt: string;
-	if (!previousSummary) {
-		basePrompt = SUMMARIZATION_PROMPT;
-	} else if (prevSummaryTokens > reserveTokens * 0.5) {
-		basePrompt = COMPACT_SUMMARIZATION_PROMPT;
-	} else {
-		basePrompt = UPDATE_SUMMARIZATION_PROMPT;
-	}
+	let basePrompt = previousSummary ? UPDATE_SUMMARIZATION_PROMPT : SUMMARIZATION_PROMPT;
 	if (customInstructions) {
 		basePrompt = `${basePrompt}\n\nAdditional focus: ${customInstructions}`;
 	}
@@ -598,37 +542,10 @@ export async function generateSummary(
 		);
 	}
 
-	let textContent = response.content
+	const textContent = response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
 		.map((c) => c.text)
 		.join("\n");
-
-	// Hard cap: if the produced summary still exceeds the reserve budget, collapse
-	// it once by re-summarizing it from scratch (no previous-summary preservation).
-	if (textContent && estimateTextTokens(textContent) > reserveTokens * 0.8) {
-		const collapsePrompt = `<conversation>\n${textContent}\n</conversation>\n\n${SUMMARIZATION_PROMPT}`;
-		const collapseResponse = await completeSimple(
-			model,
-			{
-				systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
-				messages: [
-					{
-						role: "user" as const,
-						content: [{ type: "text" as const, text: collapsePrompt }],
-						timestamp: Date.now(),
-					},
-				],
-			},
-			completionOptions,
-		);
-		if (collapseResponse.stopReason !== "error" && collapseResponse.stopReason !== "aborted") {
-			const collapsed = collapseResponse.content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("\n");
-			if (collapsed.trim()) textContent = collapsed;
-		}
-	}
 
 	return ok(textContent);
 }
@@ -736,8 +653,6 @@ Summarize the prefix to provide context for the retained suffix:
 
 Be concise. Focus on what's needed to understand the kept suffix.`;
 
-export { safeJsonStringifyForTokens, serializeConversation } from "./utils.ts";
-
 /** Generate compaction summary data from prepared session history. */
 export async function compact(
 	preparation: CompactionPreparation,
@@ -811,7 +726,6 @@ export async function compact(
 
 	const { readFiles, modifiedFiles } = computeFileLists(fileOps);
 	summary += formatFileOperations(readFiles, modifiedFiles);
-	summary = ensureSummaryQuality(summary, previousSummary);
 
 	return ok({
 		summary,
@@ -869,53 +783,4 @@ async function generateTurnPrefixSummary(
 			.map((c) => c.text)
 			.join("\n"),
 	);
-}
-
-const REQUIRED_SUMMARY_SECTIONS = [
-	"Goal",
-	"Constraints & Preferences",
-	"Progress",
-	"Key Decisions",
-	"Next Steps",
-	"Critical Context",
-];
-
-function extractSummarySections(text: string): Set<string> {
-	const sections = new Set<string>();
-	for (const line of text.split("\n")) {
-		const match = /^##\s+(.+)$/u.exec(line);
-		if (match) sections.add(match[1].trim());
-	}
-	return sections;
-}
-
-function extractCriticalAnchors(text: string): string[] {
-	const anchors: string[] = [];
-	anchors.push(
-		...(text.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_\-/.]+\.(ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)/gu) ?? []),
-	);
-	anchors.push(...(text.match(/\b[a-z][a-zA-Z0-9]*\(\)/gu) ?? []));
-	anchors.push(...(text.match(/"[^"]{10,}"/gu) ?? []));
-	return [...new Set(anchors)].filter((anchor) => anchor.length >= 4);
-}
-
-function ensureSummaryQuality(summary: string, previousSummary: string | undefined): string {
-	let next = summary.trim();
-	const sections = extractSummarySections(next);
-	const missingSections = REQUIRED_SUMMARY_SECTIONS.filter((section) => !sections.has(section));
-	if (missingSections.length > 0) {
-		next += "\n\n";
-		next += missingSections.map((section) => `## ${section}\n- (none recorded)`).join("\n\n");
-	}
-
-	if (!previousSummary) return next;
-	const lostAnchors = extractCriticalAnchors(previousSummary).filter((anchor) => !next.includes(anchor));
-	if (lostAnchors.length === 0) return next;
-	const restored = lostAnchors.slice(0, 20);
-	next += "\n\n## Critical Context Anchors Preserved\n";
-	next += restored.map((anchor) => `- ${anchor}`).join("\n");
-	if (lostAnchors.length > restored.length) {
-		next += `\n- ... ${lostAnchors.length - restored.length} more anchors omitted`;
-	}
-	return next;
 }

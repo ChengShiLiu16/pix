@@ -1,20 +1,24 @@
-# Pix Documentation
+# Pi Documentation
 
-Pix is a minimal terminal coding harness. It is designed to stay small at the core while being extended through TypeScript extensions, skills, prompt templates, themes, and pix packages.
+Pi is a minimal terminal coding harness. It is designed to stay small at the core while being extended through TypeScript extensions, skills, prompt templates, themes, and pi packages.
 
 ## Quick start
 
-Install Pix with npm:
+Install Pi with npm:
 
 ```bash
 npm install -g --ignore-scripts @chengshiliu16/pix-coding-agent
 ```
 
-`--ignore-scripts` disables dependency lifecycle scripts during install. Pix does not require install scripts for normal npm installs.
+`--ignore-scripts` disables dependency lifecycle scripts during install. Pi does not require install scripts for normal npm installs.
 
-Standalone release builds are available from [GitHub Releases](https://github.com/ChengShiLiu16/pix/releases).
+On Linux or macOS, you can also use the installer:
 
-For npm installs, uninstall with:
+```bash
+curl -fsSL https://pi.dev/install.sh | sh
+```
+
+To uninstall pi itself, use npm for curl and npm installs:
 
 ```bash
 npm uninstall -g @chengshiliu16/pix-coding-agent
@@ -25,19 +29,20 @@ For pnpm, Yarn, or Bun installs, use the matching global remove command: `pnpm r
 Then run it in a project directory:
 
 ```bash
-pix
+pi
 ```
 
-Authenticate with `/login` for subscription providers, or set an API key such as `ANTHROPIC_API_KEY` before starting pix.
+Authenticate with `/login` for subscription providers, or set an API key such as `ANTHROPIC_API_KEY` before starting pi.
 
 For the full first-run flow, see [Quickstart](quickstart.md).
 
 ## Start here
 
 - [Quickstart](quickstart.md) - install, authenticate, and run a first session.
-- [Using Pix](usage.md) - interactive mode, slash commands, context files, and CLI reference.
+- [Using Pi](usage.md) - interactive mode, slash commands, context files, and CLI reference.
 - [Providers](providers.md) - subscription and API-key setup for built-in providers.
-- [Containerization](containerization.md) - sandbox pix with OpenShell, Gondolin, or Docker.
+- [Security](security.md) - project trust, sandbox boundaries, and vulnerability reporting.
+- [Containerization](containerization.md) - sandbox pi with Gondolin, Docker, or OpenShell.
 - [Settings](settings.md) - global and project settings.
 - [Keybindings](keybindings.md) - default shortcuts and custom keybindings.
 - [Sessions](sessions.md) - session management, branching, and tree navigation.
@@ -49,13 +54,13 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 - [Skills](skills.md) - Agent Skills for reusable on-demand capabilities.
 - [Prompt templates](prompt-templates.md) - reusable prompts that expand from slash commands.
 - [Themes](themes.md) - built-in and custom terminal themes.
-- [Pix packages](packages.md) - bundle and share extensions, skills, prompts, and themes.
+- [Pi packages](packages.md) - bundle and share extensions, skills, prompts, and themes.
 - [Custom models](models.md) - add model entries for supported provider APIs.
 - [Custom providers](custom-provider.md) - implement custom APIs and OAuth flows.
 
 ## Programmatic usage
 
-- [SDK](sdk.md) - embed pix in Node.js applications.
+- [SDK](sdk.md) - embed pi in Node.js applications.
 - [RPC mode](rpc.md) - integrate over stdin/stdout JSONL.
 - [JSON event stream mode](json.md) - print mode with structured events.
 - [TUI components](tui.md) - build custom terminal UI for extensions.

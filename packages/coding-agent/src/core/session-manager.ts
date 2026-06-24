@@ -18,7 +18,7 @@ import { join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.ts";
-import { normalizePath, resolvePath } from "../utils/paths.ts";
+import { canonicalizePath, normalizePath, resolvePath } from "../utils/paths.ts";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -545,7 +545,7 @@ function getSessionHeaderCwd(header: SessionHeader): string | undefined {
 }
 
 function sessionCwdMatches(cwd: string | undefined, resolvedCwd: string): boolean {
-	return cwd !== undefined && cwd !== "" && resolvePath(cwd) === resolvedCwd;
+	return cwd !== undefined && cwd !== "" && canonicalizePath(resolvePath(cwd)) === canonicalizePath(resolvedCwd);
 }
 
 /** Exported for testing */
@@ -1338,8 +1338,16 @@ export class SessionManager {
 			throw new Error(`Entry ${leafId} not found`);
 		}
 
-		// Filter out LabelEntry from path - we'll recreate them from the resolved map
-		const pathWithoutLabels = path.filter((e) => e.type !== "label");
+		// Filter out LabelEntry from path - we'll recreate them from the resolved map.
+		// Because labels are real tree entries, later entries can be children of labels;
+		// removing labels requires re-chaining the retained path to avoid orphaned subtrees.
+		const pathWithoutLabels: SessionEntry[] = [];
+		let pathParentId: string | null = null;
+		for (const entry of path) {
+			if (entry.type === "label") continue;
+			pathWithoutLabels.push({ ...entry, parentId: pathParentId });
+			pathParentId = entry.id;
+		}
 
 		const newSessionId = createSessionId();
 		const timestamp = new Date().toISOString();

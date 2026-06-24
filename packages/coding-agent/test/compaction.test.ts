@@ -9,12 +9,9 @@ import {
 	calculateContextTokens,
 	compact,
 	DEFAULT_COMPACTION_SETTINGS,
-	estimateContextTokens,
-	estimateTextTokens,
 	findCutPoint,
 	getLastAssistantUsage,
 	prepareCompaction,
-	resolveCompactionSettings,
 	shouldCompact,
 } from "../src/core/compaction/index.ts";
 import {
@@ -249,84 +246,6 @@ describe("shouldCompact", () => {
 	});
 });
 
-describe("resolveCompactionSettings", () => {
-	const windows = [8192, 16384, 32768, 131072, 200000];
-
-	it.each(windows)("keeps the retained tail below the compaction threshold (window=%i)", (window) => {
-		const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, window);
-		const threshold = window - resolved.reserveTokens;
-		// The retained tail (keepRecentTokens) must be strictly below the
-		// threshold, otherwise compaction re-triggers immediately (the loop).
-		expect(resolved.keepRecentTokens).toBeLessThan(threshold);
-		// And the combined floor must leave headroom in the window.
-		expect(resolved.keepRecentTokens + resolved.reserveTokens).toBeLessThanOrEqual(window * 0.85);
-	});
-
-	it("passes large-window defaults through unchanged (no regression)", () => {
-		for (const window of [131072, 200000]) {
-			const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, window);
-			expect(resolved.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
-			expect(resolved.keepRecentTokens).toBe(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
-		}
-	});
-
-	it("clamps the 32k loop case (threshold 16384 < default keepRecent 20000)", () => {
-		const resolved = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 32768);
-		expect(resolved.reserveTokens).toBe(8192);
-		expect(resolved.keepRecentTokens).toBe(14745);
-		expect(resolved.keepRecentTokens).toBeLessThan(32768 - resolved.reserveTokens);
-	});
-
-	it("clamps explicit oversized user values into the window-safe band", () => {
-		const resolved = resolveCompactionSettings(
-			{ enabled: true, reserveTokens: 60000, keepRecentTokens: 60000 },
-			32768,
-		);
-		expect(resolved.reserveTokens).toBeLessThanOrEqual(Math.floor(32768 * 0.25));
-		expect(resolved.keepRecentTokens).toBeLessThan(32768 - resolved.reserveTokens);
-	});
-
-	it("is idempotent and preserves enabled", () => {
-		const once = resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 32768);
-		const twice = resolveCompactionSettings(once, 32768);
-		expect(twice).toEqual(once);
-
-		const disabled = resolveCompactionSettings({ ...DEFAULT_COMPACTION_SETTINGS, enabled: false }, 32768);
-		expect(disabled.enabled).toBe(false);
-	});
-
-	it("returns settings unchanged when the window is unknown", () => {
-		expect(resolveCompactionSettings(DEFAULT_COMPACTION_SETTINGS, 0)).toEqual(DEFAULT_COMPACTION_SETTINGS);
-	});
-});
-
-describe("estimateTextTokens", () => {
-	it("matches chars/4 for ASCII-only text", () => {
-		const ascii = "the quick brown fox jumps over the lazy dog";
-		expect(estimateTextTokens(ascii)).toBe(Math.ceil(ascii.length / 4));
-	});
-
-	it("estimates CJK far higher than a flat chars/4 (no underestimate)", () => {
-		const cjk = "这是一段中文文本用于测试令牌估算的准确性";
-		const flat = Math.ceil(cjk.length / 4);
-		const estimate = estimateTextTokens(cjk);
-		// ~1.7 chars/token for CJK vs the old 4 → roughly 2.3x more.
-		expect(estimate).toBeGreaterThan(flat * 2);
-		expect(estimate).toBe(Math.ceil(cjk.length / 1.7));
-	});
-
-	it("handles mixed CJK/ASCII additively", () => {
-		const mixed = "修复 bug in findCutPoint";
-		const cjkCount = 2; // 修复
-		const other = mixed.length - cjkCount;
-		expect(estimateTextTokens(mixed)).toBe(Math.ceil(cjkCount / 1.7 + other / 4));
-	});
-
-	it("returns 0 for empty string", () => {
-		expect(estimateTextTokens("")).toBe(0);
-	});
-});
-
 describe("findCutPoint", () => {
 	it("should find cut point based on actual token differences", () => {
 		// Create entries with cumulative token counts
@@ -476,7 +395,7 @@ describe("buildSessionContext", () => {
 });
 
 describe("prepareCompaction with previous compaction", () => {
-	it("should preserve kept messages across repeated compactions when they still fit", () => {
+	it("should skip repeated compactions when kept messages still fit", () => {
 		const u1 = createMessageEntry(createUserMessage("user msg 1 (summarized by compaction1)"));
 		const a1 = createMessageEntry(createAssistantMessage("assistant msg 1"));
 		const u2 = createMessageEntry(createUserMessage("user msg 2 - kept by compaction1"));
@@ -488,29 +407,9 @@ describe("prepareCompaction with previous compaction", () => {
 		const a4 = createMessageEntry(createAssistantMessage("assistant msg 4", createMockUsage(8000, 2000)));
 
 		const pathEntries = [u1, a1, u2, a2, u3, a3, compaction1, u4, a4];
-		const contextBefore = buildSessionContext(pathEntries);
 		const preparation = prepareCompaction(pathEntries, DEFAULT_COMPACTION_SETTINGS);
 
-		expect(preparation).toBeDefined();
-		expect(preparation!.firstKeptEntryId).toBe(u2.id);
-		expect(preparation!.previousSummary).toBe("First summary");
-		expect(extractText(preparation!.messagesToSummarize)).not.toContain("First summary");
-		expect(preparation!.tokensBefore).toBe(estimateContextTokens(contextBefore.messages).tokens);
-
-		const compaction2: CompactionEntry = {
-			type: "compaction",
-			id: "compaction2-id",
-			parentId: a4.id,
-			timestamp: new Date().toISOString(),
-			summary: "Second summary",
-			firstKeptEntryId: preparation!.firstKeptEntryId,
-			tokensBefore: preparation!.tokensBefore,
-		};
-		const contextAfter = buildSessionContext([...pathEntries, compaction2]);
-		const contextAfterText = extractText(contextAfter.messages);
-
-		expect(contextAfterText).toContain("user msg 2 - kept by compaction1");
-		expect(contextAfterText).toContain("user msg 3 - kept by compaction1");
+		expect(preparation).toBeUndefined();
 	});
 
 	it("should re-summarize previously kept messages when the recent window moves past them", () => {

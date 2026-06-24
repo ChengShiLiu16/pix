@@ -1,7 +1,7 @@
 /**
  * Subagent Tool - Delegate tasks to specialized agents
  *
- * Spawns a separate `pix` process for each subagent invocation,
+ * Spawns a separate `pi` process for each subagent invocation,
  * giving it an isolated context window.
  *
  * Supports three modes:
@@ -19,7 +19,13 @@ import * as path from "node:path";
 import type { AgentToolResult } from "@chengshiliu16/pix-agent-core";
 import type { Message } from "@chengshiliu16/pix-ai";
 import { StringEnum } from "@chengshiliu16/pix-ai";
-import { type ExtensionAPI, getMarkdownTheme, withFileMutationQueue } from "@chengshiliu16/pix-coding-agent";
+import {
+	CONFIG_DIR_NAME,
+	type ExtensionAPI,
+	getAgentDir,
+	getMarkdownTheme,
+	withFileMutationQueue,
+} from "@chengshiliu16/pix-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
@@ -231,7 +237,7 @@ async function mapWithConcurrencyLimit<TIn, TOut>(
 }
 
 async function writePromptToTempFile(agentName: string, prompt: string): Promise<{ dir: string; filePath: string }> {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pix-subagent-"));
+	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-subagent-"));
 	const safeName = agentName.replace(/[^\w.-]+/g, "_");
 	const filePath = path.join(tmpDir, `prompt-${safeName}.md`);
 	await withFileMutationQueue(filePath, async () => {
@@ -253,7 +259,7 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 		return { command: process.execPath, args };
 	}
 
-	return { command: "pix", args };
+	return { command: "pi", args };
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
@@ -268,7 +274,6 @@ async function runSingleAgent(
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
-	mainModel: string | undefined,
 ): Promise<SingleResult> {
 	const agent = agents.find((a) => a.name === agentName);
 
@@ -286,10 +291,8 @@ async function runSingleAgent(
 		};
 	}
 
-	// Model precedence: agent's explicit `model:` > main process's current model > child's config default.
-	const effectiveModel = agent.model ?? mainModel;
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (effectiveModel) args.push("--model", effectiveModel);
+	if (agent.model) args.push("--model", agent.model);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	let tmpPromptDir: string | null = null;
@@ -303,7 +306,7 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: effectiveModel,
+		model: agent.model,
 		step,
 	};
 
@@ -333,32 +336,8 @@ async function runSingleAgent(
 				cwd: cwd ?? defaultCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
-				// Run the child in its own process group (POSIX) so abort can signal the
-				// whole tree — the child plus any grandchildren (bash, rg, ...) it spawns.
-				detached: process.platform !== "win32",
 			});
 			let buffer = "";
-			let killTimer: ReturnType<typeof setTimeout> | undefined;
-			let abortHandler: (() => void) | undefined;
-
-			// Signal the child's whole process group on POSIX (negative pid), or just the
-			// child on Windows. Swallows ESRCH when the process has already exited.
-			const killTree = (sig: NodeJS.Signals) => {
-				try {
-					if (process.platform !== "win32" && typeof proc.pid === "number") {
-						process.kill(-proc.pid, sig);
-					} else {
-						proc.kill(sig);
-					}
-				} catch {
-					/* already exited */
-				}
-			};
-
-			const cleanup = () => {
-				if (killTimer) clearTimeout(killTimer);
-				if (signal && abortHandler) signal.removeEventListener("abort", abortHandler);
-			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -409,32 +388,24 @@ async function runSingleAgent(
 			});
 
 			proc.on("close", (code) => {
-				cleanup();
 				if (buffer.trim()) processLine(buffer);
 				resolve(code ?? 0);
 			});
 
 			proc.on("error", () => {
-				cleanup();
 				resolve(1);
 			});
 
 			if (signal) {
-				abortHandler = () => {
+				const killProc = () => {
 					wasAborted = true;
-					killTree("SIGTERM");
-					killTimer = setTimeout(() => killTree("SIGKILL"), 5000);
-					// Resolve as soon as the child itself exits, without waiting for "close".
-					// A killed child may leave grandchildren holding the inherited stdout
-					// pipe open, which delays "close" indefinitely and would otherwise hang
-					// the awaiting parent. "exit" fires on the child's own termination.
-					proc.once("exit", () => {
-						cleanup();
-						resolve(proc.exitCode ?? -1);
-					});
+					proc.kill("SIGTERM");
+					setTimeout(() => {
+						if (!proc.killed) proc.kill("SIGKILL");
+					}, 5000);
 				};
-				if (signal.aborted) abortHandler();
-				else signal.addEventListener("abort", abortHandler, { once: true });
+				if (signal.aborted) killProc();
+				else signal.addEventListener("abort", killProc, { once: true });
 			}
 		});
 
@@ -458,17 +429,13 @@ async function runSingleAgent(
 }
 
 const TaskItem = Type.Object({
-	agent: Type.String({
-		description: "Name of the agent to invoke (must be one of the available agents listed in the tool description)",
-	}),
+	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
 
 const ChainItem = Type.Object({
-	agent: Type.String({
-		description: "Name of the agent to invoke (must be one of the available agents listed in the tool description)",
-	}),
+	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 });
@@ -479,12 +446,7 @@ const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
 });
 
 const SubagentParams = Type.Object({
-	agent: Type.Optional(
-		Type.String({
-			description:
-				"Name of the agent to invoke (single mode). Must be one of the available agents listed in the tool description.",
-		}),
-	),
+	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
 	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
 	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
@@ -495,30 +457,15 @@ const SubagentParams = Type.Object({
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
 });
 
-export default function (pix: ExtensionAPI) {
-	// Discover user-level agents at registration so the tool description can list
-	// the valid agent names. Without this the model has to guess the name (and
-	// only learns the real options from an error after a failed call).
-	let knownAgents: string[] = [];
-	try {
-		knownAgents = discoverAgents(process.cwd(), "user").agents.map((a) => a.name);
-	} catch {
-		knownAgents = [];
-	}
-	const availableLine =
-		knownAgents.length > 0
-			? `Available agents: ${knownAgents.join(", ")}.`
-			: "No user agents found in ~/.pix/agent/agents (add agent .md files there).";
-
-	pix.registerTool({
+export default function (pi: ExtensionAPI) {
+	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
-			availableLine,
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			'Default agent scope is "user" (from ~/.pix/agent/agents).',
-			'To enable project-local agents in .pix/agents, set agentScope: "both" (or "project").',
+			`Default agent scope is "user" (from ${path.join(getAgentDir(), "agents")}).`,
+			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 		].join(" "),
 		parameters: SubagentParams,
 
@@ -527,10 +474,6 @@ export default function (pix: ExtensionAPI) {
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
-			// Inherit the main process's current model so subagents match it (unless the
-			// agent pins its own `model:`). Without this, subagents fall back to the
-			// child's config default, which may differ from what the main session uses.
-			const mainModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -617,7 +560,6 @@ export default function (pix: ExtensionAPI) {
 						signal,
 						chainUpdate,
 						makeDetails("chain"),
-						mainModel,
 					);
 					results.push(result);
 
@@ -696,7 +638,6 @@ export default function (pix: ExtensionAPI) {
 							}
 						},
 						makeDetails("parallel"),
-						mainModel,
 					);
 					allResults[index] = result;
 					emitParallelUpdate();
@@ -719,9 +660,6 @@ export default function (pix: ExtensionAPI) {
 						},
 					],
 					details: makeDetails("parallel")(results),
-					// Surface as an error only when every task failed; partial success still
-					// returns usable output for the surviving tasks.
-					isError: successCount === 0,
 				};
 			}
 
@@ -736,7 +674,6 @@ export default function (pix: ExtensionAPI) {
 					signal,
 					onUpdate,
 					makeDetails("single"),
-					mainModel,
 				);
 				const isError = isFailedResult(result);
 				if (isError) {

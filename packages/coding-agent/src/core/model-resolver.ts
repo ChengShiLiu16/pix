@@ -3,8 +3,9 @@
  */
 
 import type { ThinkingLevel } from "@chengshiliu16/pix-agent-core";
-import type { Api, KnownProvider, Model } from "@chengshiliu16/pix-ai";
+import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@chengshiliu16/pix-ai";
 import chalk from "chalk";
+import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRegistry } from "./model-registry.ts";
@@ -47,6 +48,12 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
+
+export interface ScopedModel {
+	model: Model<Api>;
+	/** Thinking level if explicitly specified in pattern (e.g., "model:high"), undefined otherwise */
+	thinkingLevel?: ThinkingLevel;
+}
 
 /**
  * Helper to check if a model ID looks like an alias (no date suffix)
@@ -237,6 +244,77 @@ export function parseModelPattern(
 	}
 }
 
+/**
+ * Resolve model patterns to actual Model objects with optional thinking levels
+ * Format: "pattern:level" where :level is optional
+ * For each pattern, finds all matching models and picks the best version:
+ * 1. Prefer alias (e.g., claude-sonnet-4-5) over dated versions (claude-sonnet-4-5-20250929)
+ * 2. If no alias, pick the latest dated version
+ *
+ * Supports models with colons in their IDs (e.g., OpenRouter's model:exacto).
+ * The algorithm tries to match the full pattern first, then progressively
+ * strips colon-suffixes to find a match.
+ */
+export async function resolveModelScope(patterns: string[], modelRegistry: ModelRegistry): Promise<ScopedModel[]> {
+	const availableModels = await modelRegistry.getAvailable();
+	const scopedModels: ScopedModel[] = [];
+
+	for (const pattern of patterns) {
+		// Check if pattern contains glob characters
+		if (pattern.includes("*") || pattern.includes("?") || pattern.includes("[")) {
+			// Extract optional thinking level suffix (e.g., "provider/*:high")
+			const colonIdx = pattern.lastIndexOf(":");
+			let globPattern = pattern;
+			let thinkingLevel: ThinkingLevel | undefined;
+
+			if (colonIdx !== -1) {
+				const suffix = pattern.substring(colonIdx + 1);
+				if (isValidThinkingLevel(suffix)) {
+					thinkingLevel = suffix;
+					globPattern = pattern.substring(0, colonIdx);
+				}
+			}
+
+			// Match against "provider/modelId" format OR just model ID
+			// This allows "*sonnet*" to match without requiring "anthropic/*sonnet*"
+			const matchingModels = availableModels.filter((m) => {
+				const fullId = `${m.provider}/${m.id}`;
+				return minimatch(fullId, globPattern, { nocase: true }) || minimatch(m.id, globPattern, { nocase: true });
+			});
+
+			if (matchingModels.length === 0) {
+				console.warn(chalk.yellow(`Warning: No models match pattern "${pattern}"`));
+				continue;
+			}
+
+			for (const model of matchingModels) {
+				if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
+					scopedModels.push({ model, thinkingLevel });
+				}
+			}
+			continue;
+		}
+
+		const { model, thinkingLevel, warning } = parseModelPattern(pattern, availableModels);
+
+		if (warning) {
+			console.warn(chalk.yellow(`Warning: ${warning}`));
+		}
+
+		if (!model) {
+			console.warn(chalk.yellow(`Warning: No models match pattern "${pattern}"`));
+			continue;
+		}
+
+		// Avoid duplicates
+		if (!scopedModels.find((sm) => modelsAreEqual(sm.model, model))) {
+			scopedModels.push({ model, thinkingLevel });
+		}
+	}
+
+	return scopedModels;
+}
+
 export interface ResolveCliModelResult {
 	model: Model<Api> | undefined;
 	thinkingLevel?: ThinkingLevel;
@@ -262,9 +340,10 @@ export interface ResolveCliModelResult {
 export function resolveCliModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
+	cliThinking?: ThinkingLevel;
 	modelRegistry: ModelRegistry;
 }): ResolveCliModelResult {
-	const { cliProvider, cliModel, modelRegistry } = options;
+	const { cliProvider, cliModel, cliThinking, modelRegistry } = options;
 
 	if (!cliModel) {
 		return { model: undefined, warning: undefined, error: undefined };
@@ -343,6 +422,27 @@ export function resolveCliModel(options: {
 	});
 
 	if (model) {
+		// If provider inference matched an unauthenticated provider/model pair, prefer
+		// one exact raw model-id match that is authenticated. This keeps
+		// "provider/model" syntax preferred when usable, but handles models whose
+		// literal id starts with a known provider name (for example
+		// commandcode model id "xiaomi/mimo-v2.5-pro").
+		if (inferredProvider) {
+			const rawExactMatches = availableModels.filter(
+				(m) => m.id.toLowerCase() === cliModel.toLowerCase() && !modelsAreEqual(m, model),
+			);
+			if (rawExactMatches.length > 0 && !modelRegistry.hasConfiguredAuth(model)) {
+				const authenticatedRawMatches = rawExactMatches.filter((m) => modelRegistry.hasConfiguredAuth(m));
+				if (authenticatedRawMatches.length === 1) {
+					return {
+						model: authenticatedRawMatches[0],
+						thinkingLevel: undefined,
+						warning: undefined,
+						error: undefined,
+					};
+				}
+			}
+		}
 		return { model, thinkingLevel, warning, error: undefined };
 	}
 
@@ -373,12 +473,31 @@ export function resolveCliModel(options: {
 	}
 
 	if (provider) {
-		const fallbackModel = buildFallbackModel(provider, pattern, availableModels);
+		// Parse thinking level suffix from the pattern before building the fallback model,
+		// but only when --thinking is not explicitly provided.
+		// e.g. "zai-org/GLM-5.1-FP8:high" → modelId="zai-org/GLM-5.1-FP8", fallbackThinking="high"
+		let fallbackPattern = pattern;
+		let fallbackThinking: ThinkingLevel | undefined;
+		if (!cliThinking) {
+			const lastColon = pattern.lastIndexOf(":");
+			if (lastColon !== -1) {
+				const suffix = pattern.substring(lastColon + 1);
+				if (isValidThinkingLevel(suffix)) {
+					fallbackPattern = pattern.substring(0, lastColon);
+					fallbackThinking = suffix;
+				}
+			}
+		}
+
+		const fallbackModel = buildFallbackModel(provider, fallbackPattern, availableModels);
 		if (fallbackModel) {
+			const requestedThinking = cliThinking ?? fallbackThinking;
+			const model =
+				requestedThinking && requestedThinking !== "off" ? { ...fallbackModel, reasoning: true } : fallbackModel;
 			const fallbackWarning = warning
-				? `${warning} Model "${pattern}" not found for provider "${provider}". Using custom model id.`
-				: `Model "${pattern}" not found for provider "${provider}". Using custom model id.`;
-			return { model: fallbackModel, thinkingLevel: undefined, warning: fallbackWarning, error: undefined };
+				? `${warning} Model "${fallbackPattern}" not found for provider "${provider}". Using custom model id.`
+				: `Model "${fallbackPattern}" not found for provider "${provider}". Using custom model id.`;
+			return { model, thinkingLevel: fallbackThinking, warning: fallbackWarning, error: undefined };
 		}
 	}
 
@@ -400,18 +519,31 @@ export interface InitialModelResult {
 /**
  * Find the initial model to use based on priority:
  * 1. CLI args (provider + model)
- * 2. Saved default from settings
- * 3. First available model with valid API key
+ * 2. First model from scoped models (if not continuing/resuming)
+ * 3. Restored from session (if continuing/resuming)
+ * 4. Saved default from settings
+ * 5. First available model with valid API key
  */
 export async function findInitialModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
+	scopedModels: ScopedModel[];
+	isContinuing: boolean;
 	defaultProvider?: string;
 	defaultModelId?: string;
 	defaultThinkingLevel?: ThinkingLevel;
 	modelRegistry: ModelRegistry;
 }): Promise<InitialModelResult> {
-	const { cliProvider, cliModel, defaultProvider, defaultModelId, defaultThinkingLevel, modelRegistry } = options;
+	const {
+		cliProvider,
+		cliModel,
+		scopedModels,
+		isContinuing,
+		defaultProvider,
+		defaultModelId,
+		defaultThinkingLevel,
+		modelRegistry,
+	} = options;
 
 	let model: Model<Api> | undefined;
 	let thinkingLevel: ThinkingLevel = DEFAULT_THINKING_LEVEL;
@@ -432,7 +564,16 @@ export async function findInitialModel(options: {
 		}
 	}
 
-	// 2. Try saved default from settings
+	// 2. Use first model from scoped models (skip if continuing/resuming)
+	if (scopedModels.length > 0 && !isContinuing) {
+		return {
+			model: scopedModels[0].model,
+			thinkingLevel: scopedModels[0].thinkingLevel ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+			fallbackMessage: undefined,
+		};
+	}
+
+	// 3. Try saved default from settings
 	if (defaultProvider && defaultModelId) {
 		const found = modelRegistry.find(defaultProvider, defaultModelId);
 		if (found) {
@@ -444,7 +585,7 @@ export async function findInitialModel(options: {
 		}
 	}
 
-	// 3. Try first available model with valid API key
+	// 4. Try first available model with valid API key
 	const availableModels = await modelRegistry.getAvailable();
 
 	if (availableModels.length > 0) {
@@ -461,7 +602,7 @@ export async function findInitialModel(options: {
 		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 	}
 
-	// 4. No model found
+	// 5. No model found
 	return { model: undefined, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
 }
 

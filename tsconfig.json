@@ -6,6 +6,7 @@
 			"*": ["./*"],
 			"@chengshiliu16/pix-ai": ["./packages/ai/src/index.ts"],
 			"@chengshiliu16/pix-ai/oauth": ["./packages/ai/src/oauth.ts"],
+			"@chengshiliu16/pix-ai/openrouter-images": ["./packages/ai/src/providers/images/openrouter.ts"],
 			"@chengshiliu16/pix-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
 			"@chengshiliu16/pix-ai/dist/*": ["./packages/ai/src/*"],
 			"@chengshiliu16/pix-agent-core": ["./packages/agent/src/index.ts"],

@@ -2,7 +2,7 @@
  * Shared utilities for compaction and branch summarization.
  */
 
-import { type AgentMessage, safeJsonStringifyForTokens } from "@chengshiliu16/pix-agent-core";
+import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
 import type { Message } from "@chengshiliu16/pix-ai";
 
 // ============================================================================
@@ -119,6 +119,58 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 /** Maximum characters for a tool result in serialized summaries. */
 const TOOL_RESULT_MAX_CHARS = 2000;
 
+function typeTag(v: object): string {
+	const ctor = v.constructor?.name ?? "Object";
+	if (Array.isArray(v)) return `Array[${v.length}]`;
+	return ctor;
+}
+
+/** 序列化 token 估算和摘要输入，容忍循环引用并限制大型嵌套结构。 */
+export function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
+	const seen = new WeakSet<object>();
+	let truncated = false;
+
+	function stringify(v: unknown, depth: number): string {
+		if (v === null) return "null";
+		if (typeof v !== "object") return JSON.stringify(v);
+		if (depth >= maxDepth) {
+			truncated = true;
+			return typeTag(v);
+		}
+		if (seen.has(v)) {
+			truncated = true;
+			return `[Circular ${typeTag(v)}]`;
+		}
+		seen.add(v);
+		try {
+			if (Array.isArray(v)) {
+				if (v.length === 0) return "[]";
+				const items = v.slice(0, 50).map((x) => stringify(x, depth + 1));
+				if (v.length > 50) {
+					truncated = true;
+					items.push("...");
+				}
+				return `[${items.join(",")}]`;
+			}
+			const keys = Object.keys(v);
+			if (keys.length === 0) return "{}";
+			const entries = keys
+				.slice(0, 30)
+				.map((k) => `${JSON.stringify(k)}:${stringify((v as Record<string, unknown>)[k], depth + 1)}`);
+			if (keys.length > 30) {
+				truncated = true;
+				entries.push("...");
+			}
+			return `{${entries.join(",")}}`;
+		} finally {
+			seen.delete(v);
+		}
+	}
+
+	const result = stringify(value, 0);
+	return truncated ? `${result}⟪truncated⟫` : result;
+}
+
 /**
  * Truncate text to a maximum character length for summarization.
  * Keeps the beginning and appends a truncation marker.
@@ -196,6 +248,6 @@ export function serializeConversation(messages: Message[]): string {
 // Summarization System Prompt
 // ============================================================================
 
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;

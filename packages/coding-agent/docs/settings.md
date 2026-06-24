@@ -1,6 +1,6 @@
 # Settings
 
-Pix uses JSON settings files with project settings overriding global settings.
+Pi uses JSON settings files with project settings overriding global settings.
 
 | Location | Scope |
 |----------|-------|
@@ -11,13 +11,15 @@ Edit directly or use `/settings` for common options.
 
 ## Project Trust
 
-On interactive startup, pix asks before trusting a project folder that contains project-local inputs and has no saved decision in `~/.pix/agent/trust.json`. Trusting a project allows pix to read project instructions (`AGENTS.md`/`CLAUDE.md`), load `.pix/settings.json` and `.pix` resources, install missing project packages, and execute project extensions.
+On interactive startup, pi asks before trusting a project folder that contains project-local settings, resources, or project `.agents/skills` and has no saved decision for the folder or a parent folder in `~/.pix/agent/trust.json`. Trusting a project allows pix to load `.pix/settings.json` and `.pix` resources, install missing project packages, and execute project extensions.
 
-Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without a saved trust decision, they ignore project-local inputs unless `--approve`/`-a` is passed. Use `--no-approve`/`-na` to ignore project-local inputs for one run even when the project is trusted.
+Non-interactive modes (`-p`, `--mode json`, and `--mode rpc`) do not show a trust prompt. Without an applicable saved trust decision, they use `defaultProjectTrust` from global settings: `ask` (default) and `never` ignore those project resources, while `always` trusts them. Pass `--approve`/`-a` or `--no-approve`/`-na` to override project trust for one run.
 
-`pix config` assumes project trust for that command so you can view and change project resource settings before starting a session. It does not save a trust decision; starting a session in that folder still prompts. Pass `--no-approve` to hide project-local inputs in `pix config`.
+If no extension or saved decision applies, `defaultProjectTrust` controls the fallback behavior. Set it to `"ask"`, `"always"`, or `"never"` in `~/.pix/agent/settings.json`, or change it with `/settings`.
 
-Use `/trust` in interactive mode to save a project trust decision for future sessions. It writes `~/.pix/agent/trust.json` only; the current session is not reloaded, so restart pix for changes to take effect.
+`pi config` and package commands use the same project trust flow, except `pi update` never prompts. Pass `--approve` to trust project-local settings for one command or `--no-approve` to ignore them.
+
+Use `/trust` in interactive mode to save a project trust decision for future sessions, including trust for the immediate parent folder. It writes `~/.pix/agent/trust.json` only; the current session is not reloaded, so restart pix for changes to take effect.
 
 ## All Settings
 
@@ -50,8 +52,11 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 |---------|------|---------|-------------|
 | `theme` | string | `"dark"` | Theme name (`"dark"`, `"light"`, or custom) |
 | `quietStartup` | boolean | `false` | Hide startup header |
+| `defaultProjectTrust` | string | `"ask"` | Fallback project trust behavior: `"ask"`, `"always"`, or `"never"`. Global setting only |
 | `collapseChangelog` | boolean | `false` | Show condensed changelog after updates |
 | `enableInstallTelemetry` | boolean | `true` | Send an anonymous install/update version ping after first install or changelog-detected updates. This does not control update checks |
+| `enableAnalytics` | boolean | `false` | Opt-in analytics data sharing. Currently only asked for during the experimental first-time setup (`PI_EXPERIMENTAL=1`) |
+| `trackingId` | string | - | Analytics tracking identifier, generated when `enableAnalytics` is turned on |
 | `doubleEscapeAction` | string | `"tree"` | Action for double-escape: `"tree"`, `"fork"`, or `"none"` |
 | `treeFilterMode` | string | `"default"` | Default filter for `/tree`: `"default"`, `"no-tools"`, `"user-only"`, `"labeled-only"`, `"all"` |
 | `editorPaddingX` | number | `0` | Horizontal padding for input editor (0-3) |
@@ -60,9 +65,21 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 
 ### Telemetry and update checks
 
-`enableInstallTelemetry` controls local install/update version state and optional provider attribution headers. Opting out of telemetry does not disable update checks; Pix can still fetch `https://api.github.com/repos/ChengShiLiu16/pix/releases/latest` to look for the latest version.
+`enableInstallTelemetry` only controls the anonymous install/update ping to `https://pi.dev/api/report-install`. Opting out of telemetry does not disable update checks; Pi can still fetch `https://pi.dev/api/latest-version` to look for the latest version.
 
-Set `PIX_SKIP_VERSION_CHECK=1` to disable the Pix version update check. Use `--offline` or `PIX_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+Set `PI_SKIP_VERSION_CHECK=1` to disable the Pi version update check. Use `--offline` or `PI_OFFLINE=1` to disable all startup network operations described here, including update checks, package update checks, and install/update telemetry.
+
+### Network
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `httpProxy` | string | - | HTTP proxy URL applied as `HTTP_PROXY` and `HTTPS_PROXY`. Global setting only. |
+
+```json
+{
+  "httpProxy": "http://127.0.0.1:7890"
+}
+```
 
 ### Warnings
 
@@ -116,7 +133,7 @@ Set `PIX_SKIP_VERSION_CHECK=1` to disable the Pix version update check. Use `--o
 
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs` (e.g., Google's "quota will reset after 5h"), the request fails immediately with an informative error instead of waiting silently. Set to `0` to disable the cap.
 
-Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Pix sees them, which may block the agent until the provider quota resets in some circumstances.
+Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Pi sees them, which may block the agent until the provider quota resets in some circumstances.
 
 ```json
 {
@@ -179,7 +196,19 @@ Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explic
 { "sessionDir": ".pix/sessions" }
 ```
 
-When multiple sources specify a session directory, precedence is `--session-dir`, `PIX_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.
+When multiple sources specify a session directory, precedence is `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.
+
+### Model Cycling
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `enabledModels` | string[] | - | Model patterns for Ctrl+P cycling (same format as `--models` CLI flag) |
+
+```json
+{
+  "enabledModels": ["claude-*", "gpt-4o", "gemini-2*"]
+}
+```
 
 ### Markdown
 
@@ -210,7 +239,7 @@ String form loads all resources from a package:
 
 ```json
 {
-  "packages": ["pix-skills", "@org/my-extension"]
+  "packages": ["pi-skills", "@org/my-extension"]
 }
 ```
 
@@ -220,7 +249,7 @@ Object form filters which resources to load:
 {
   "packages": [
     {
-      "source": "pix-skills",
+      "source": "pi-skills",
       "skills": ["brave-search", "transcribe"],
       "extensions": []
     }
@@ -247,10 +276,11 @@ See [packages.md](packages.md) for package management details.
     "enabled": true,
     "maxRetries": 3
   },
+  "enabledModels": ["claude-*", "gpt-4o"],
   "warnings": {
     "anthropicExtraUsage": true
   },
-  "packages": ["pix-skills"]
+  "packages": ["pi-skills"]
 }
 ```
 

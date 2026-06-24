@@ -1,4 +1,7 @@
-const LATEST_VERSION_URL = "https://api.github.com/repos/ChengShiLiu16/pix/releases/latest";
+import { compare, valid } from "semver";
+import { getPixUserAgent } from "./pix-user-agent.ts";
+
+const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
 const DEFAULT_VERSION_CHECK_TIMEOUT_MS = 10000;
 
 export interface LatestPixRelease {
@@ -7,40 +10,13 @@ export interface LatestPixRelease {
 	note?: string;
 }
 
-interface ParsedVersion {
-	major: number;
-	minor: number;
-	patch: number;
-	prerelease?: string;
-}
-
-function parsePackageVersion(version: string): ParsedVersion | undefined {
-	const match = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/);
-	if (!match) {
-		return undefined;
-	}
-	return {
-		major: Number.parseInt(match[1], 10),
-		minor: Number.parseInt(match[2], 10),
-		patch: Number.parseInt(match[3], 10),
-		prerelease: match[4],
-	};
-}
-
 export function comparePackageVersions(leftVersion: string, rightVersion: string): number | undefined {
-	const left = parsePackageVersion(leftVersion);
-	const right = parsePackageVersion(rightVersion);
+	const left = valid(leftVersion.trim());
+	const right = valid(rightVersion.trim());
 	if (!left || !right) {
 		return undefined;
 	}
-
-	if (left.major !== right.major) return left.major - right.major;
-	if (left.minor !== right.minor) return left.minor - right.minor;
-	if (left.patch !== right.patch) return left.patch - right.patch;
-	if (left.prerelease === right.prerelease) return 0;
-	if (!left.prerelease) return 1;
-	if (!right.prerelease) return -1;
-	return left.prerelease.localeCompare(right.prerelease);
+	return compare(left, right);
 }
 
 export function isNewerPackageVersion(candidateVersion: string, currentVersion: string): boolean {
@@ -55,12 +31,18 @@ export async function getLatestPixRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number } = {},
 ): Promise<LatestPixRelease | undefined> {
-	if (process.env.PIX_SKIP_VERSION_CHECK || process.env.PIX_OFFLINE) return undefined;
-	if (currentVersion.includes("-pix.")) return undefined;
+	if (
+		process.env.PIX_SKIP_VERSION_CHECK ||
+		process.env.PI_SKIP_VERSION_CHECK ||
+		process.env.PIX_OFFLINE ||
+		process.env.PI_OFFLINE
+	) {
+		return undefined;
+	}
 
 	const response = await fetch(LATEST_VERSION_URL, {
 		headers: {
-			"User-Agent": "pix-coding-agent",
+			"User-Agent": getPixUserAgent(currentVersion),
 			accept: "application/json",
 		},
 		signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_VERSION_CHECK_TIMEOUT_MS),
@@ -68,22 +50,18 @@ export async function getLatestPixRelease(
 	if (!response.ok) return undefined;
 
 	const data = (await response.json()) as {
-		tag_name?: unknown;
-		version?: unknown;
-		body?: unknown;
-		note?: unknown;
 		packageName?: unknown;
+		version?: unknown;
+		note?: unknown;
 	};
-	const rawVersion = typeof data.tag_name === "string" ? data.tag_name : data.version;
-	if (typeof rawVersion !== "string" || !rawVersion.trim()) {
+	if (typeof data.version !== "string" || !data.version.trim()) {
 		return undefined;
 	}
-	const version = rawVersion.trim().replace(/^v/, "");
-	const rawNote = typeof data.body === "string" ? data.body : data.note;
-	const note = typeof rawNote === "string" ? rawNote.trim().slice(0, 500) : undefined;
-	const packageName = typeof data.packageName === "string" ? data.packageName : "@chengshiliu16/pix-coding-agent";
+	const packageName =
+		typeof data.packageName === "string" && data.packageName.trim() ? data.packageName.trim() : undefined;
+	const note = typeof data.note === "string" && data.note.trim() ? data.note.trim() : undefined;
 	return {
-		version,
+		version: data.version.trim(),
 		packageName,
 		...(note ? { note } : {}),
 	};

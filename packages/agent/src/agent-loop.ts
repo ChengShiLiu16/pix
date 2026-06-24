@@ -10,7 +10,7 @@ import {
 	streamSimple,
 	type ToolResultMessage,
 	validateToolArguments,
-} from "@chengshiliu16/pix-ai";
+} from "@chengshiliu16/pix-ai/base";
 import type {
 	AgentContext,
 	AgentEvent,
@@ -379,7 +379,7 @@ async function executeToolCalls(
 ): Promise<ExecutedToolCallBatch> {
 	const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
 	const hasSequentialToolCall = toolCalls.some(
-		(tc) => resolveToolForCall(currentContext.tools, tc.name)?.tool.executionMode === "sequential",
+		(tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential",
 	);
 	if (config.toolExecution === "sequential" || hasSequentialToolCall) {
 		return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
@@ -559,16 +559,6 @@ function prepareToolCallArguments(tool: AgentTool<any>, toolCall: AgentToolCall)
 	};
 }
 
-function resolveToolForCall(
-	tools: AgentTool<any>[] | undefined,
-	toolName: string,
-): { tool: AgentTool<any>; toolName: string } | undefined {
-	const direct = tools?.find((tool) => tool.name === toolName);
-	if (direct) return { tool: direct, toolName: direct.name };
-	const aliased = tools?.find((tool) => tool.aliases?.includes(toolName));
-	return aliased ? { tool: aliased, toolName: aliased.name } : undefined;
-}
-
 async function prepareToolCall(
 	currentContext: AgentContext,
 	assistantMessage: AssistantMessage,
@@ -576,8 +566,8 @@ async function prepareToolCall(
 	config: AgentLoopConfig,
 	signal: AbortSignal | undefined,
 ): Promise<PreparedToolCall | ImmediateToolCallOutcome> {
-	const resolved = resolveToolForCall(currentContext.tools, toolCall.name);
-	if (!resolved) {
+	const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
+	if (!tool) {
 		return {
 			kind: "immediate",
 			result: createErrorToolResult(`Tool ${toolCall.name} not found`),
@@ -586,8 +576,8 @@ async function prepareToolCall(
 	}
 
 	try {
-		const preparedToolCall = prepareToolCallArguments(resolved.tool, toolCall);
-		const validatedArgs = validateToolArguments(resolved.tool, preparedToolCall);
+		const preparedToolCall = prepareToolCallArguments(tool, toolCall);
+		const validatedArgs = validateToolArguments(tool, preparedToolCall);
 		if (config.beforeToolCall) {
 			const beforeResult = await config.beforeToolCall(
 				{
@@ -623,7 +613,7 @@ async function prepareToolCall(
 		return {
 			kind: "prepared",
 			toolCall,
-			tool: resolved.tool,
+			tool,
 			args: validatedArgs,
 		};
 	} catch (error) {
@@ -641,6 +631,7 @@ async function executePreparedToolCall(
 	emit: AgentEventSink,
 ): Promise<ExecutedToolCallOutcome> {
 	const updateEvents: Promise<void>[] = [];
+	let acceptingUpdates = true;
 
 	try {
 		const result = await prepared.tool.execute(
@@ -648,6 +639,7 @@ async function executePreparedToolCall(
 			prepared.args as never,
 			signal,
 			(partialResult) => {
+				if (!acceptingUpdates) return;
 				updateEvents.push(
 					Promise.resolve(
 						emit({
@@ -661,14 +653,18 @@ async function executePreparedToolCall(
 				);
 			},
 		);
+		acceptingUpdates = false;
 		await Promise.all(updateEvents);
 		return { result, isError: false };
 	} catch (error) {
+		acceptingUpdates = false;
 		await Promise.all(updateEvents);
 		return {
 			result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
 			isError: true,
 		};
+	} finally {
+		acceptingUpdates = false;
 	}
 }
 

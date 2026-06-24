@@ -142,7 +142,7 @@ describe("openai-codex streaming", () => {
 				expect(headers?.get("Authorization")).toBe(`Bearer ${token}`);
 				expect(headers?.get("chatgpt-account-id")).toBe("acc_test");
 				expect(headers?.get("OpenAI-Beta")).toBe("responses=experimental");
-				expect(headers?.get("originator")).toBe("pi");
+				expect(headers?.get("originator")).toBe("pix");
 				expect(headers?.get("accept")).toBe("text/event-stream");
 				expect(headers?.has("x-api-key")).toBe(false);
 				return new Response(stream, {
@@ -361,13 +361,21 @@ describe("openai-codex streaming", () => {
 			apiKey: token,
 			transport: "sse",
 		}).result();
+		let settled = false;
+		const observedResultPromise = resultPromise.then((result) => {
+			settled = true;
+			return result;
+		});
 		await vi.advanceTimersByTimeAsync(0);
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 
 		await vi.advanceTimersByTimeAsync(10_000);
-		const result = await resultPromise;
+		expect(settled).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(10_000);
+		const result = await observedResultPromise;
 		expect(result.stopReason).toBe("error");
-		expect(result.errorMessage).toBe("Codex SSE response headers timed out after 10000ms");
+		expect(result.errorMessage).toBe("Codex SSE response headers timed out after 20000ms");
 	});
 
 	it("aborts SSE body reads after response headers arrive", async () => {

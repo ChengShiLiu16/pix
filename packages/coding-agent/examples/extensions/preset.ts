@@ -30,7 +30,7 @@
  * ```
  *
  * Usage:
- * - `pix --preset plan` - start with plan preset
+ * - `pi --preset plan` - start with plan preset
  * - `/preset` - show selector to switch presets mid-session
  * - `/preset implement` - switch to implement preset directly
  * - `Ctrl+Shift+U` - cycle through presets
@@ -42,7 +42,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Api, Model } from "@chengshiliu16/pix-ai";
 import type { ExtensionAPI, ExtensionContext } from "@chengshiliu16/pix-coding-agent";
-import { DynamicBorder, getAgentDir } from "@chengshiliu16/pix-coding-agent";
+import { CONFIG_DIR_NAME, DynamicBorder, getAgentDir } from "@chengshiliu16/pix-coding-agent";
 import { Container, Key, type SelectItem, SelectList, Text } from "@chengshiliu16/pix-tui";
 
 // Preset configuration
@@ -69,7 +69,7 @@ interface PresetsConfig {
  */
 function loadPresets(cwd: string): PresetsConfig {
 	const globalPath = join(getAgentDir(), "presets.json");
-	const projectPath = join(cwd, ".pix", "presets.json");
+	const projectPath = join(cwd, CONFIG_DIR_NAME, "presets.json");
 
 	let globalPresets: PresetsConfig = {};
 	let projectPresets: PresetsConfig = {};
@@ -104,14 +104,14 @@ interface OriginalState {
 	tools: string[];
 }
 
-export default function presetExtension(pix: ExtensionAPI) {
+export default function presetExtension(pi: ExtensionAPI) {
 	let presets: PresetsConfig = {};
 	let activePresetName: string | undefined;
 	let activePreset: Preset | undefined;
 	let originalState: OriginalState | undefined;
 
 	// Register --preset CLI flag
-	pix.registerFlag("preset", {
+	pi.registerFlag("preset", {
 		description: "Preset configuration to use",
 		type: "string",
 	});
@@ -124,8 +124,8 @@ export default function presetExtension(pix: ExtensionAPI) {
 		if (activePresetName === undefined) {
 			originalState = {
 				model: ctx.model,
-				thinkingLevel: pix.getThinkingLevel(),
-				tools: pix.getActiveTools(),
+				thinkingLevel: pi.getThinkingLevel(),
+				tools: pi.getActiveTools(),
 			};
 		}
 
@@ -133,7 +133,7 @@ export default function presetExtension(pix: ExtensionAPI) {
 		if (preset.provider && preset.model) {
 			const model = ctx.modelRegistry.find(preset.provider, preset.model);
 			if (model) {
-				const success = await pix.setModel(model);
+				const success = await pi.setModel(model);
 				if (!success) {
 					ctx.ui.notify(`Preset "${name}": No API key for ${preset.provider}/${preset.model}`, "warning");
 				}
@@ -144,12 +144,12 @@ export default function presetExtension(pix: ExtensionAPI) {
 
 		// Apply thinking level if specified
 		if (preset.thinkingLevel) {
-			pix.setThinkingLevel(preset.thinkingLevel);
+			pi.setThinkingLevel(preset.thinkingLevel);
 		}
 
 		// Apply tools if specified
 		if (preset.tools && preset.tools.length > 0) {
-			const allToolNames = pix.getAllTools().map((t) => t.name);
+			const allToolNames = pi.getAllTools().map((t) => t.name);
 			const validTools = preset.tools.filter((t) => allToolNames.includes(t));
 			const invalidTools = preset.tools.filter((t) => !allToolNames.includes(t));
 
@@ -158,7 +158,7 @@ export default function presetExtension(pix: ExtensionAPI) {
 			}
 
 			if (validTools.length > 0) {
-				pix.setActiveTools(validTools);
+				pi.setActiveTools(validTools);
 			}
 		}
 
@@ -200,7 +200,10 @@ export default function presetExtension(pix: ExtensionAPI) {
 		const presetNames = Object.keys(presets);
 
 		if (presetNames.length === 0) {
-			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pix/presets.json", "warning");
+			ctx.ui.notify(
+				`No presets defined. Add presets to ${join(getAgentDir(), "presets.json")} or ${join(ctx.cwd, CONFIG_DIR_NAME, "presets.json")}`,
+				"warning",
+			);
 			return;
 		}
 
@@ -270,12 +273,12 @@ export default function presetExtension(pix: ExtensionAPI) {
 			activePreset = undefined;
 			if (originalState) {
 				if (originalState.model) {
-					await pix.setModel(originalState.model);
+					await pi.setModel(originalState.model);
 				}
-				pix.setThinkingLevel(originalState.thinkingLevel);
-				pix.setActiveTools(originalState.tools);
+				pi.setThinkingLevel(originalState.thinkingLevel);
+				pi.setActiveTools(originalState.tools);
 			} else {
-				pix.setActiveTools(["read", "bash", "edit", "write"]);
+				pi.setActiveTools(["read", "bash", "edit", "write"]);
 			}
 			ctx.ui.notify("Preset cleared, defaults restored", "info");
 			updateStatus(ctx);
@@ -308,7 +311,10 @@ export default function presetExtension(pix: ExtensionAPI) {
 	async function cyclePreset(ctx: ExtensionContext): Promise<void> {
 		const presetNames = getPresetOrder();
 		if (presetNames.length === 0) {
-			ctx.ui.notify("No presets defined. Add presets to ~/.pix/agent/presets.json or .pix/presets.json", "warning");
+			ctx.ui.notify(
+				`No presets defined. Add presets to ${join(getAgentDir(), "presets.json")} or ${join(ctx.cwd, CONFIG_DIR_NAME, "presets.json")}`,
+				"warning",
+			);
 			return;
 		}
 
@@ -323,12 +329,12 @@ export default function presetExtension(pix: ExtensionAPI) {
 			activePreset = undefined;
 			if (originalState) {
 				if (originalState.model) {
-					await pix.setModel(originalState.model);
+					await pi.setModel(originalState.model);
 				}
-				pix.setThinkingLevel(originalState.thinkingLevel);
-				pix.setActiveTools(originalState.tools);
+				pi.setThinkingLevel(originalState.thinkingLevel);
+				pi.setActiveTools(originalState.tools);
 			} else {
-				pix.setActiveTools(["read", "bash", "edit", "write"]);
+				pi.setActiveTools(["read", "bash", "edit", "write"]);
 			}
 			ctx.ui.notify("Preset cleared, defaults restored", "info");
 			updateStatus(ctx);
@@ -343,7 +349,7 @@ export default function presetExtension(pix: ExtensionAPI) {
 		updateStatus(ctx);
 	}
 
-	pix.registerShortcut(Key.ctrlShift("u"), {
+	pi.registerShortcut(Key.ctrlShift("u"), {
 		description: "Cycle presets",
 		handler: async (ctx) => {
 			await cyclePreset(ctx);
@@ -351,7 +357,7 @@ export default function presetExtension(pix: ExtensionAPI) {
 	});
 
 	// Register /preset command
-	pix.registerCommand("preset", {
+	pi.registerCommand("preset", {
 		description: "Switch preset configuration",
 		handler: async (args, ctx) => {
 			// If preset name provided, apply directly
@@ -377,7 +383,7 @@ export default function presetExtension(pix: ExtensionAPI) {
 	});
 
 	// Inject preset instructions into system prompt
-	pix.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event) => {
 		if (activePreset?.instructions) {
 			return {
 				systemPrompt: `${event.systemPrompt}\n\n${activePreset.instructions}`,
@@ -386,12 +392,12 @@ export default function presetExtension(pix: ExtensionAPI) {
 	});
 
 	// Initialize on session start
-	pix.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (_event, ctx) => {
 		// Load presets from config files
 		presets = loadPresets(ctx.cwd);
 
 		// Check for --preset flag
-		const presetFlag = pix.getFlag("preset");
+		const presetFlag = pi.getFlag("preset");
 		if (typeof presetFlag === "string" && presetFlag) {
 			const preset = presets[presetFlag];
 			if (preset) {
@@ -422,9 +428,9 @@ export default function presetExtension(pix: ExtensionAPI) {
 	});
 
 	// Persist preset state
-	pix.on("turn_start", async () => {
+	pi.on("turn_start", async () => {
 		if (activePresetName) {
-			pix.appendEntry("preset-state", { name: activePresetName });
+			pi.appendEntry("preset-state", { name: activePresetName });
 		}
 	});
 }

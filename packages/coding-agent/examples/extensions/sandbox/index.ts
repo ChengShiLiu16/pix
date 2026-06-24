@@ -30,8 +30,8 @@
  * ```
  *
  * Usage:
- * - `pix -e ./sandbox` - sandbox enabled with default/config settings
- * - `pix -e ./sandbox --no-sandbox` - disable sandboxing
+ * - `pi -e ./sandbox` - sandbox enabled with default/config settings
+ * - `pi -e ./sandbox --no-sandbox` - disable sandboxing
  * - `/sandbox` - show current sandbox configuration
  *
  * Setup:
@@ -46,7 +46,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
-import { type BashOperations, createBashTool, getAgentDir } from "@chengshiliu16/pix-coding-agent";
+import { type BashOperations, CONFIG_DIR_NAME, createBashTool, getAgentDir } from "@chengshiliu16/pix-coding-agent";
 
 interface SandboxConfig extends SandboxRuntimeConfig {
 	enabled?: boolean;
@@ -77,7 +77,7 @@ const DEFAULT_CONFIG: SandboxConfig = {
 };
 
 function loadConfig(cwd: string): SandboxConfig {
-	const projectConfigPath = join(cwd, ".pix", "sandbox.json");
+	const projectConfigPath = join(cwd, CONFIG_DIR_NAME, "sandbox.json");
 	const globalConfigPath = join(getAgentDir(), "extensions", "sandbox.json");
 
 	let globalConfig: Partial<SandboxConfig> = {};
@@ -198,8 +198,8 @@ function createSandboxedBashOps(): BashOperations {
 	};
 }
 
-export default function (pix: ExtensionAPI) {
-	pix.registerFlag("no-sandbox", {
+export default function (pi: ExtensionAPI) {
+	pi.registerFlag("no-sandbox", {
 		description: "Disable OS-level sandboxing for bash commands",
 		type: "boolean",
 		default: false,
@@ -211,7 +211,7 @@ export default function (pix: ExtensionAPI) {
 	let sandboxEnabled = false;
 	let sandboxInitialized = false;
 
-	pix.registerTool({
+	pi.registerTool({
 		...localBash,
 		label: "bash (sandboxed)",
 		async execute(id, params, signal, onUpdate, _ctx) {
@@ -226,13 +226,13 @@ export default function (pix: ExtensionAPI) {
 		},
 	});
 
-	pix.on("user_bash", () => {
+	pi.on("user_bash", () => {
 		if (!sandboxEnabled || !sandboxInitialized) return;
 		return { operations: createSandboxedBashOps() };
 	});
 
-	pix.on("session_start", async (_event, ctx) => {
-		const noSandbox = pix.getFlag("no-sandbox") as boolean;
+	pi.on("session_start", async (_event, ctx) => {
+		const noSandbox = pi.getFlag("no-sandbox") as boolean;
 
 		if (noSandbox) {
 			sandboxEnabled = false;
@@ -284,7 +284,7 @@ export default function (pix: ExtensionAPI) {
 		}
 	});
 
-	pix.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async () => {
 		if (sandboxInitialized) {
 			try {
 				await SandboxManager.reset();
@@ -294,7 +294,7 @@ export default function (pix: ExtensionAPI) {
 		}
 	});
 
-	pix.registerCommand("sandbox", {
+	pi.registerCommand("sandbox", {
 		description: "Show sandbox configuration",
 		handler: async (_args, ctx) => {
 			if (!sandboxEnabled) {

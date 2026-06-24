@@ -1,4 +1,5 @@
 import type { Transport } from "@chengshiliu16/pix-ai";
+import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -35,7 +36,7 @@ export interface TerminalSettings {
 	imageWidthCells?: number; // default: 60 (preferred inline image width in terminal cells)
 	clearOnShrink?: boolean; // default: false (clear empty rows when content shrinks)
 	showTerminalProgress?: boolean; // default: false (OSC 9;4 terminal progress indicators)
-	mouseUI?: boolean; // default: true (alt-screen mouse UI: click-to-expand, app scroll, drag-select; PIX_MOUSE_UI=0 to opt out)
+	mouseUI?: boolean; // default: true (alt-screen mouse UI; PIX_MOUSE_UI=0 to opt out)
 }
 
 export interface ImageSettings {
@@ -57,6 +58,8 @@ export interface MarkdownSettings {
 export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
+
+export type DefaultProjectTrust = "ask" | "always" | "never";
 
 export type TransportSetting = Transport;
 
@@ -90,10 +93,13 @@ export interface Settings {
 	hideThinkingBlock?: boolean;
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	quietStartup?: boolean;
+	defaultProjectTrust?: DefaultProjectTrust; // default: "ask"; global setting only
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	collapseChangelog?: boolean; // Show condensed changelog after update (use /changelog for full)
 	enableInstallTelemetry?: boolean; // default: true - anonymous version/update ping after changelog-detected updates
+	enableAnalytics?: boolean; // default: false - opt-in analytics data sharing
+	trackingId?: string; // analytics tracking identifier, generated when analytics is enabled
 	packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
 	extensions?: string[]; // Array of local extension file paths or directories
 	skills?: string[]; // Array of local skill file paths or directories
@@ -102,6 +108,7 @@ export interface Settings {
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
+	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
 	treeFilterMode?: "default" | "no-tools" | "user-only" | "labeled-only" | "all"; // Default filter when opening /tree
 	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
@@ -111,6 +118,7 @@ export interface Settings {
 	markdown?: MarkdownSettings;
 	warnings?: WarningSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	httpProxy?: string; // Proxy URL applied as HTTP_PROXY and HTTPS_PROXY for Pi-managed HTTP clients
 	httpIdleTimeoutMs?: number; // HTTP header/body idle timeout in milliseconds; 0 disables it
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 }
@@ -707,8 +715,15 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getThemeSetting(): string | undefined {
+		const value = this.settings.theme;
+		if (typeof value === "string") return value;
+		return undefined;
+	}
+
 	getTheme(): string | undefined {
-		return this.settings.theme;
+		const theme = this.getThemeSetting();
+		return theme?.includes("/") ? undefined : theme;
 	}
 
 	setTheme(theme: string): void {
@@ -853,6 +868,17 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getDefaultProjectTrust(): DefaultProjectTrust {
+		const value = this.globalSettings.defaultProjectTrust;
+		return value === "always" || value === "never" ? value : "ask";
+	}
+
+	setDefaultProjectTrust(defaultProjectTrust: DefaultProjectTrust): void {
+		this.globalSettings.defaultProjectTrust = defaultProjectTrust;
+		this.markModified("defaultProjectTrust");
+		this.save();
+	}
+
 	getShellCommandPrefix(): string | undefined {
 		return this.settings.shellCommandPrefix;
 	}
@@ -890,6 +916,25 @@ export class SettingsManager {
 	setEnableInstallTelemetry(enabled: boolean): void {
 		this.globalSettings.enableInstallTelemetry = enabled;
 		this.markModified("enableInstallTelemetry");
+		this.save();
+	}
+
+	getEnableAnalytics(): boolean {
+		return this.settings.enableAnalytics ?? false;
+	}
+
+	getTrackingId(): string | undefined {
+		return this.settings.trackingId;
+	}
+
+	/** Set the analytics opt-in preference; generates a tracking identifier on first opt-in */
+	setEnableAnalytics(enabled: boolean): void {
+		this.globalSettings.enableAnalytics = enabled;
+		this.markModified("enableAnalytics");
+		if (enabled && !this.globalSettings.trackingId) {
+			this.globalSettings.trackingId = randomUUID();
+			this.markModified("trackingId");
+		}
 		this.save();
 	}
 
@@ -1022,7 +1067,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PIX_CLEAR_ON_SHRINK === "1";
+		return process.env.PI_CLEAR_ON_SHRINK === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1035,8 +1080,6 @@ export class SettingsManager {
 	}
 
 	getMouseUI(): boolean {
-		// Settings takes precedence; otherwise default on, with PIX_MOUSE_UI=0 as an
-		// env opt-out (e.g. for terminals where mouse reporting misbehaves).
 		if (this.settings.terminal?.mouseUI !== undefined) {
 			return this.settings.terminal.mouseUI;
 		}
@@ -1091,6 +1134,16 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getEnabledModels(): string[] | undefined {
+		return this.settings.enabledModels;
+	}
+
+	setEnabledModels(patterns: string[] | undefined): void {
+		this.globalSettings.enabledModels = patterns;
+		this.markModified("enabledModels");
+		this.save();
+	}
+
 	getDoubleEscapeAction(): "fork" | "tree" | "none" {
 		return this.settings.doubleEscapeAction ?? "tree";
 	}
@@ -1114,7 +1167,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PIX_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

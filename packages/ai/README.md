@@ -8,6 +8,7 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 
 - [Supported Providers](#supported-providers)
 - [Installation](#installation)
+- [Base Entry Point](#base-entry-point)
 - [Quick Start](#quick-start)
 - [Tools](#tools)
   - [Defining Tools](#defining-tools)
@@ -38,6 +39,7 @@ Unified LLM API with automatic model discovery, provider configuration, token an
 - [Browser Usage](#browser-usage)
   - [Browser Compatibility Notes](#browser-compatibility-notes)
   - [Environment Variables](#environment-variables-nodejs-only)
+  - [Provider-Scoped Environment Overrides](#provider-scoped-environment-overrides)
   - [Checking Environment Variables](#checking-environment-variables)
 - [OAuth Providers](#oauth-providers)
   - [Vertex AI](#vertex-ai)
@@ -86,6 +88,30 @@ npm install @chengshiliu16/pix-ai
 ```
 
 TypeBox exports are re-exported from `@chengshiliu16/pix-ai`: `Type`, `Static`, and `TSchema`.
+
+## Base Entry Point
+
+Use `@chengshiliu16/pix-ai/base` when a bundler should include only explicitly selected transport implementations. The base entry point exposes model discovery, registries, generic dispatch, environment-key helpers, and provider-neutral utilities without registering built-in transports during module initialization. Generic dispatch still resolves configured environment keys when called.
+
+Import each selected transport directly and call its `register()` function:
+
+```typescript
+import { getModel, streamSimple } from '@chengshiliu16/pix-ai/base';
+import { register as registerAnthropic } from '@chengshiliu16/pix-ai/anthropic';
+
+registerAnthropic();
+
+const model = getModel('anthropic', 'claude-sonnet-4-6');
+const response = await streamSimple(model, {
+  messages: [{ role: 'user', content: 'Hello!' }]
+}, {
+  apiKey: process.env.ANTHROPIC_API_KEY
+}).result();
+```
+
+Direct transport imports bundle their implementation and SDK code. Register only the transports used by the application. For example, OpenRouter, Groq, xAI, and DeepSeek chat models share the `@chengshiliu16/pix-ai/openai-completions` transport.
+
+Use `@chengshiliu16/pix-ai` for the batteries-included behavior. The root entry point remains backward-compatible: it registers lazy wrappers for all built-in transports and resolves environment API keys automatically during dispatch.
 
 ## Quick Start
 
@@ -390,7 +416,7 @@ All streaming events emitted during assistant message generation:
 | `done` | Stream complete | `reason`: Stop reason ("stop", "length", "toolUse"), `message`: Final assistant message |
 | `error` | Error occurred | `reason`: Error type ("error" or "aborted"), `error`: AssistantMessage with partial content |
 
-Streaming events for different content blocks are not guaranteed to be contiguous. Providers may emit deltas for text, thinking, and tool calls in the same upstream chunk, and pix may surface corresponding events interleaved, for example `text_start`, `text_delta`, `toolcall_start`, `text_delta`, `toolcall_delta`. Consumers must use `contentIndex` to associate each delta/end event with its block and must not assume that a block's `*_start`/`*_delta`/`*_end` sequence is uninterrupted by events for other blocks.
+Streaming events for different content blocks are not guaranteed to be contiguous. Providers may emit deltas for text, thinking, and tool calls in the same upstream chunk, and pi may surface corresponding events interleaved, for example `text_start`, `text_delta`, `toolcall_start`, `text_delta`, `toolcall_delta`. Consumers must use `contentIndex` to associate each delta/end event with its block and must not assume that a block's `*_start`/`*_delta`/`*_end` sequence is uninterrupted by events for other blocks.
 
 ## Image Input
 
@@ -894,7 +920,7 @@ const response = await stream(ollamaModel, context, {
 
 Some OpenAI-compatible servers do not understand the `developer` role used for reasoning-capable models. For those providers, set `compat.supportsDeveloperRole` to `false` so the system prompt is sent as a `system` message instead. If the server also does not support `reasoning_effort`, set `compat.supportsReasoningEffort` to `false` too.
 
-Use model-level `thinkingLevelMap` to describe model-specific thinking controls. Keys are pix thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Missing keys use provider defaults, string values are sent to the provider, and `null` marks a level unsupported.
+Use model-level `thinkingLevelMap` to describe model-specific thinking controls. Keys are pi thinking levels (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). Missing keys use provider defaults, string values are sent to the provider, and `null` marks a level unsupported.
 
 This commonly applies to Ollama, vLLM, SGLang, and similar OpenAI-compatible servers. You can set `compat` at the provider level or per model.
 
@@ -926,7 +952,7 @@ const ollamaReasoningModel: Model<'openai-completions'> = {
 
 ### OpenAI Compatibility Settings
 
-The `openai-completions` API is implemented by many providers with minor differences. By default, the library auto-detects compatibility settings based on `baseUrl` for a small set of known OpenAI-compatible providers (Cerebras, xAI, Chutes, DeepSeek, NVIDIA NIM, Together AI, zAi, OpenCode, Cloudflare Workers AI, etc.). For custom proxies or unknown endpoints, you can override these settings via the `compat` field. For `openai-responses` models, the compat field only supports Responses-specific flags.
+The `openai-completions` API is implemented by many providers with minor differences. By default, the library auto-detects compatibility settings based on `baseUrl` for a small set of known OpenAI-compatible providers (Cerebras, xAI, Chutes, DeepSeek, NVIDIA NIM, Together AI, zAi, OpenCode, Cloudflare Workers AI, etc.). For custom proxies or unknown endpoints, you can override these settings via the `compat` field. For `openai-responses` models, the compat field supports Responses-specific flags.
 
 ```typescript
 interface OpenAICompletionsCompat {
@@ -948,7 +974,9 @@ interface OpenAICompletionsCompat {
 }
 
 interface OpenAIResponsesCompat {
-  // Reserved for future use
+  supportsDeveloperRole?: boolean;   // Whether provider supports `developer` role vs `system` (default: true)
+  sendSessionIdHeader?: boolean;     // Whether to send `session_id` from `sessionId` when caching is enabled (default: true)
+  supportsLongCacheRetention?: boolean; // Whether provider supports `prompt_cache_retention: "24h"` (default: true)
 }
 ```
 
@@ -1094,6 +1122,7 @@ const response = await complete(model, {
 - OAuth login flows are not supported in browser environments. Use the `@chengshiliu16/pix-ai/oauth` entry point in Node.js.
 - In browser builds, Bedrock can still appear in model lists. Calls to Bedrock models fail at runtime.
 - Use a server-side proxy or backend service if you need Bedrock or OAuth-based auth from a web app.
+- Use `@chengshiliu16/pix-ai/base` plus explicit direct transport registration when a browser bundle should exclude unused provider SDK implementations.
 
 ### Environment Variables (Node.js only)
 
@@ -1142,6 +1171,24 @@ const response = await complete(model, context, {
   apiKey: 'sk-different-key'
 });
 ```
+
+### Provider-Scoped Environment Overrides
+
+Pass `env` in stream options to scope provider configuration to a request. Values in `env` are used before process environment variables for API key discovery and provider configuration such as Cloudflare account IDs, Azure OpenAI settings, Vertex project/location, Bedrock settings, `PI_CACHE_RETENTION`, and `HTTP_PROXY`/`HTTPS_PROXY`.
+
+```typescript
+const model = getModel('cloudflare-ai-gateway', 'workers-ai/@cf/moonshotai/kimi-k2.6');
+
+const response = await complete(model, context, {
+  env: {
+    CLOUDFLARE_API_KEY: '...',
+    CLOUDFLARE_ACCOUNT_ID: 'account-id',
+    CLOUDFLARE_GATEWAY_ID: 'gateway-id'
+  }
+});
+```
+
+Use this when one process needs different provider settings per request, or when ambient environment variables should not leak into a provider call.
 
 ### Checking Environment Variables
 
@@ -1312,6 +1359,7 @@ Create a new provider file (for example `amazon-bedrock.ts`) that exports:
 
 - `stream<Provider>()` function returning `AssistantMessageEventStream`
 - `streamSimple<Provider>()` for `SimpleStreamOptions` mapping
+- `register()` for explicit direct transport registration from `@chengshiliu16/pix-ai/base`
 - Provider-specific options interface
 - Message conversion functions to transform `Context` to provider format
 - Tool conversion if the provider supports tools
@@ -1322,7 +1370,8 @@ Create a new provider file (for example `amazon-bedrock.ts`) that exports:
 - Register the API with `registerApiProvider()`
 - Add a package subpath export in `package.json` for the provider module (`./dist/providers/<provider>.js`)
 - Add lazy loader wrappers in `src/providers/register-builtins.ts`, do not statically import provider implementation modules there
-- Add any root-level `export type` re-exports in `src/index.ts` that should remain available from `@chengshiliu16/pix-ai`
+- Add any root-level `export type` re-exports in `src/index.ts` and `src/base.ts` that should remain available from `@chengshiliu16/pix-ai` and `@chengshiliu16/pix-ai/base`
+- Keep `src/base.ts` free of built-in registration imports
 - Add credential detection in `env-api-keys.ts` for the new provider
 - Ensure `streamSimple` handles auth lookup via `getEnvApiKey()` or provider-specific auth
 

@@ -1,4 +1,4 @@
-import type { Message } from "@chengshiliu16/pix-ai";
+import type { Message } from "@chengshiliu16/pix-ai/base";
 import type { AgentMessage } from "../../types.ts";
 
 /** File paths touched by a session branch or compaction range. */
@@ -73,6 +73,12 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 
+function typeTag(v: object): string {
+	const ctor = v.constructor?.name ?? "Object";
+	if (Array.isArray(v)) return `Array[${v.length}]`;
+	return ctor;
+}
+
 /** 序列化 token 估算和摘要输入，容忍循环引用并限制大型嵌套结构。 */
 export function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string {
 	const seen = new WeakSet<object>();
@@ -117,12 +123,6 @@ export function safeJsonStringifyForTokens(value: unknown, maxDepth = 3): string
 
 	const result = stringify(value, 0);
 	return truncated ? `${result}⟪truncated⟫` : result;
-}
-
-function typeTag(v: object): string {
-	const ctor = v.constructor?.name ?? "Object";
-	if (Array.isArray(v)) return `Array[${v.length}]`;
-	return ctor;
 }
 
 function truncateForSummary(text: string, maxChars: number): string {

@@ -1,5 +1,4 @@
-import type { Model } from "@chengshiliu16/pix-ai";
-import { completeSimple } from "@chengshiliu16/pix-ai";
+import { completeSimple, type Model } from "@chengshiliu16/pix-ai/base";
 import type { AgentMessage } from "../../types.ts";
 import {
 	convertToLlm,

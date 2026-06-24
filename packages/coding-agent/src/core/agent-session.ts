@@ -48,6 +48,7 @@ import {
 	collectEntriesForBranchSummary,
 	compact,
 	estimateContextTokens,
+	estimateTokens,
 	generateBranchSummary,
 	prepareCompaction,
 	resolveCompactionSettings,
@@ -189,6 +190,7 @@ export interface AgentSessionConfig {
 	modelRegistry: ModelRegistry;
 	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Optional allowlist of tool names. When provided, only these tool names are exposed. */
 	allowedToolNames?: string[];
 	/** Optional denylist of tool names. When provided, these tool names are not exposed. */
@@ -233,6 +235,7 @@ export interface PromptOptions {
 export interface ModelCycleResult {
 	model: Model<any>;
 	thinkingLevel: ThinkingLevel;
+	isScoped?: boolean;
 }
 
 /** Session statistics for /session command */
@@ -257,6 +260,14 @@ export interface SessionStats {
 
 export interface TreeWorkspaceRestoreResult extends WorkspaceRestoreResult {
 	mode: "filesystem" | "git";
+}
+
+function estimateMessagesTokens(messages: AgentMessage[]): number {
+	let tokens = 0;
+	for (const message of messages) {
+		tokens += estimateTokens(message);
+	}
+	return tokens;
 }
 
 interface ToolDefinitionEntry {
@@ -371,6 +382,7 @@ export class AgentSession {
 
 	// Model registry for API key resolution
 	private _modelRegistry: ModelRegistry;
+	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
 	// Tool registry for extension getTools/setTools
 	private _toolRegistry: Map<string, AgentTool> = new Map();
@@ -392,6 +404,7 @@ export class AgentSession {
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
 		this._modelRegistry = config.modelRegistry;
+		this._scopedModels = config.scopedModels ?? [];
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
@@ -944,6 +957,16 @@ export class AgentSession {
 	}
 
 	/** Current session display name, if set */
+	/** Scoped models for cycling (from --models flag) */
+	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
+		return this._scopedModels;
+	}
+
+	/** Update scoped models for cycling */
+	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
+		this._scopedModels = scopedModels;
+	}
+
 	get sessionName(): string | undefined {
 		return this.sessionManager.getSessionName();
 	}
@@ -1124,6 +1147,9 @@ export class AgentSession {
 				}
 			}
 
+			// Capture streaming queue intent before emitInput; isStreaming can flip while handlers run.
+			const shouldQueueStreamMessage = this.isStreaming && options?.streamingBehavior !== undefined;
+
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = options?.images;
@@ -1132,7 +1158,7 @@ export class AgentSession {
 					currentText,
 					currentImages,
 					options?.source ?? "interactive",
-					this.isStreaming ? options?.streamingBehavior : undefined,
+					shouldQueueStreamMessage ? options?.streamingBehavior : undefined,
 				);
 				if (inputResult.action === "handled") {
 					preflightResult?.(true);
@@ -1152,19 +1178,20 @@ export class AgentSession {
 			}
 
 			// If streaming, queue via steer() or followUp() based on option
-			if (this.isStreaming) {
-				if (!options?.streamingBehavior) {
-					throw new Error(
-						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
-					);
-				}
-				if (options.streamingBehavior === "followUp") {
+			if (shouldQueueStreamMessage) {
+				if (options?.streamingBehavior === "followUp") {
 					await this._queueFollowUp(expandedText, currentImages);
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
 				preflightResult?.(true);
 				return;
+			}
+
+			if (this.isStreaming) {
+				throw new Error(
+					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+				);
 			}
 
 			// Flush any pending bash messages before the new prompt
@@ -1475,6 +1502,9 @@ export class AgentSession {
 		content: string | (TextContent | ImageContent)[],
 		options?: { deliverAs?: "steer" | "followUp" },
 	): Promise<void> {
+		// Capture queue intent before any await; isStreaming can flip while handlers run.
+		const queueAs = this.isStreaming ? options?.deliverAs : undefined;
+
 		// Normalize content to text string + optional images
 		let text: string;
 		let images: ImageContent[] | undefined;
@@ -1495,11 +1525,31 @@ export class AgentSession {
 			if (images.length === 0) images = undefined;
 		}
 
-		// Use prompt() with expandPromptTemplates: false to skip command handling and template expansion
-		await this.prompt(text, {
+		let currentText = text;
+		let currentImages = images;
+		if (this._extensionRunner.hasHandlers("input")) {
+			const inputResult = await this._extensionRunner.emitInput(currentText, currentImages, "extension", queueAs);
+			if (inputResult.action === "handled") {
+				return;
+			}
+			if (inputResult.action === "transform") {
+				currentText = inputResult.text;
+				currentImages = inputResult.images ?? currentImages;
+			}
+		}
+
+		if (queueAs === "followUp") {
+			await this._queueFollowUp(currentText, currentImages);
+			return;
+		}
+		if (queueAs === "steer") {
+			await this._queueSteer(currentText, currentImages);
+			return;
+		}
+
+		await this.prompt(currentText, {
 			expandPromptTemplates: false,
-			streamingBehavior: options?.deliverAs,
-			images,
+			images: currentImages,
 			source: "extension",
 		});
 	}
@@ -1589,12 +1639,44 @@ export class AgentSession {
 
 	/**
 	 * Cycle to next/previous model.
-	 * Uses all available models.
+	 * Uses scoped models (from --models flag) if available, otherwise all available models.
 	 * @param direction - "forward" (default) or "backward"
 	 * @returns The new model info, or undefined if only one model available
 	 */
 	async cycleModel(direction: "forward" | "backward" = "forward"): Promise<ModelCycleResult | undefined> {
+		if (this._scopedModels.length > 0) {
+			return this._cycleScopedModel(direction);
+		}
 		return this._cycleAvailableModel(direction);
+	}
+
+	private async _cycleScopedModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
+		const scopedModels = this._scopedModels.filter((scoped) => this._modelRegistry.hasConfiguredAuth(scoped.model));
+		if (scopedModels.length <= 1) return undefined;
+
+		const currentModel = this.model;
+		let currentIndex = scopedModels.findIndex((sm) => modelsAreEqual(sm.model, currentModel));
+
+		if (currentIndex === -1) currentIndex = 0;
+		const len = scopedModels.length;
+		const nextIndex = direction === "forward" ? (currentIndex + 1) % len : (currentIndex - 1 + len) % len;
+		const next = scopedModels[nextIndex];
+		const thinkingLevel = this._getThinkingLevelForModelSwitch(next.thinkingLevel);
+
+		// Apply model
+		this.agent.state.model = next.model;
+		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
+		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
+
+		// Apply thinking level.
+		// - Explicit scoped model thinking level overrides current session level
+		// - Undefined scoped model thinking level inherits the current session preference
+		// setThinkingLevel clamps to model capabilities.
+		this.setThinkingLevel(thinkingLevel);
+
+		await this._emitModelSelect(next.model, currentModel, "cycle");
+
+		return { model: next.model, thinkingLevel: this.thinkingLevel, isScoped: true };
 	}
 
 	private async _cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
@@ -1746,10 +1828,7 @@ export class AgentSession {
 			const { apiKey, headers } = await this._getCompactionRequestAuth(this.model);
 
 			const pathEntries = this.sessionManager.getBranch();
-			const settings = resolveCompactionSettings(
-				this.settingsManager.getCompactionSettings(),
-				this.model.contextWindow ?? 0,
-			);
+			const settings = this.settingsManager.getCompactionSettings();
 
 			const preparation = prepareCompaction(pathEntries, settings);
 			if (!preparation) {
@@ -1810,8 +1889,6 @@ export class AgentSession {
 					this._compactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,
-					this.sessionId,
-					"manual",
 				);
 				summary = result.summary;
 				firstKeptEntryId = result.firstKeptEntryId;
@@ -1827,6 +1904,7 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
@@ -1845,6 +1923,7 @@ export class AgentSession {
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
+				estimatedTokensAfter,
 				details,
 			};
 			this._emit({
@@ -1928,8 +2007,17 @@ export class AgentSession {
 			return false;
 		}
 
-		// Case 1: Overflow - LLM returned context overflow error
+		// Case 1: Overflow - LLM returned context overflow error, or silent overflow (z.ai style).
+		// Successful overflow responses (stopReason "stop") still need compaction,
+		// but must not retry: the assistant answer already completed and agent.continue() cannot
+		// continue from an assistant message.
 		if (sameModel && isContextOverflow(assistantMessage, contextWindow)) {
+			const willRetry = assistantMessage.stopReason !== "stop";
+
+			if (!willRetry) {
+				return await this._runAutoCompaction("overflow", false);
+			}
+
 			if (this._overflowRecoveryAttempted) {
 				this._emit({
 					type: "compaction_end",
@@ -1950,7 +2038,7 @@ export class AgentSession {
 			if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
 				this.agent.state.messages = messages.slice(0, -1);
 			}
-			return await this._runAutoCompaction("overflow", true);
+			return await this._runAutoCompaction("overflow", willRetry);
 		}
 
 		// Case 2: Threshold - context is getting large
@@ -2011,10 +2099,7 @@ export class AgentSession {
 	 * Internal: Run auto-compaction with events.
 	 */
 	private async _runAutoCompaction(reason: "overflow" | "threshold", willRetry: boolean): Promise<boolean> {
-		const settings = resolveCompactionSettings(
-			this.settingsManager.getCompactionSettings(),
-			this.model?.contextWindow ?? 0,
-		);
+		const settings = this.settingsManager.getCompactionSettings();
 
 		this._emit({ type: "compaction_start", reason });
 		this._autoCompactionAbortController = new AbortController();
@@ -2121,8 +2206,6 @@ export class AgentSession {
 					this._autoCompactionAbortController.signal,
 					this.thinkingLevel,
 					this.agent.streamFn,
-					this.sessionId,
-					reason,
 				);
 				summary = compactResult.summary;
 				firstKeptEntryId = compactResult.firstKeptEntryId;
@@ -2145,6 +2228,7 @@ export class AgentSession {
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
+			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
@@ -2163,6 +2247,7 @@ export class AgentSession {
 				summary,
 				firstKeptEntryId,
 				tokensBefore,
+				estimatedTokensAfter,
 				details,
 			};
 			this._emit({ type: "compaction_end", reason, result, aborted: false, willRetry });
@@ -2350,12 +2435,13 @@ export class AgentSession {
 					});
 				},
 				sendUserMessage: (content, options) => {
-					this.sendUserMessage(content, options).catch((err) => {
+					return this.sendUserMessage(content, options).catch((err) => {
 						runner.emitError({
 							extensionPath: "<runtime>",
 							event: "send_user_message",
 							error: err instanceof Error ? err.message : String(err),
 						});
+						throw err;
 					});
 				},
 				appendEntry: (customType, data) => {
@@ -2412,6 +2498,7 @@ export class AgentSession {
 				},
 				getSystemPrompt: () => this.systemPrompt,
 				getSystemPromptOptions: () => this._baseSystemPromptOptions,
+				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 			},
 			{
 				registerProvider: (name, config) => {
