@@ -31,6 +31,7 @@ pi list                     # show installed packages from settings
 pi update                   # update pi only
 pi update --all             # update pi, update packages, and reconcile pinned git refs
 pi update --extensions      # update packages and reconcile pinned git refs only
+pi update --models          # refresh model catalogs only
 pi update --self            # update pi only
 pi update --self --force    # reinstall pi even if current
 pi update npm:@foo/bar      # update one package
@@ -216,11 +217,11 @@ Filter what a package loads using the object form in settings:
 
 ## Enable and Disable Resources
 
-Use `pix config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. Works for both global (`~/.pix/agent`) and project (`.pix/`) scopes.
+Use `pix config` to enable or disable extensions, skills, prompt templates, and themes from installed packages and local directories. `pix config` starts in global settings (`~/.pix/agent/settings.json`); press Tab to switch between global and project-local modes. Use `pix config -l` to start in project overrides (`.pix/settings.json`) with inherited global resources dimmed.
 
 ## Scope and Deduplication
 
-Packages can appear in both global and project settings. If the same package appears in both, the project entry wins. Identity is determined by:
+Packages can appear in both global and project settings. If the same package appears in both, the project entry wins unless the project entry has `autoload: false`, in which case it is applied as a delta over the global entry. Identity is determined by:
 
 - npm: package name
 - git: repository URL without ref

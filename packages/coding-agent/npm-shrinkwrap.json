@@ -1,17 +1,17 @@
 {
 	"name": "@chengshiliu16/pix-coding-agent",
-	"version": "0.79.8",
+	"version": "0.81.1",
 	"lockfileVersion": 3,
 	"requires": true,
 	"packages": {
 		"": {
 			"name": "@chengshiliu16/pix-coding-agent",
-			"version": "0.79.8",
+			"version": "0.81.1",
 			"license": "MIT",
 			"dependencies": {
-				"@chengshiliu16/pix-agent-core": "^0.79.8",
-				"@chengshiliu16/pix-ai": "^0.79.8",
-				"@chengshiliu16/pix-tui": "^0.79.8",
+				"@chengshiliu16/pix-agent-core": "^0.81.1",
+				"@chengshiliu16/pix-ai": "^0.81.1",
+				"@chengshiliu16/pix-tui": "^0.81.1",
 				"@silvia-odwyer/photon-node": "0.3.4",
 				"chalk": "5.6.2",
 				"cross-spawn": "7.0.6",
@@ -475,11 +475,11 @@
 			}
 		},
 		"node_modules/@chengshiliu16/pix-agent-core": {
-			"version": "0.79.8",
-			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-agent-core/-/pix-agent-core-0.79.8.tgz",
+			"version": "0.81.1",
+			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-agent-core/-/pix-agent-core-0.81.1.tgz",
 			"license": "MIT",
 			"dependencies": {
-				"@chengshiliu16/pix-ai": "^0.79.8",
+				"@chengshiliu16/pix-ai": "^0.81.1",
 				"ignore": "7.0.5",
 				"typebox": "1.1.38",
 				"yaml": "2.9.0"
@@ -489,8 +489,8 @@
 			}
 		},
 		"node_modules/@chengshiliu16/pix-ai": {
-			"version": "0.79.8",
-			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-ai/-/pix-ai-0.79.8.tgz",
+			"version": "0.81.1",
+			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-ai/-/pix-ai-0.81.1.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"@anthropic-ai/sdk": "0.91.1",
@@ -506,15 +506,15 @@
 				"typebox": "1.1.38"
 			},
 			"bin": {
-				"pi-ai": "./dist/cli.js"
+				"pi-ai": "dist/cli.js"
 			},
 			"engines": {
 				"node": ">=22.19.0"
 			}
 		},
 		"node_modules/@chengshiliu16/pix-tui": {
-			"version": "0.79.8",
-			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-tui/-/pix-tui-0.79.8.tgz",
+			"version": "0.81.1",
+			"resolved": "https://registry.npmjs.org/@chengshiliu16/pix-tui/-/pix-tui-0.81.1.tgz",
 			"license": "MIT",
 			"dependencies": {
 				"get-east-asian-width": "1.6.0",
@@ -1336,9 +1336,9 @@
 			"license": "MIT"
 		},
 		"node_modules/brace-expansion": {
-			"version": "5.0.6",
-			"resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.6.tgz",
-			"integrity": "sha512-kLpxurY4Z4r9sgMsyG0Z9uzsBlgiU/EFKhj/h91/8yHu0edo7XuixOIH3VcJ8kkxs6/jPzoI6U9Vj3WqbMQ94g==",
+			"version": "5.0.7",
+			"resolved": "https://registry.npmjs.org/brace-expansion/-/brace-expansion-5.0.7.tgz",
+			"integrity": "sha512-7oFy703dxfY3/NLxC1fh2SUCQ0H9rmAY+5EpDVfXjUTTs+HEwR2nYaqLv+GWcTsumwxPfiz6CzCNkwXwBUwqCA==",
 			"license": "MIT",
 			"dependencies": {
 				"balanced-match": "^4.0.2"

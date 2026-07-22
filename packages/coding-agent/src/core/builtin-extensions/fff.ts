@@ -239,7 +239,7 @@ export function builtin(pix: ExtensionAPI): void {
 		if (finder && !finder.isDestroyed && finderCwd === cwd) return Promise.resolve(finder);
 		if (finderPromise) return finderPromise;
 
-		finderPromise = (async () => {
+		finderPromise = (async (): Promise<FileFinder> => {
 			destroyFinder();
 			const created = FileFinder.create({
 				basePath: cwd,
@@ -253,10 +253,14 @@ export function builtin(pix: ExtensionAPI): void {
 			if (!created.ok) {
 				throw new Error(`Failed to create FFF file finder: ${created.error}`);
 			}
-			finder = created.value;
+			const instance = created.value as FileFinder | undefined;
+			if (!instance) {
+				throw new Error("Failed to create FFF file finder: missing instance");
+			}
+			finder = instance;
 			finderCwd = cwd;
-			await finder.waitForScan(15000);
-			return finder;
+			await instance.waitForScan(15000);
+			return instance;
 		})().finally(() => {
 			finderPromise = undefined;
 		});
@@ -514,14 +518,15 @@ export function builtin(pix: ExtensionAPI): void {
 			ctx.ui.addAutocompleteProvider((fallback) => createFffMentionProvider(getMentionItems, fallback));
 		}
 
-		ctx.ui.setStatus("fff", "indexing");
+		const ui = ctx.ui;
+		ui.setStatus("fff", "indexing");
 		void ensureFinder(activeCwd)
 			.then(() => {
-				ctx.ui.setStatus("fff", undefined);
+				ui.setStatus("fff", undefined);
 			})
 			.catch((error: unknown) => {
-				ctx.ui.setStatus("fff", "failed");
-				ctx.ui.notify(`FFF init failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+				ui.setStatus("fff", "failed");
+				ui.notify(`FFF init failed: ${error instanceof Error ? error.message : String(error)}`, "error");
 			});
 	});
 

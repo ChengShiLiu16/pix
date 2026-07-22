@@ -7,11 +7,13 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as _bundledPixAgentCore from "@chengshiliu16/pix-agent-core";
-import * as _bundledPixAi from "@chengshiliu16/pix-ai";
-import * as _bundledPixAiOauth from "@chengshiliu16/pix-ai/oauth";
+import * as _bundledPiAgentCore from "@chengshiliu16/pix-agent-core";
+import type { Provider } from "@chengshiliu16/pix-ai";
+import * as _bundledPiAiCompat from "@chengshiliu16/pix-ai/compat";
+import * as _bundledPiAiOauth from "@chengshiliu16/pix-ai/oauth";
+import * as _bundledPiAiProviders from "@chengshiliu16/pix-ai/providers/all";
 import type { KeyId } from "@chengshiliu16/pix-tui";
-import * as _bundledPixTui from "@chengshiliu16/pix-tui";
+import * as _bundledPiTui from "@chengshiliu16/pix-tui";
 import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
@@ -28,7 +30,9 @@ import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
 import { execCommand } from "../exec.ts";
 import { createSyntheticSourceInfo } from "../source-info.ts";
+import { time } from "../timings.ts";
 import type {
+	EntryRenderer,
 	Extension,
 	ExtensionAPI,
 	ExtensionFactory,
@@ -48,11 +52,23 @@ const VIRTUAL_MODULES: Record<string, unknown> = {
 	"@sinclair/typebox": _bundledTypebox,
 	"@sinclair/typebox/compile": _bundledTypeboxCompile,
 	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@chengshiliu16/pix-agent-core": _bundledPixAgentCore,
-	"@chengshiliu16/pix-tui": _bundledPixTui,
-	"@chengshiliu16/pix-ai": _bundledPixAi,
-	"@chengshiliu16/pix-ai/oauth": _bundledPixAiOauth,
+	"@chengshiliu16/pix-agent-core": _bundledPiAgentCore,
+	"@chengshiliu16/pix-tui": _bundledPiTui,
+	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
+	// superset of the core entrypoint): existing extensions using the old
+	// global API keep working at runtime until compat is removed.
+	"@chengshiliu16/pix-ai": _bundledPiAiCompat,
+	"@chengshiliu16/pix-ai/compat": _bundledPiAiCompat,
+	"@chengshiliu16/pix-ai/oauth": _bundledPiAiOauth,
+	"@chengshiliu16/pix-ai/providers/all": _bundledPiAiProviders,
 	"@chengshiliu16/pix-coding-agent": _bundledPixCodingAgent,
+	"@mariozechner/pi-agent-core": _bundledPiAgentCore,
+	"@mariozechner/pi-tui": _bundledPiTui,
+	"@mariozechner/pi-ai": _bundledPiAiCompat,
+	"@mariozechner/pi-ai/compat": _bundledPiAiCompat,
+	"@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
+	"@mariozechner/pi-ai/providers/all": _bundledPiAiProviders,
+	"@mariozechner/pi-coding-agent": _bundledPixCodingAgent,
 };
 
 const require = createRequire(import.meta.url);
@@ -67,7 +83,8 @@ function getAliases(): Record<string, string> {
 	if (_aliases) return _aliases;
 
 	const __dirname = path.dirname(fileURLToPath(import.meta.url));
-	const packageIndex = path.resolve(__dirname, "../..", "index.js");
+	const packageIndexJs = path.resolve(__dirname, "../..", "index.js");
+	const packageIndex = fs.existsSync(packageIndexJs) ? packageIndexJs : path.resolve(__dirname, "../..", "index.ts");
 
 	const typeboxEntry = require.resolve("typebox");
 	const typeboxCompileEntry = require.resolve("typebox/compile");
@@ -79,21 +96,43 @@ function getAliases(): Record<string, string> {
 		if (fs.existsSync(workspacePath)) {
 			return workspacePath;
 		}
+		const sourcePath = workspacePath
+			.replace(`${path.sep}dist${path.sep}`, `${path.sep}src${path.sep}`)
+			.replace(/\.js$/, ".ts");
+		if (fs.existsSync(sourcePath)) {
+			return sourcePath;
+		}
 		return fileURLToPath(import.meta.resolve(specifier));
 	};
 
 	const pixCodingAgentEntry = packageIndex;
 	const pixAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@chengshiliu16/pix-agent-core");
 	const pixTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@chengshiliu16/pix-tui");
-	const pixAiEntry = resolveWorkspaceOrImport("ai/dist/index.js", "@chengshiliu16/pix-ai");
+	// Extensions resolve the pi-ai root to the compat entrypoint (a strict
+	// superset of the core entrypoint): existing extensions using the old
+	// global API keep working at runtime until compat is removed.
+	const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@chengshiliu16/pix-ai/compat");
 	const pixAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@chengshiliu16/pix-ai/oauth");
+	const piAiProvidersEntry = resolveWorkspaceOrImport(
+		"ai/dist/providers/all.js",
+		"@chengshiliu16/pix-ai/providers/all",
+	);
 
 	_aliases = {
 		"@chengshiliu16/pix-coding-agent": pixCodingAgentEntry,
 		"@chengshiliu16/pix-agent-core": pixAgentCoreEntry,
 		"@chengshiliu16/pix-tui": pixTuiEntry,
-		"@chengshiliu16/pix-ai": pixAiEntry,
+		"@chengshiliu16/pix-ai/providers/all": piAiProvidersEntry,
+		"@chengshiliu16/pix-ai/compat": piAiCompatEntry,
 		"@chengshiliu16/pix-ai/oauth": pixAiOauthEntry,
+		"@chengshiliu16/pix-ai": piAiCompatEntry,
+		"@mariozechner/pi-coding-agent": pixCodingAgentEntry,
+		"@mariozechner/pi-agent-core": pixAgentCoreEntry,
+		"@mariozechner/pi-tui": pixTuiEntry,
+		"@mariozechner/pi-ai/providers/all": piAiProvidersEntry,
+		"@mariozechner/pi-ai/compat": piAiCompatEntry,
+		"@mariozechner/pi-ai/oauth": pixAiOauthEntry,
+		"@mariozechner/pi-ai": piAiCompatEntry,
 		typebox: typeboxEntry,
 		"typebox/compile": typeboxCompileEntry,
 		"typebox/value": typeboxValueEntry,
@@ -106,6 +145,30 @@ function getAliases(): Record<string, string> {
 }
 
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
+
+let extensionCacheCwd: string | undefined;
+let extensionCacheGeneration = 0;
+const extensionCache = new Map<string, ExtensionFactory>();
+
+interface ExtensionCacheToken {
+	cwd: string;
+	generation: number;
+}
+
+export function clearExtensionCache(): void {
+	extensionCache.clear();
+	extensionCacheCwd = undefined;
+	extensionCacheGeneration++;
+}
+
+function useExtensionCacheCwd(cwd: string): ExtensionCacheToken {
+	const resolvedCwd = resolvePath(cwd);
+	if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
+		clearExtensionCache();
+	}
+	extensionCacheCwd = resolvedCwd;
+	return { cwd: resolvedCwd, generation: extensionCacheGeneration };
+}
 
 /**
  * Create a runtime with throwing stubs for action methods.
@@ -140,6 +203,7 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		setThinkingLevel: notInitialized,
 		flagValues: new Map(),
 		pendingProviderRegistrations: [],
+		pendingNativeProviderRegistrations: [],
 		assertActive,
 		invalidate: (message) => {
 			state.staleMessage ??=
@@ -151,8 +215,14 @@ export function createExtensionRuntime(): ExtensionRuntime {
 		registerProvider: (name, config, extensionPath = "<unknown>") => {
 			runtime.pendingProviderRegistrations.push({ name, config, extensionPath });
 		},
+		registerNativeProvider: (provider, extensionPath = "<unknown>") => {
+			runtime.pendingNativeProviderRegistrations.push({ provider, extensionPath });
+		},
 		unregisterProvider: (name) => {
 			runtime.pendingProviderRegistrations = runtime.pendingProviderRegistrations.filter((r) => r.name !== name);
+			runtime.pendingNativeProviderRegistrations = runtime.pendingNativeProviderRegistrations.filter(
+				(r) => r.provider.id !== name,
+			);
 		},
 	};
 
@@ -236,6 +306,12 @@ function createExtensionAPI(
 			extension.messageRenderers.set(customType, renderer as MessageRenderer);
 		},
 
+		registerEntryRenderer<T>(customType: string, renderer: EntryRenderer<T>): void {
+			runtime.assertActive();
+			extension.entryRenderers ??= new Map();
+			extension.entryRenderers.set(customType, renderer as EntryRenderer);
+		},
+
 		// Flag access - checks extension registered it, reads from runtime
 		getFlag(name: string): boolean | string | undefined {
 			runtime.assertActive();
@@ -314,9 +390,14 @@ function createExtensionAPI(
 			runtime.setThinkingLevel(level);
 		},
 
-		registerProvider(name: string, config: ProviderConfig) {
+		registerProvider(providerOrName: Provider | string, config?: ProviderConfig) {
 			runtime.assertActive();
-			runtime.registerProvider(name, config, extension.path);
+			if (typeof providerOrName === "string") {
+				if (!config) throw new Error("Provider config is required when registering by name");
+				runtime.registerProvider(providerOrName, config, extension.path);
+				return;
+			}
+			runtime.registerNativeProvider(providerOrName, extension.path);
 		},
 
 		unregisterProvider(name: string) {
@@ -330,7 +411,22 @@ function createExtensionAPI(
 	return api;
 }
 
-async function loadExtensionModule(extensionPath: string) {
+function isCurrentCacheToken(cacheToken: ExtensionCacheToken | undefined): cacheToken is ExtensionCacheToken {
+	return (
+		cacheToken !== undefined &&
+		extensionCacheCwd === cacheToken.cwd &&
+		extensionCacheGeneration === cacheToken.generation
+	);
+}
+
+async function loadExtensionModule(extensionPath: string, cacheToken?: ExtensionCacheToken) {
+	if (isCurrentCacheToken(cacheToken)) {
+		const cachedFactory = extensionCache.get(extensionPath);
+		if (cachedFactory) {
+			return cachedFactory;
+		}
+	}
+
 	const jiti = createJiti(import.meta.url, {
 		moduleCache: false,
 		// In Bun binary: use virtualModules for bundled packages (no filesystem resolution)
@@ -341,7 +437,13 @@ async function loadExtensionModule(extensionPath: string) {
 
 	const module = await jiti.import(extensionPath, { default: true });
 	const factory = module as ExtensionFactory;
-	return typeof factory !== "function" ? undefined : factory;
+	if (typeof factory !== "function") {
+		return undefined;
+	}
+	if (isCurrentCacheToken(cacheToken)) {
+		extensionCache.set(extensionPath, factory);
+	}
+	return factory;
 }
 
 /**
@@ -361,6 +463,7 @@ function createExtension(extensionPath: string, resolvedPath: string): Extension
 		handlers: new Map(),
 		tools: new Map(),
 		messageRenderers: new Map(),
+		entryRenderers: new Map(),
 		commands: new Map(),
 		flags: new Map(),
 		shortcuts: new Map(),
@@ -372,11 +475,13 @@ async function loadExtension(
 	cwd: string,
 	eventBus: EventBus,
 	runtime: ExtensionRuntime,
+	cacheToken?: ExtensionCacheToken,
 ): Promise<{ extension: Extension | null; error: string | null }> {
 	const resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
 
 	try {
-		const factory = await loadExtensionModule(resolvedPath);
+		const factory = await loadExtensionModule(resolvedPath, cacheToken);
+		time(`${extensionPath} module import`, "extensions");
 		if (!factory) {
 			return { extension: null, error: `Extension does not export a valid factory function: ${extensionPath}` };
 		}
@@ -384,6 +489,7 @@ async function loadExtension(
 		const extension = createExtension(extensionPath, resolvedPath);
 		const api = createExtensionAPI(extension, runtime, cwd, eventBus);
 		await factory(api);
+		time(`${extensionPath} factory`, "extensions");
 
 		return { extension, error: null };
 	} catch (err) {
@@ -406,26 +512,35 @@ export async function loadExtensionFromFactory(
 	const resolvedCwd = resolvePath(cwd);
 	const api = createExtensionAPI(extension, runtime, resolvedCwd, eventBus);
 	await factory(api);
+	time(`${extensionPath} factory`, "extensions");
 	return extension;
 }
 
 /**
  * Load extensions from paths.
  */
-export async function loadExtensions(
+async function loadExtensionsInternal(
 	paths: string[],
 	cwd: string,
 	eventBus?: EventBus,
 	runtime?: ExtensionRuntime,
+	useCache = false,
 ): Promise<LoadExtensionsResult> {
 	const extensions: Extension[] = [];
 	const errors: Array<{ path: string; error: string }> = [];
-	const resolvedCwd = resolvePath(cwd);
+	const cacheToken = useCache ? useExtensionCacheCwd(cwd) : undefined;
+	const resolvedCwd = cacheToken?.cwd ?? resolvePath(cwd);
 	const resolvedEventBus = eventBus ?? createEventBus();
 	const resolvedRuntime = runtime ?? createExtensionRuntime();
 
 	for (const extPath of paths) {
-		const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, resolvedRuntime);
+		const { extension, error } = await loadExtension(
+			extPath,
+			resolvedCwd,
+			resolvedEventBus,
+			resolvedRuntime,
+			cacheToken,
+		);
 
 		if (error) {
 			errors.push({ path: extPath, error });
@@ -442,6 +557,24 @@ export async function loadExtensions(
 		errors,
 		runtime: resolvedRuntime,
 	};
+}
+
+export async function loadExtensions(
+	paths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	runtime?: ExtensionRuntime,
+): Promise<LoadExtensionsResult> {
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime);
+}
+
+export async function loadExtensionsCached(
+	paths: string[],
+	cwd: string,
+	eventBus?: EventBus,
+	runtime?: ExtensionRuntime,
+): Promise<LoadExtensionsResult> {
+	return loadExtensionsInternal(paths, cwd, eventBus, runtime, true);
 }
 
 interface PixManifest {

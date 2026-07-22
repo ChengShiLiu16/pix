@@ -2,7 +2,7 @@ import type { Model } from "@chengshiliu16/pix-ai";
 import { setKeybindings, type TUI } from "@chengshiliu16/pix-tui";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
-import type { ModelRegistry } from "../../../src/core/model-registry.ts";
+import type { ModelRuntime } from "../../../src/core/model-runtime.ts";
 import type { SettingsManager } from "../../../src/core/settings-manager.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
@@ -30,11 +30,13 @@ function createModel(provider: string, id: string): Model<any> {
 }
 
 function createSelector(models: Model<any>[], currentModel: Model<any>): ModelSelectorComponent {
-	const modelRegistry = {
-		refresh: () => {},
+	const modelRuntime = {
+		getAvailableSnapshot: () => models,
 		getError: () => undefined,
-		getAvailable: async () => models,
-	} as unknown as ModelRegistry;
+		getModel: (provider: string, id: string) =>
+			models.find((model) => model.provider === provider && model.id === id),
+		refresh: async () => ({ aborted: false, errors: new Map() }),
+	} as unknown as ModelRuntime;
 	const settingsManager = {
 		setDefaultModelAndProvider: () => {},
 	} as unknown as SettingsManager;
@@ -43,7 +45,8 @@ function createSelector(models: Model<any>[], currentModel: Model<any>): ModelSe
 		createFakeTui(),
 		currentModel,
 		settingsManager,
-		modelRegistry,
+		modelRuntime,
+		[],
 		() => {},
 		() => {},
 	);
@@ -81,12 +84,12 @@ describe("model selector provider grouping", () => {
 			.map((line) => line.trim())
 			.filter((line) => line.length > 0);
 
-		expect(renderedLines).toContain("anthropic (1)");
-		expect(renderedLines).toContain("claude-opus");
-		expect(renderedLines).toContain("openai (1)");
-		expect(renderedLines).toContain("gpt-5");
-		expect(renderedLines.filter((line) => line === "zai (2)")).toHaveLength(1);
-		expect(renderedLines).toContain("glm-4");
-		expect(renderedLines.some((line) => line.endsWith("glm-5 ✓"))).toBe(true);
+		expect(renderedLines).toContain("claude-opus [anthropic]");
+		expect(renderedLines).toContain("gpt-5 [openai]");
+		expect(renderedLines.filter((line) => line.includes("[zai]"))).toHaveLength(2);
+		expect(renderedLines).toContain("glm-4 [zai]");
+		expect(renderedLines.some((line) => line.includes("glm-5") && line.includes("[zai]") && line.includes("✓"))).toBe(
+			true,
+		);
 	});
 });

@@ -2,7 +2,7 @@ import { once } from "node:events";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { streamOpenAICompletions } from "../src/providers/openai-completions.ts";
+import { streamOpenAICompletions } from "../src/compat.ts";
 import type { AssistantMessage, AssistantMessageEvent, Context, Model, OpenAICompletionsCompat } from "../src/types.ts";
 
 type StreamDelta = Record<string, unknown>;

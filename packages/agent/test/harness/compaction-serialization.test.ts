@@ -1,6 +1,6 @@
 import type { Message } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
-import { safeJsonStringifyForTokens, serializeConversation } from "../../src/harness/compaction/compaction.ts";
+import { safeJsonStringifyForTokens, serializeConversation } from "../../src/harness/compaction/utils.ts";
 
 describe("compaction serialization", () => {
 	it("serializes circular tool-call arguments for token estimates", () => {

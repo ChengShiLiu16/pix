@@ -1,17 +1,4 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@chengshiliu16/pix-tui";
-import { logBatchDebug } from "../../../core/builtin-extensions/lib/batch-debug.ts";
-import {
-	buildFallbackCall,
-	ensureCompactSpacing,
-	isBatchAnchorWithContent,
-	isToolArgsReady,
-	NEVER_HIDE,
-	shouldHideBatchDuplicate,
-	shouldHidePreBatchShell,
-	shouldHideToolEntirely,
-	shouldHideUntilBatchReady,
-	shouldRenderNeverHideFallback,
-} from "../../../core/builtin-extensions/lib/tool-visibility-patch.ts";
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
 import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.ts";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
@@ -128,10 +115,6 @@ export class ToolExecutionComponent extends Container {
 			return this.builtInToolDefinition.renderShell ?? "default";
 		}
 		return this.toolDefinition.renderShell ?? this.builtInToolDefinition.renderShell ?? "default";
-	}
-
-	private getHidden(): boolean {
-		return (this.toolDefinition?.hidden ?? this.builtInToolDefinition?.hidden) === true;
 	}
 
 	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
@@ -342,76 +325,7 @@ export class ToolExecutionComponent extends Container {
 		}
 	}
 
-	private renderBatchFallback(): boolean {
-		this.hideComponent = false;
-		const container = this.getRenderShell() === "self" ? this.selfRenderContainer : this.contentBox;
-		container.clear();
-		const fallback = buildFallbackCall(this.toolName, this.args, theme, this.toolCallId);
-		if (fallback) {
-			container.addChild(fallback);
-			return true;
-		}
-		return false;
-	}
-
 	private updateDisplay(): void {
-		// === Tool visibility: compact spacing ===
-		ensureCompactSpacing(this as any);
-
-		// === Tool visibility: hide entirely (e.g. todo_manage shown in aboveEditor) ===
-		// hidden:true tools (internal bookkeeping like git_evidence_findings) render
-		// nothing — no call line, result, or error shell.
-		if (shouldHideToolEntirely(this.toolName) || this.getHidden()) {
-			this.hideComponent = true;
-			logBatchDebug("hide entirely", { toolName: this.toolName, toolCallId: this.toolCallId });
-			return;
-		}
-
-		// === Tool visibility: hide batch duplicates (non-anchor batch members) ===
-		if (shouldHideBatchDuplicate(this.toolName, this.toolCallId)) {
-			this.hideComponent = true;
-			logBatchDebug("hide duplicate", { toolName: this.toolName, toolCallId: this.toolCallId });
-			return;
-		}
-
-		// === Tool visibility: hide until batch has visible content ===
-		if (shouldHideUntilBatchReady(this.toolName, this.toolCallId, this.args, this.argsComplete)) {
-			this.hideComponent = true;
-			logBatchDebug("hide until ready", {
-				toolName: this.toolName,
-				toolCallId: this.toolCallId,
-				argsReady: isToolArgsReady(this.toolName, this.args, this.argsComplete),
-				argsComplete: this.argsComplete,
-			});
-			return;
-		}
-
-		// === Tool visibility: hide pre-batch shell (args not yet complete, not in batch) ===
-		if (shouldHidePreBatchShell(this.toolName, this.toolCallId, this.argsComplete)) {
-			this.hideComponent = true;
-			logBatchDebug("hide pre-batch shell", {
-				toolName: this.toolName,
-				toolCallId: this.toolCallId,
-				argsComplete: this.argsComplete,
-			});
-			return;
-		}
-
-		// === Tool visibility: batch anchor with aggregated content ===
-		if (isBatchAnchorWithContent(this.toolName, this.toolCallId)) {
-			const rendered = this.renderBatchFallback();
-			logBatchDebug("batch anchor fallback", {
-				toolName: this.toolName,
-				toolCallId: this.toolCallId,
-				rendered,
-				argsReady: isToolArgsReady(this.toolName, this.args, this.argsComplete),
-				argsComplete: this.argsComplete,
-			});
-			if (rendered) return;
-			// If fallback failed, fall through to standard rendering
-		}
-
-		// === Original updateDisplay logic ===
 		const bgFn = this.isPartial
 			? (text: string) => theme.bg("toolPendingBg", text)
 			: this.result?.isError
@@ -516,27 +430,6 @@ export class ToolExecutionComponent extends Container {
 
 		if (this.hasRendererDefinition() && !hasContent && this.imageComponents.length === 0) {
 			this.hideComponent = true;
-		}
-
-		// === Tool visibility: never-hide fallback (after original rendering) ===
-		if (NEVER_HIDE.has(this.toolName)) {
-			if (shouldHideBatchDuplicate(this.toolName, this.toolCallId)) {
-				return;
-			}
-			if (shouldRenderNeverHideFallback(this.toolName, this.argsComplete, this.args, this.hideComponent)) {
-				const rendered = this.renderBatchFallback();
-				logBatchDebug("never-hide fallback", {
-					toolName: this.toolName,
-					toolCallId: this.toolCallId,
-					rendered,
-					hideComponent: this.hideComponent,
-					argsReady: isToolArgsReady(this.toolName, this.args, this.argsComplete),
-					argsComplete: this.argsComplete,
-				});
-				if (!rendered && this.hideComponent) {
-					this.hideComponent = false;
-				}
-			}
 		}
 	}
 

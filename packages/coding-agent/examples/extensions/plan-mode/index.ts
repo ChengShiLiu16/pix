@@ -2,7 +2,7 @@
  * Plan Mode Extension
  *
  * Read-only exploration mode for safe code analysis.
- * When enabled, only read-only tools are available.
+ * When enabled, built-in write tools are disabled.
  *
  * Features:
  * - /plan command or Ctrl+Alt+P to toggle
@@ -21,6 +21,15 @@ import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } fr
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+const PLAN_MODE_DISABLED_TOOLS = new Set<string>(["edit", "write"]);
+const PLAN_MANAGED_TOOLS = new Set<string>([...PLAN_MODE_TOOLS, ...NORMAL_MODE_TOOLS]);
+
+interface PlanModeState {
+	enabled: boolean;
+	todos?: TodoItem[];
+	executing?: boolean;
+	toolsBeforePlanMode?: string[];
+}
 
 // Type guard for assistant messages
 function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
@@ -35,12 +44,13 @@ function getTextContent(message: AssistantMessage): string {
 		.join("\n");
 }
 
-export default function planModeExtension(pix: ExtensionAPI): void {
+export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+	let toolsBeforePlanMode: string[] | undefined;
 
-	pix.registerFlag("plan", {
+	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
 		type: "boolean",
 		default: false,
@@ -73,35 +83,67 @@ export default function planModeExtension(pix: ExtensionAPI): void {
 		}
 	}
 
+	function uniqueToolNames(toolNames: string[]): string[] {
+		return [...new Set(toolNames)];
+	}
+
+	function getPlanModeTools(activeToolNames: string[]): string[] {
+		return uniqueToolNames([
+			...activeToolNames.filter((name) => !PLAN_MODE_DISABLED_TOOLS.has(name)),
+			...PLAN_MODE_TOOLS,
+		]);
+	}
+
+	function getNormalModeTools(activeToolNames: string[]): string[] {
+		return uniqueToolNames([
+			...NORMAL_MODE_TOOLS,
+			...activeToolNames.filter((name) => !PLAN_MANAGED_TOOLS.has(name)),
+		]);
+	}
+
+	function enablePlanModeTools(): void {
+		if (toolsBeforePlanMode === undefined) {
+			toolsBeforePlanMode = pi.getActiveTools();
+		}
+		pi.setActiveTools(getPlanModeTools(toolsBeforePlanMode));
+	}
+
+	function restoreNormalModeTools(): void {
+		pi.setActiveTools(toolsBeforePlanMode ?? getNormalModeTools(pi.getActiveTools()));
+		toolsBeforePlanMode = undefined;
+	}
+
+	function persistState(): void {
+		pi.appendEntry("plan-mode", {
+			enabled: planModeEnabled,
+			todos: todoItems,
+			executing: executionMode,
+			toolsBeforePlanMode,
+		});
+	}
+
 	function togglePlanMode(ctx: ExtensionContext): void {
 		planModeEnabled = !planModeEnabled;
 		executionMode = false;
 		todoItems = [];
 
 		if (planModeEnabled) {
-			pix.setActiveTools(PLAN_MODE_TOOLS);
-			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+			enablePlanModeTools();
+			ctx.ui.notify("Plan mode enabled. Built-in write tools disabled.");
 		} else {
-			pix.setActiveTools(NORMAL_MODE_TOOLS);
+			restoreNormalModeTools();
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
+		persistState();
 	}
 
-	function persistState(): void {
-		pix.appendEntry("plan-mode", {
-			enabled: planModeEnabled,
-			todos: todoItems,
-			executing: executionMode,
-		});
-	}
-
-	pix.registerCommand("plan", {
+	pi.registerCommand("plan", {
 		description: "Toggle plan mode (read-only exploration)",
 		handler: async (_args, ctx) => togglePlanMode(ctx),
 	});
 
-	pix.registerCommand("todos", {
+	pi.registerCommand("todos", {
 		description: "Show current plan todo list",
 		handler: async (_args, ctx) => {
 			if (todoItems.length === 0) {
@@ -113,13 +155,13 @@ export default function planModeExtension(pix: ExtensionAPI): void {
 		},
 	});
 
-	pix.registerShortcut(Key.ctrlAlt("p"), {
+	pi.registerShortcut(Key.ctrlAlt("p"), {
 		description: "Toggle plan mode",
 		handler: async (ctx) => togglePlanMode(ctx),
 	});
 
 	// Block destructive bash commands in plan mode
-	pix.on("tool_call", async (event) => {
+	pi.on("tool_call", async (event) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
 		const command = event.input.command as string;
@@ -132,7 +174,7 @@ export default function planModeExtension(pix: ExtensionAPI): void {
 	});
 
 	// Filter out stale plan mode context when not in plan mode
-	pix.on("context", async (event) => {
+	pi.on("context", async (event) => {
 		if (planModeEnabled) return;
 
 		return {
@@ -156,7 +198,7 @@ export default function planModeExtension(pix: ExtensionAPI): void {
 	});
 
 	// Inject plan/execution context before agent starts
-	pix.on("before_agent_start", async () => {
+	pi.on("before_agent_start", async () => {
 		if (planModeEnabled) {
 			return {
 				message: {
@@ -165,8 +207,8 @@ export default function planModeExtension(pix: ExtensionAPI): void {
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
 Restrictions:
-- You can only use: read, bash, grep, find, ls, questionnaire
-- You CANNOT use: edit, write (file modifications are disabled)
+- Built-in edit and write tools are disabled
+- Other currently active tools remain available
 - Bash is restricted to an allowlist of read-only commands
 
 Ask clarifying questions using the questionnaire tool.
@@ -205,7 +247,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Track progress after each turn
-	pix.on("turn_end", async (event, ctx) => {
+	pi.on("turn_end", async (event, ctx) => {
 		if (!executionMode || todoItems.length === 0) return;
 		if (!isAssistantMessage(event.message)) return;
 
@@ -217,18 +259,17 @@ After completing a step, include a [DONE:n] tag in your response.`,
 	});
 
 	// Handle plan completion and plan mode UI
-	pix.on("agent_end", async (event, ctx) => {
+	pi.on("agent_end", async (event, ctx) => {
 		// Check if execution is complete
 		if (executionMode && todoItems.length > 0) {
 			if (todoItems.every((t) => t.completed)) {
 				const completedList = todoItems.map((t) => `~~${t.text}~~`).join("\n");
-				pix.sendMessage(
+				pi.sendMessage(
 					{ customType: "plan-complete", content: `**Plan Complete!** ✓\n\n${completedList}`, display: true },
 					{ triggerTurn: false },
 				);
 				executionMode = false;
 				todoItems = [];
-				pix.setActiveTools(NORMAL_MODE_TOOLS);
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
 			}
@@ -246,50 +287,58 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			}
 		}
 
+		if (todoItems.length === 0) return;
+		persistState();
+
 		// Show plan steps and prompt for next action
-		if (todoItems.length > 0) {
-			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
-			pix.sendMessage(
-				{
-					customType: "plan-todo-list",
-					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
-					display: true,
-				},
-				{ triggerTurn: false },
-			);
-		}
+		const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
+		const planTodoListMessage = {
+			customType: "plan-todo-list",
+			content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
+			display: true,
+		};
 
 		const choice = await ctx.ui.select("Plan mode - what next?", [
-			todoItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
+			"Execute the plan (track progress)",
 			"Stay in plan mode",
 			"Refine the plan",
 		]);
 
 		if (choice?.startsWith("Execute")) {
-			planModeEnabled = false;
-			executionMode = todoItems.length > 0;
-			pix.setActiveTools(NORMAL_MODE_TOOLS);
-			updateStatus(ctx);
+			const firstTodoItem = todoItems[0];
+			if (!firstTodoItem) return;
 
-			const execMessage =
-				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].text}`
-					: "Execute the plan you just created.";
-			pix.sendMessage(
+			planModeEnabled = false;
+			executionMode = true;
+			restoreNormalModeTools();
+			updateStatus(ctx);
+			persistState();
+
+			const remainingList = todoItems.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const execMessage = `Execute the plan.
+
+Remaining steps:
+${remainingList}
+
+Start with: ${firstTodoItem.text}
+After completing a step, include a [DONE:n] tag in your response.`;
+			pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
-				{ triggerTurn: true },
+				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			if (refinement?.trim()) {
-				pix.sendUserMessage(refinement.trim());
+				pi.sendMessage(planTodoListMessage, { deliverAs: "followUp" });
+				pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
 			}
 		}
 	});
 
 	// Restore state on session start/resume
-	pix.on("session_start", async (_event, ctx) => {
-		if (pix.getFlag("plan") === true) {
+	pi.on("session_start", async (_event, ctx) => {
+		if (pi.getFlag("plan") === true) {
 			planModeEnabled = true;
 		}
 
@@ -298,12 +347,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		// Restore persisted state
 		const planModeEntry = entries
 			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === "plan-mode")
-			.pop() as { data?: { enabled: boolean; todos?: TodoItem[]; executing?: boolean } } | undefined;
+			.pop() as { data?: PlanModeState } | undefined;
 
 		if (planModeEntry?.data) {
 			planModeEnabled = planModeEntry.data.enabled ?? planModeEnabled;
 			todoItems = planModeEntry.data.todos ?? todoItems;
 			executionMode = planModeEntry.data.executing ?? executionMode;
+			toolsBeforePlanMode = planModeEntry.data.toolsBeforePlanMode ?? toolsBeforePlanMode;
 		}
 
 		// On resume: re-scan messages to rebuild completion state
@@ -333,7 +383,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		}
 
 		if (planModeEnabled) {
-			pix.setActiveTools(PLAN_MODE_TOOLS);
+			enablePlanModeTools();
 		}
 		updateStatus(ctx);
 	});

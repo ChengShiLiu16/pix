@@ -1,15 +1,23 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
+const aiSrcIndex = fileURLToPath(new URL("../ai/src/index.ts", import.meta.url));
+const aiSrcCompat = fileURLToPath(new URL("../ai/src/compat.ts", import.meta.url));
+const agentSrcIndex = fileURLToPath(new URL("./src/index.ts", import.meta.url));
+
 export default defineConfig({
-	resolve: {
-		alias: {
-			"@earendil-works/pi-ai/base": new URL("../ai/src/base.ts", import.meta.url).pathname,
-			"@earendil-works/pi-ai": new URL("../ai/src/index.ts", import.meta.url).pathname,
-		},
-	},
 	test: {
 		globals: true,
 		environment: "node",
 		testTimeout: 30000, // 30 seconds for API calls
+		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
+		silent: "passed-only",
+	},
+	resolve: {
+		alias: [
+			{ find: /^@chengshiliu16\/pix-agent-core$/, replacement: agentSrcIndex },
+			{ find: /^@chengshiliu16\/pix-ai$/, replacement: aiSrcIndex },
+			{ find: /^@chengshiliu16\/pix-ai\/compat$/, replacement: aiSrcCompat },
+		],
 	},
 });

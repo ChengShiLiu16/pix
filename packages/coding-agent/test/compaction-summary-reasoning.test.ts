@@ -9,8 +9,8 @@ const { completeSimpleMock, emitCompactionMock, emitCompactionQualityMock } = vi
 	emitCompactionQualityMock: vi.fn(),
 }));
 
-vi.mock("@chengshiliu16/pix-ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("@chengshiliu16/pix-ai")>();
+vi.mock("@chengshiliu16/pix-ai/compat", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@chengshiliu16/pix-ai/compat")>();
 	return {
 		...actual,
 		completeSimple: completeSimpleMock,
@@ -221,7 +221,7 @@ describe("generateSummary reasoning options", () => {
 			undefined,
 			undefined,
 			undefined,
-			"session-quality",
+			{ PIX_SESSION_ID: "session-quality" },
 		);
 
 		expect(emitCompactionQualityMock).toHaveBeenCalledTimes(1);

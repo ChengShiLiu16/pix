@@ -2,11 +2,11 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const aiSrcIndex = fileURLToPath(new URL("../ai/src/index.ts", import.meta.url));
-const aiSrcBase = fileURLToPath(new URL("../ai/src/base.ts", import.meta.url));
+const aiSrcCompat = fileURLToPath(new URL("../ai/src/compat.ts", import.meta.url));
 const aiSrcOAuth = fileURLToPath(new URL("../ai/src/oauth.ts", import.meta.url));
-const aiOpenRouterImages = fileURLToPath(new URL("../ai/src/providers/images/openrouter.ts", import.meta.url));
+const aiSrcProviders = fileURLToPath(new URL("../ai/src/providers", import.meta.url));
 const agentSrcIndex = fileURLToPath(new URL("../agent/src/index.ts", import.meta.url));
-const agentSrcBase = fileURLToPath(new URL("../agent/src/base.ts", import.meta.url));
+const codingAgentSrcIndex = fileURLToPath(new URL("./src/index.ts", import.meta.url));
 const tuiSrcIndex = fileURLToPath(new URL("../tui/src/index.ts", import.meta.url));
 
 export default defineConfig({
@@ -14,6 +14,8 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		testTimeout: 30000,
+		reporters: process.env.GITHUB_ACTIONS ? ["dot", "github-actions"] : ["dot"],
+		silent: "passed-only",
 		server: {
 			deps: {
 				external: [/@silvia-odwyer\/photon-node/],
@@ -23,19 +25,17 @@ export default defineConfig({
 	resolve: {
 		alias: [
 			{ find: /^@chengshiliu16\/pix-ai$/, replacement: aiSrcIndex },
-			{ find: /^@chengshiliu16\/pix-ai\/base$/, replacement: aiSrcBase },
+			{ find: /^@chengshiliu16\/pix-ai\/compat$/, replacement: aiSrcCompat },
 			{ find: /^@chengshiliu16\/pix-ai\/oauth$/, replacement: aiSrcOAuth },
-			{ find: /^@chengshiliu16\/pix-ai\/openrouter-images$/, replacement: aiOpenRouterImages },
+			{ find: /^@chengshiliu16\/pix-ai\/providers\/(.+)$/, replacement: `${aiSrcProviders}/$1.ts` },
 			{ find: /^@chengshiliu16\/pix-agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@chengshiliu16\/pix-agent-core\/base$/, replacement: agentSrcBase },
+			{ find: /^@chengshiliu16\/pix-coding-agent$/, replacement: codingAgentSrcIndex },
 			{ find: /^@chengshiliu16\/pix-tui$/, replacement: tuiSrcIndex },
-			{ find: /^@chengshiliu16\/pix-ai$/, replacement: aiSrcIndex },
-			{ find: /^@chengshiliu16\/pix-ai\/base$/, replacement: aiSrcBase },
-			{ find: /^@chengshiliu16\/pix-ai\/oauth$/, replacement: aiSrcOAuth },
-			{ find: /^@chengshiliu16\/pix-ai\/openrouter-images$/, replacement: aiOpenRouterImages },
-			{ find: /^@chengshiliu16\/pix-agent-core$/, replacement: agentSrcIndex },
-			{ find: /^@chengshiliu16\/pix-agent-core\/base$/, replacement: agentSrcBase },
-			{ find: /^@chengshiliu16\/pix-tui$/, replacement: tuiSrcIndex },
+			{ find: /^@mariozechner\/pi-ai$/, replacement: aiSrcIndex },
+			{ find: /^@mariozechner\/pi-ai\/compat$/, replacement: aiSrcCompat },
+			{ find: /^@mariozechner\/pi-ai\/oauth$/, replacement: aiSrcOAuth },
+			{ find: /^@mariozechner\/pi-agent-core$/, replacement: agentSrcIndex },
+			{ find: /^@mariozechner\/pi-tui$/, replacement: tuiSrcIndex },
 		],
 	},
 });

@@ -45,6 +45,9 @@ const rgiEmojiRegex = /^\p{RGI_Emoji}$/v;
 const WIDTH_CACHE_SIZE = 512;
 const widthCache = new Map<string, number>();
 
+export const cjkBreakRegex =
+	/[\p{Script_Extensions=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}\p{Script_Extensions=Hangul}\p{Script_Extensions=Bopomofo}]/u;
+
 function isPrintableAscii(str: string): boolean {
 	for (let i = 0; i < str.length; i++) {
 		const code = str.charCodeAt(i);
@@ -271,14 +274,35 @@ export function visibleWidth(str: string): number {
  * Normalize text for terminal output without changing logical editor content.
  * Some terminals render precomposed Thai/Lao AM vowels inconsistently during
  * differential repaint. Their compatibility decompositions have the same cell
- * width but avoid stale-cell artifacts in terminal renderers.
+ * width but avoid stale-cell artifacts in terminal renderers. Visible tabs are
+ * expanded to the fixed width used by layout so terminal tab stops cannot wrap
+ * a logical line, while tabs inside terminal string sequences stay untouched.
  */
 const THAI_LAO_AM_REGEX = /[\u0e33\u0eb3]/;
 const THAI_LAO_AM_GLOBAL_REGEX = /[\u0e33\u0eb3]/g;
 
 export function normalizeTerminalOutput(str: string): string {
-	if (!THAI_LAO_AM_REGEX.test(str)) return str;
-	return str.replace(THAI_LAO_AM_GLOBAL_REGEX, (char) => (char === "\u0e33" ? "\u0e4d\u0e32" : "\u0ecd\u0eb2"));
+	let normalized = str;
+	if (THAI_LAO_AM_REGEX.test(normalized)) {
+		normalized = normalized.replace(THAI_LAO_AM_GLOBAL_REGEX, (char) =>
+			char === "\u0e33" ? "\u0e4d\u0e32" : "\u0ecd\u0eb2",
+		);
+	}
+	if (!normalized.includes("\t")) return normalized;
+
+	let result = "";
+	let i = 0;
+	while (i < normalized.length) {
+		const ansi = extractAnsiCode(normalized, i);
+		if (ansi) {
+			result += ansi.code;
+			i += ansi.length;
+			continue;
+		}
+		result += normalized[i] === "\t" ? "   " : normalized[i];
+		i++;
+	}
+	return result;
 }
 
 /**
@@ -605,8 +629,17 @@ function splitIntoTokensWithAnsi(text: string): string[] {
 	const tokens: string[] = [];
 	let current = "";
 	let pendingAnsi = ""; // ANSI codes waiting to be attached to next visible content
-	let inWhitespace = false;
+	let currentKind: "space" | "word" | null = null;
 	let i = 0;
+
+	const flushCurrent = (): void => {
+		if (!current) {
+			return;
+		}
+		tokens.push(current);
+		current = "";
+		currentKind = null;
+	};
 
 	while (i < text.length) {
 		const ansiResult = extractAnsiCode(text, i);
@@ -617,29 +650,48 @@ function splitIntoTokensWithAnsi(text: string): string[] {
 			continue;
 		}
 
-		const char = text[i];
-		const charIsSpace = char === " ";
-
-		if (charIsSpace !== inWhitespace && current) {
-			// Switching between whitespace and non-whitespace, push current token
-			tokens.push(current);
-			current = "";
+		let end = i;
+		while (end < text.length && !extractAnsiCode(text, end)) {
+			end++;
 		}
 
-		// Attach any pending ANSI codes to this visible character
-		if (pendingAnsi) {
-			current += pendingAnsi;
-			pendingAnsi = "";
+		for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
+			const segmentIsSpace = segment === " ";
+			if (!segmentIsSpace && cjkBreakRegex.test(segment)) {
+				flushCurrent();
+				const token = pendingAnsi + segment;
+				pendingAnsi = "";
+				tokens.push(token);
+				continue;
+			}
+
+			const segmentKind = segmentIsSpace ? "space" : "word";
+			if (current && currentKind !== segmentKind) {
+				flushCurrent();
+			}
+
+			// Attach any pending ANSI codes to this visible character
+			if (pendingAnsi) {
+				current += pendingAnsi;
+				pendingAnsi = "";
+			}
+
+			currentKind = segmentKind;
+			current += segment;
 		}
 
-		inWhitespace = charIsSpace;
-		current += char;
-		i++;
+		i = end;
 	}
 
 	// Handle any remaining pending ANSI codes (attach to last token)
 	if (pendingAnsi) {
-		current += pendingAnsi;
+		if (current) {
+			current += pendingAnsi;
+		} else if (tokens.length > 0) {
+			tokens[tokens.length - 1] += pendingAnsi;
+		} else {
+			current = pendingAnsi;
+		}
 	}
 
 	if (current) {
@@ -667,7 +719,7 @@ export function wrapTextWithAnsi(text: string, width: number): string[] {
 
 	// Handle newlines by processing each line separately
 	// Track ANSI state across lines so styles carry over after literal newlines
-	const inputLines = text.split("\n");
+	const inputLines = text.split(/\r\n|\r|\n/);
 	const result: string[] = [];
 	const tracker = new AnsiCodeTracker();
 

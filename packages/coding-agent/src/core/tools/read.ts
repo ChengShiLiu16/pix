@@ -8,15 +8,10 @@ import { type Static, Type } from "typebox";
 import { getReadmePath } from "../../config.ts";
 import { keyHint, keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
-import { formatDimensionNote, resizeImage } from "../../utils/image-resize.ts";
+import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import { formatPathRelativeToCwdOrAbsolute } from "../../utils/paths.ts";
-import {
-	createGitEvidenceResult,
-	type GitEvidenceDetails,
-	isGitEvidenceDisplayText,
-	isGitEvidenceText,
-} from "../context-git-evidence.ts";
+import { createGitEvidenceResult, type GitEvidenceDetails, isGitEvidenceText } from "../context-git-evidence.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, replaceTabs, shortenPath, str } from "./render-utils.ts";
@@ -240,17 +235,15 @@ function formatReadResult(
 
 	const rawPath = str(args?.file_path ?? args?.path);
 	const output = getTextOutput(result, showImages);
-	const isGitEvidenceOutput = isGitEvidenceDisplayText(output);
-	const outputColor = isGitEvidenceOutput ? "dim" : "toolOutput";
-	const lang = rawPath && !isGitEvidenceOutput ? getLanguageFromPath(rawPath) : undefined;
+	const lang = !isError && rawPath ? getLanguageFromPath(rawPath) : undefined;
 	const renderedLines = lang ? highlightCode(replaceTabs(output), lang) : output.split("\n");
 	const lines = trimTrailingEmptyLines(renderedLines);
 	const maxLines = options.expanded ? lines.length : 10;
 	const displayLines = lines.slice(0, maxLines);
 	const remaining = lines.length - maxLines;
-	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg(outputColor, replaceTabs(line)))).join("\n")}`;
+	let text = `\n${displayLines.map((line) => (lang ? replaceTabs(line) : theme.fg("toolOutput", replaceTabs(line)))).join("\n")}`;
 	if (remaining > 0) {
-		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} click or ${keyHint("app.tools.expand", "to expand")})`;
+		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
 	}
 
 	const truncation = result.details?.truncation;
@@ -275,13 +268,9 @@ export function createReadToolDefinition(
 	return {
 		name: "read",
 		label: "read",
-		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+		description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
 		promptSnippet: "Read file contents",
-		promptGuidelines: [
-			"Use read to examine files instead of cat or sed.",
-			"When you need a specific symbol (function, class, variable), use grep FIRST to find its line number, then read with offset/limit. Avoid blind scrolling through large files.",
-			"Do not write git diff/show/log output to a temporary file and read it back; use git evidence digests and git_evidence_read ranges instead.",
-		],
+		promptGuidelines: ["Use read to examine files instead of cat or sed."],
 		parameters: readSchema,
 		async execute(
 			_toolCallId,
@@ -317,29 +306,18 @@ export function createReadToolDefinition(
 							if (mimeType) {
 								// Read image as binary.
 								const buffer = await ops.readFile(absolutePath);
-								if (autoResizeImages) {
-									// Resize image if needed before sending it back to the model.
-									const resized = await resizeImage(buffer, mimeType);
-									if (!resized) {
-										let textNote = `Read image file [${mimeType}]\n[Image omitted: could not be resized below the inline image size limit.]`;
-										if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
-										content = [{ type: "text", text: textNote }];
-									} else {
-										const dimensionNote = formatDimensionNote(resized);
-										let textNote = `Read image file [${resized.mimeType}]`;
-										if (dimensionNote) textNote += `\n${dimensionNote}`;
-										if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
-										content = [
-											{ type: "text", text: textNote },
-											{ type: "image", data: resized.data, mimeType: resized.mimeType },
-										];
-									}
+								const processed = await processImage(buffer, mimeType, { autoResizeImages });
+								if (!processed.ok) {
+									let textNote = `Read image file [${mimeType}]\n${processed.message}`;
+									if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
+									content = [{ type: "text", text: textNote }];
 								} else {
-									let textNote = `Read image file [${mimeType}]`;
+									let textNote = `Read image file [${processed.mimeType}]`;
+									if (processed.hints.length > 0) textNote += `\n${processed.hints.join("\n")}`;
 									if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
 									content = [
 										{ type: "text", text: textNote },
-										{ type: "image", data: buffer.toString("base64"), mimeType },
+										{ type: "image", data: processed.data, mimeType: processed.mimeType },
 									];
 								}
 							} else {

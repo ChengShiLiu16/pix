@@ -37,6 +37,7 @@ export class AssistantMessageComponent extends Container {
 	private hideThinkingBlock: boolean;
 	private markdownTheme: MarkdownTheme;
 	private hiddenThinkingLabel: string;
+	private outputPad: number;
 	private lastMessage?: AssistantMessage;
 	private hasToolCalls = false;
 
@@ -45,14 +46,14 @@ export class AssistantMessageComponent extends Container {
 		hideThinkingBlock = false,
 		markdownTheme: MarkdownTheme = getMarkdownTheme(),
 		hiddenThinkingLabel = "Thinking...",
+		outputPad = 1,
 	) {
 		super();
 
 		this.hideThinkingBlock = hideThinkingBlock;
 		this.markdownTheme = markdownTheme;
 		this.hiddenThinkingLabel = hiddenThinkingLabel;
-
-		// Container for text/thinking content
+		this.outputPad = outputPad;
 		this.contentContainer = new Container();
 		this.addChild(this.contentContainer);
 
@@ -70,14 +71,21 @@ export class AssistantMessageComponent extends Container {
 
 	setHideThinkingBlock(hide: boolean): void {
 		this.hideThinkingBlock = hide;
-		if (this.lastMessage && this.contentContainer) {
+		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
 		}
 	}
 
 	setHiddenThinkingLabel(label: string): void {
 		this.hiddenThinkingLabel = label;
-		if (this.lastMessage && this.contentContainer) {
+		if (this.lastMessage) {
+			this.updateContent(this.lastMessage);
+		}
+	}
+
+	setOutputPad(padding: number): void {
+		this.outputPad = padding;
+		if (this.lastMessage) {
 			this.updateContent(this.lastMessage);
 		}
 	}
@@ -87,50 +95,41 @@ export class AssistantMessageComponent extends Container {
 		if (this.hasToolCalls || lines.length === 0) {
 			return lines;
 		}
-
 		return wrapOscPromptZone(lines);
 	}
 
 	updateContent(message: AssistantMessage): void {
 		this.lastMessage = message;
-		if (!this.contentContainer) return;
-
 		this.contentContainer.clear();
 
-		// Collect thinking blocks for thinking-steps rendering
 		const thinkingBlocks = collectThinkingBlocks(message);
 		const hasVisibleContent =
-			message.content.some((c) => c.type === "text" && c.text.trim()) || thinkingBlocks.length > 0;
-
+			message.content.some((content) => content.type === "text" && content.text.trim()) || thinkingBlocks.length > 0;
 		if (hasVisibleContent) {
 			this.contentContainer.addChild(new Spacer(1));
 		}
 
-		// Determine if there is visible text after the first thinking block
 		const firstThinkingIndex = thinkingBlocks[0]?.contentIndex;
 		const hasVisibleTextAfterThinking =
 			firstThinkingIndex !== undefined &&
-			message.content.slice(firstThinkingIndex + 1).some((c) => c.type === "text" && /\S/u.test(c.text));
+			message.content
+				.slice(firstThinkingIndex + 1)
+				.some((content) => content.type === "text" && /\S/u.test(content.text));
 
-		// Markdown-assistant: track streaming vs finalized state
 		syncAssistantMarkdownStreamingState(message);
 		const isPartial = isAssistantMessagePartial(message);
-
 		let renderedThinking = false;
 
-		// Render content in order
-		for (let i = 0; i < message.content.length; i++) {
-			const content = message.content[i];
-
+		for (let index = 0; index < message.content.length; index++) {
+			const content = message.content[index];
 			if (content.type === "text" && content.text.trim()) {
-				// Use narrative markdown rendering (streaming=plain text, finalized=formatted markdown)
 				this.contentContainer.addChild(
 					renderNarrativeMarkdown(content.text, {
 						message,
 						isPartial,
 						markdownTheme: this.markdownTheme,
-						terminalTheme: theme as any,
-						paddingX: 1,
+						terminalTheme: theme,
+						paddingX: this.outputPad,
 						paddingY: 0,
 					}),
 				);
@@ -138,16 +137,20 @@ export class AssistantMessageComponent extends Container {
 			}
 
 			if (content.type === "thinking" && thinkingBlocks.length > 0 && !renderedThinking) {
-				// Thinking-steps: use ThinkingStepsComponent for structured rendering
-				const scopeKey = resolveThinkingMessageScope(message);
-				this.contentContainer.addChild(
-					new ThinkingStepsComponent(
-						theme as unknown as ThinkingThemeLike,
-						message.timestamp,
-						thinkingBlocks,
-						scopeKey,
-					),
-				);
+				if (this.hideThinkingBlock) {
+					this.contentContainer.addChild(
+						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0),
+					);
+				} else {
+					this.contentContainer.addChild(
+						new ThinkingStepsComponent(
+							theme as unknown as ThinkingThemeLike,
+							message.timestamp,
+							thinkingBlocks,
+							resolveThinkingMessageScope(),
+						),
+					);
+				}
 				renderedThinking = true;
 				if (hasVisibleTextAfterThinking) {
 					this.contentContainer.addChild(new Spacer(1));
@@ -155,19 +158,20 @@ export class AssistantMessageComponent extends Container {
 				continue;
 			}
 
-			// Fallback: non-visible thinking blocks when thinking-steps already rendered
 			if (content.type === "thinking" && content.thinking.trim() && !renderedThinking) {
 				const hasVisibleContentAfter = message.content
-					.slice(i + 1)
-					.some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
-
+					.slice(index + 1)
+					.some(
+						(next) =>
+							(next.type === "text" && next.text.trim()) || (next.type === "thinking" && next.thinking.trim()),
+					);
 				if (this.hideThinkingBlock) {
 					this.contentContainer.addChild(
-						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), 1, 0),
+						new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0),
 					);
 				} else {
 					this.contentContainer.addChild(
-						new Markdown(content.thinking.trim(), 1, 0, this.markdownTheme, {
+						new Markdown(content.thinking.trim(), this.outputPad, 0, this.markdownTheme, {
 							color: (text: string) => theme.fg("thinkingText", text),
 							italic: true,
 						}),
@@ -179,30 +183,36 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 
-		// Check if aborted - show after partial content
-		const hasToolCalls = message.content.some((c) => c.type === "toolCall");
+		const hasToolCalls = message.content.some((content) => content.type === "toolCall");
 		this.hasToolCalls = hasToolCalls;
-		if (!hasToolCalls) {
-			if (message.stopReason === "aborted") {
-				const abortMessage =
-					message.errorMessage && message.errorMessage !== "Request was aborted"
-						? message.errorMessage
-						: "Operation aborted";
-				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), 1, 0));
-			} else if (message.stopReason === "error") {
-				const errorMsg = message.errorMessage || "Unknown error";
-				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), 1, 0));
-			}
+		if (message.stopReason === "length") {
+			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(
+				new Text(
+					theme.fg(
+						"error",
+						"Error: Model stopped because it reached the maximum output token limit. The response may be incomplete.",
+					),
+					this.outputPad,
+					0,
+				),
+			);
+		} else if (!hasToolCalls && message.stopReason === "aborted") {
+			const abortMessage =
+				message.errorMessage && message.errorMessage !== "Request was aborted"
+					? message.errorMessage
+					: "Operation aborted";
+			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), this.outputPad, 0));
+		} else if (!hasToolCalls && message.stopReason === "error") {
+			this.contentContainer.addChild(new Spacer(1));
+			this.contentContainer.addChild(
+				new Text(theme.fg("error", `Error: ${message.errorMessage || "Unknown error"}`), this.outputPad, 0),
+			);
 		}
 	}
 }
 
-/**
- * Resolve the thinking message scope key for the given message.
- * Uses the same logic as the thinking-steps state module.
- */
-function resolveThinkingMessageScope(_message: AssistantMessage): string | undefined {
+function resolveThinkingMessageScope(): string | undefined {
 	return getCurrentThinkingScopeKey() || undefined;
 }

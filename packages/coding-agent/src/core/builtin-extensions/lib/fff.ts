@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { AutocompleteItem, AutocompleteProvider } from "@chengshiliu16/pix-tui";
-import type { GrepResult, MixedItem, SearchResult } from "@ff-labs/fff-node";
+import type { FileItem, GrepResult, MixedItem, SearchResult } from "@ff-labs/fff-node";
 
 export type FffMode = "tools-and-ui" | "tools-only" | "override";
 
@@ -180,7 +180,7 @@ export function formatFffFindOutput(result: SearchResult, limit: number, pattern
 	const shown = result.items.slice(0, effectiveLimit);
 
 	return {
-		output: shown.map((item) => `${item.relativePath}${fffFileAnnotation(item)}`).join("\n"),
+		output: shown.map((item: FileItem) => `${item.relativePath}${fffFileAnnotation(item)}`).join("\n"),
 		weak,
 		shownCount: shown.length,
 	};

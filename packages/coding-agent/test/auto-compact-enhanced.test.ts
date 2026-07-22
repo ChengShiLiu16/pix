@@ -35,6 +35,7 @@ function createEvent(reason: SessionBeforeCompactEvent["reason"]): SessionBefore
 		reason,
 		preparation: {} as SessionBeforeCompactEvent["preparation"],
 		branchEntries: [],
+		willRetry: false,
 		signal: new AbortController().signal,
 	};
 }

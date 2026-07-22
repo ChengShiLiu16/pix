@@ -10,15 +10,15 @@
  * which can be cheaper/faster than the main conversation model.
  *
  * Usage:
- *   pix --extension examples/extensions/custom-compaction.ts
+ *   pi --extension examples/extensions/custom-compaction.ts
  */
 
-import { complete } from "@chengshiliu16/pix-ai";
+import { complete } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { convertToLlm, serializeConversation } from "@chengshiliu16/pix-coding-agent";
 
-export default function (pix: ExtensionAPI) {
-	pix.on("session_before_compact", async (event, ctx) => {
+export default function (pi: ExtensionAPI) {
+	pi.on("session_before_compact", async (event, ctx) => {
 		ctx.ui.notify("Custom compaction extension triggered", "info");
 
 		const { preparation, branchEntries: _, signal } = event;
@@ -93,6 +93,7 @@ ${conversationText}
 				{
 					apiKey: auth.apiKey,
 					headers: auth.headers,
+					env: auth.env,
 					maxTokens: 8192,
 					signal,
 				},
@@ -115,6 +116,7 @@ ${conversationText}
 					summary,
 					firstKeptEntryId,
 					tokensBefore,
+					usage: response.usage,
 				},
 			};
 		} catch (error) {

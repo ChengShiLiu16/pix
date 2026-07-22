@@ -51,6 +51,42 @@ describe("extensions discovery", () => {
 		expect(result.extensions.map((e) => path.basename(e.path)).sort()).toEqual(["bar.ts", "foo.ts"]);
 	});
 
+	it("loads the coding-agent entrypoint without rewriting pi-ai provider subpaths", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "coding-agent-import.ts"),
+			`
+				import { getAgentDir } from "@chengshiliu16/pix-coding-agent";
+				void getAgentDir;
+				export default function(pi) {
+					pi.registerCommand("test", { handler: async () => {} });
+				}
+			`,
+		);
+
+		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.extensions).toHaveLength(1);
+	});
+
+	it("keeps the type-only pi-ai OAuth compatibility barrel resolvable", async () => {
+		fs.writeFileSync(
+			path.join(extensionsDir, "oauth-import.ts"),
+			`
+				import * as oauth from "@chengshiliu16/pix-ai/oauth";
+				void oauth;
+				export default function(pi) {
+					pi.registerCommand("test", { handler: async () => {} });
+				}
+			`,
+		);
+
+		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
+
+		expect(result.errors).toEqual([]);
+		expect(result.extensions).toHaveLength(1);
+	});
+
 	it("discovers direct .js files in extensions/", async () => {
 		fs.writeFileSync(path.join(extensionsDir, "foo.js"), extensionCode);
 
@@ -99,7 +135,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("index.ts");
 	});
 
-	it("discovers subdirectory with package.json pi field", async () => {
+	it("discovers subdirectory with package.json pix field", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		const srcDir = path.join(subdir, "src");
 		fs.mkdirSync(subdir);
@@ -109,7 +145,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				pi: {
+				pix: {
 					extensions: ["./src/main.ts"],
 				},
 			}),
@@ -134,7 +170,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "tilde-package",
-				pi: {
+				pix: {
 					extensions: ["~entry.ts", "~/entry.ts"],
 				},
 			}),
@@ -157,7 +193,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				pi: {
+				pix: {
 					extensions: ["./ext1.ts", "./ext2.ts"],
 				},
 			}),
@@ -169,7 +205,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions).toHaveLength(2);
 	});
 
-	it("package.json with pi field takes precedence over index.ts", async () => {
+	it("package.json with pix field takes precedence over index.ts", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		fs.mkdirSync(subdir);
 		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCodeWithTool("from-index"));
@@ -178,7 +214,7 @@ describe("extensions discovery", () => {
 			path.join(subdir, "package.json"),
 			JSON.stringify({
 				name: "my-package",
-				pi: {
+				pix: {
 					extensions: ["./custom.ts"],
 				},
 			}),
@@ -194,7 +230,7 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].tools.has("from-index")).toBe(false);
 	});
 
-	it("ignores package.json without pi field, falls back to index.ts", async () => {
+	it("ignores package.json without pix field, falls back to index.ts", async () => {
 		const subdir = path.join(extensionsDir, "my-package");
 		fs.mkdirSync(subdir);
 		fs.writeFileSync(path.join(subdir, "index.ts"), extensionCode);
@@ -252,7 +288,7 @@ describe("extensions discovery", () => {
 		const subdir2 = path.join(extensionsDir, "with-manifest");
 		fs.mkdirSync(subdir2);
 		fs.writeFileSync(path.join(subdir2, "entry.ts"), extensionCode);
-		fs.writeFileSync(path.join(subdir2, "package.json"), JSON.stringify({ pi: { extensions: ["./entry.ts"] } }));
+		fs.writeFileSync(path.join(subdir2, "package.json"), JSON.stringify({ pix: { extensions: ["./entry.ts"] } }));
 
 		const result = await discoverAndLoadExtensions([], tempDir, tempDir);
 
@@ -267,7 +303,7 @@ describe("extensions discovery", () => {
 		fs.writeFileSync(
 			path.join(subdir, "package.json"),
 			JSON.stringify({
-				pi: {
+				pix: {
 					extensions: ["./exists.ts", "./missing.ts"],
 				},
 			}),
@@ -335,11 +371,14 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].tools.has("parse_duration")).toBe(true);
 	});
 
-	it("registers message renderers", async () => {
+	it("registers message and entry renderers", async () => {
 		const extCode = `
 			export default function(pi) {
 				pi.registerMessageRenderer("my-custom-type", (message, options, theme) => {
 					return null; // Use default rendering
+				});
+				pi.registerEntryRenderer("my-entry-type", (entry, options, theme) => {
+					return null;
 				});
 			}
 		`;
@@ -350,6 +389,7 @@ describe("extensions discovery", () => {
 		expect(result.errors).toHaveLength(0);
 		expect(result.extensions).toHaveLength(1);
 		expect(result.extensions[0].messageRenderers.has("my-custom-type")).toBe(true);
+		expect(result.extensions[0].entryRenderers?.has("my-entry-type")).toBe(true);
 	});
 
 	it("reports error when extension throws during initialization", async () => {

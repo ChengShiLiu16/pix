@@ -1,4 +1,4 @@
-import { complete, getModel } from "@chengshiliu16/pix-ai";
+import { complete, getModel } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI, ExtensionCommandContext } from "@chengshiliu16/pix-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@chengshiliu16/pix-coding-agent";
 import { Container, Markdown, matchesKey, Text } from "@chengshiliu16/pix-tui";
@@ -191,6 +191,7 @@ export default function (pix: ExtensionAPI) {
 				{
 					apiKey: auth.apiKey,
 					headers: auth.headers,
+					env: auth.env,
 					reasoningEffort: "high",
 				},
 			);

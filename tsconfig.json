@@ -2,18 +2,22 @@
 	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": true,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
 		"paths": {
 			"*": ["./*"],
 			"@chengshiliu16/pix-ai": ["./packages/ai/src/index.ts"],
 			"@chengshiliu16/pix-ai/oauth": ["./packages/ai/src/oauth.ts"],
-			"@chengshiliu16/pix-ai/openrouter-images": ["./packages/ai/src/providers/images/openrouter.ts"],
 			"@chengshiliu16/pix-ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
 			"@chengshiliu16/pix-ai/dist/*": ["./packages/ai/src/*"],
 			"@chengshiliu16/pix-agent-core": ["./packages/agent/src/index.ts"],
 			"@chengshiliu16/pix-agent-core/*": ["./packages/agent/src/*"],
+			"@chengshiliu16/pix-agent-sqlite-node": ["./packages/storage/sqlite-node/src/index.ts"],
 			"@chengshiliu16/pix-coding-agent": ["./packages/coding-agent/src/index.ts"],
 			"@chengshiliu16/pix-coding-agent/hooks": ["./packages/coding-agent/src/core/hooks/index.ts"],
 			"@chengshiliu16/pix-coding-agent/*": ["./packages/coding-agent/src/*"],
+			"@chengshiliu16/pix-server": ["./packages/server/src/index.ts"],
+			"@chengshiliu16/pix-server/*": ["./packages/server/src/*"],
 			"typebox": ["./node_modules/typebox"],
 			"@chengshiliu16/pix-tui": ["./packages/tui/src/index.ts"],
 			"@chengshiliu16/pix-tui/*": ["./packages/tui/src/*"],
@@ -21,6 +25,6 @@
 			"@chengshiliu16/pix-agent-old/*": ["./packages/agent-old/src/*"]
 		}
 	},
-	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*"],
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/storage/*/src/**/*", "packages/storage/*/test/**/*", "packages/coding-agent/examples/**/*"],
 	"exclude": ["**/dist/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 }

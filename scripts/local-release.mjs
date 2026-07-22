@@ -9,6 +9,7 @@ const packages = [
 	{ directory: "packages/ai", name: "@chengshiliu16/pix-ai" },
 	{ directory: "packages/tui", name: "@chengshiliu16/pix-tui" },
 	{ directory: "packages/agent", name: "@chengshiliu16/pix-agent-core" },
+	{ directory: "packages/storage/sqlite-node", name: "@chengshiliu16/pix-storage-sqlite-node" },
 	{ directory: "packages/coding-agent", name: "@chengshiliu16/pix-coding-agent" },
 ];
 
@@ -22,6 +23,7 @@ Options:
   --out <dir>          Output directory. Defaults to a new directory under ${tmpdir()}
   --force              Remove --out first if it already exists
   --skip-check         Do not run npm run check before building
+  --skip-test          Do not run ./test.sh before building
   --skip-install       Only create tarballs; do not create isolated installs
   --skip-bun-install   Do not create the isolated Bun install
   --help               Show this help
@@ -29,7 +31,14 @@ Options:
 }
 
 function parseArgs() {
-	const options = { force: false, outDir: undefined, skipBunInstall: false, skipCheck: false, skipInstall: false };
+	const options = {
+		force: false,
+		outDir: undefined,
+		skipBunInstall: false,
+		skipCheck: false,
+		skipInstall: false,
+		skipTest: false,
+	};
 	const args = process.argv.slice(2);
 
 	for (let i = 0; i < args.length; i++) {
@@ -44,6 +53,10 @@ function parseArgs() {
 		}
 		if (arg === "--skip-check") {
 			options.skipCheck = true;
+			continue;
+		}
+		if (arg === "--skip-test") {
+			options.skipTest = true;
 			continue;
 		}
 		if (arg === "--skip-install") {
@@ -197,15 +210,21 @@ const bunInstallDirectory = join(outDir, "bun-install");
 const binaryDirectory = join(outDir, "bun");
 mkdirSync(tarballDirectory, { recursive: true });
 
+// Release artifacts always use a freshly generated, strictly validated catalog,
+// including when checks or tests are explicitly skipped.
+run("npm", ["run", "generate:models"], { cwd: repoRoot });
+
 if (!options.skipCheck) {
 	run("npm", ["run", "check"], { cwd: repoRoot });
 }
 
-run("npm", ["run", "generate"], { cwd: join(repoRoot, "packages/ai") });
-
 for (const pkg of packages) {
 	run("npm", ["run", "clean"], { cwd: pkg.directory });
-	run("npm", ["run", "build"], { cwd: pkg.directory });
+	run("npm", ["run", pkg.directory === "packages/ai" ? "build:offline" : "build"], { cwd: pkg.directory });
+}
+
+if (!options.skipTest) {
+	run("./test.sh", [], { cwd: repoRoot });
 }
 
 const tarballs = new Map();

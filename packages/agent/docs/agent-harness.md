@@ -79,6 +79,8 @@ Stream options are shallow-copied when a snapshot is created. `headers` and `met
 
 The session contains persisted entries only. Session reads return persisted state and do not include queued writes.
 
+`Session.buildContextEntries()` returns the compaction-aware entry sequence used for model context construction. `Session.buildContext()` derives runtime state from the full active branch, then projects those context entries to `AgentMessage[]`. Custom entries are omitted from model context by default; applications can pass `entryProjectors` to the `Session` constructor or `buildContext()` to project selected custom entries into messages. Applications can also pass stacked `entryTransforms`, which run after the default compaction transform, to filter or reorder context entries before projection.
+
 Session storage implementations must persist leaf changes as `leaf` entries. `setLeafId()` is not an in-memory-only cursor update; it appends a durable entry whose `targetId` is the active tree leaf or `null` for root. Reopening storage must reconstruct the current leaf from the latest persisted leaf-affecting entry.
 
 ### Pending session writes
@@ -172,6 +174,16 @@ Summary:
 - Hook context should be a plain object of facades, not raw internals or late-bound getter mazes.
 
 Event payloads describe what is happening. Harness getters describe latest config for future snapshots. Hook and listener settlement should be awaited in lifecycle order where possible; transport backpressure is handled below the harness by `AssistantMessageStream`, so the harness does not need a separate async event queue merely to keep SSE or websocket reads flowing.
+
+### Summarization retry events
+
+When the harness is configured with a retry policy, generated compaction and branch-summary requests emit retry lifecycle events for transient provider errors:
+
+- `retry_scheduled`: a retry was scheduled. Includes `operation: "compaction" | "branch_summary"`, `attempt`, `maxAttempts`, `delayMs`, and `errorMessage`.
+- `retry_attempt_start`: the backoff delay completed and the retried summarization request is starting. Includes `operation`.
+- `retry_finished`: the retry loop finished after success, exhaustion, or abort. Includes `operation`.
+
+These events are observational and do not accept hook results.
 
 ## Planned session facade
 

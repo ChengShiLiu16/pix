@@ -6,6 +6,7 @@ const OSC_PATTERN = /\x1b\][^\x07]*\x07/g;
 export type UserMessageThemeLike = {
 	fg(name: string, text: string): string;
 	bold(text: string): string;
+	bg(name: string, text: string): string;
 };
 
 function stripTerminalControl(text: string): string {
@@ -31,9 +32,10 @@ export function formatUserMessageCardLines(lines: string[], theme: UserMessageTh
 	const label = theme.bold(theme.fg("accent", "You"));
 	const body = (text: string): string => theme.fg("userMessageText", text);
 
+	const withBg = (line: string): string => theme.bg("userMessageBg", line);
 	return wrapOscPromptZone([
-		`${border("╭─")} ${label}`,
-		...content.map((line) => `${border("│")} ${body(line)}`),
-		border("╰─"),
+		withBg(`${border("╭─")} ${label}`),
+		...content.map((line) => withBg(`${border("│")} ${body(line)}`)),
+		withBg(border("╰─")),
 	]);
 }

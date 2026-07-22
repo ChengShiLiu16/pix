@@ -7,7 +7,7 @@
  * 3. Loads the result into the editor for user to fill in answers
  */
 
-import { complete, type UserMessage } from "@chengshiliu16/pix-ai";
+import { complete, type UserMessage } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { BorderedLoader } from "@chengshiliu16/pix-coding-agent";
 
@@ -90,7 +90,7 @@ export default function (pix: ExtensionAPI) {
 					const response = await complete(
 						ctx.model!,
 						{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-						{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+						{ apiKey: auth.apiKey, headers: auth.headers, env: auth.env, signal: loader.signal },
 					);
 
 					if (response.stopReason === "aborted") {

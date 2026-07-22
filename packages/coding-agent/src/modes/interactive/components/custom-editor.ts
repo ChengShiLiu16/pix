@@ -152,7 +152,7 @@ export class CustomEditor extends Editor {
 			return;
 		}
 
-		// Check for paste image keybinding
+		// Check for clipboard paste keybinding
 		if (this.keybindings.matches(data, "app.clipboard.pasteImage")) {
 			this.onPasteImage?.();
 			return;

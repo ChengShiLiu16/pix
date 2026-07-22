@@ -220,6 +220,7 @@ export class ProcessTerminal implements Terminal {
 			if (this.keyboardProtocolNegotiationPending) {
 				const negotiationSequence = this.readKeyboardProtocolNegotiationSequence(sequence, true);
 				if (negotiationSequence === "pending") {
+					this.scheduleKeyboardProtocolNegotiationBufferFlush();
 					return; // Wait for the rest of a split negotiation response.
 				}
 				if (this.handleKeyboardProtocolNegotiationSequence(negotiationSequence)) {
@@ -294,13 +295,15 @@ export class ProcessTerminal implements Terminal {
 	): boolean {
 		if (!negotiationSequence) return false;
 		if (negotiationSequence.type === "kitty-flags") {
+			this.keyboardProtocolNegotiationPending = false;
+			this.keyboardProtocolLateResponsePending = true;
+			this.clearKeyboardProtocolNegotiationBuffer();
+			this.clearKeyboardProtocolFallbackTimer();
 			if (negotiationSequence.flags !== 0 && !this._kittyProtocolActive) {
 				this._kittyProtocolActive = true;
 				setKittyProtocolActive(true);
-				this.keyboardProtocolNegotiationPending = false;
-				this.keyboardProtocolLateResponsePending = true;
-				this.clearKeyboardProtocolNegotiationBuffer();
-				this.clearKeyboardProtocolFallbackTimer();
+			} else if (negotiationSequence.flags === 0) {
+				this.enableModifyOtherKeys();
 			}
 			return true;
 		}
