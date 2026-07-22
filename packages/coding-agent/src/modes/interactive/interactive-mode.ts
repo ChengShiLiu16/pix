@@ -87,6 +87,7 @@ import type { TruncationResult } from "../../core/tools/truncate.ts";
 import { hasTrustRequiringProjectResources, ProjectTrustStore } from "../../core/trust-manager.ts";
 import { getUsageCostBreakdown } from "../../core/usage-totals.ts";
 import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
+import { setOscPromptZonesEnabled } from "../../core/builtin-extensions/lib/osc-prompt-zone.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
@@ -136,6 +137,7 @@ import { TrustSelectorComponent } from "./components/trust-selector.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { type UserMessageAction, UserMessageActionDialogComponent } from "./components/user-message-action-dialog.ts";
 import { UserMessageSelectorComponent } from "./components/user-message-selector.ts";
+import { resolveMouseTuiAssembly } from "./mouse-tui-assembly.ts";
 import { getModelSearchText } from "./model-search.ts";
 import {
 	detectTerminalBackgroundFromEnv,
@@ -457,7 +459,30 @@ export class InteractiveMode {
 			await this.rebindCurrentSession({ renderBeforeBind: true });
 		});
 		this.version = VERSION;
-		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
+		// Opt-in: alternate-screen + mouse so the app owns scrolling and can receive
+		// clicks (click-to-expand, drag-select). Controlled by the `terminal.mouseUI`
+		// setting, with the PIX_MOUSE_UI env var as a fallback override.
+		const mouseUI = this.settingsManager.getMouseUI();
+		const mouseAssembly = resolveMouseTuiAssembly(mouseUI);
+		// OSC 133 prompt-zone markers are only meaningful on the primary screen.
+		// Mouse UI runs on the alternate screen, where they desync the app-driven
+		// differential renderer (misaligned message borders, stale selection cells),
+		// so suppress them there and keep them for inline rendering.
+		setOscPromptZonesEnabled(mouseAssembly.oscPromptZonesEnabled);
+		this.ui = new TUI(
+			new ProcessTerminal({ enableMouse: mouseAssembly.enableMouse }),
+			this.settingsManager.getShowHardwareCursor(),
+			{
+				appScroll: mouseAssembly.appScroll,
+				marginX: mouseAssembly.marginX,
+			},
+		);
+		if (mouseAssembly.attachSelectionCopy) {
+			// App-managed drag selection: copy the selected transcript text on release.
+			this.ui.onSelectionCopy = (text) => {
+				void copyToClipboard(text);
+			};
+		}
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.loadedResourcesContainer = new Container();
@@ -789,23 +814,7 @@ export class InteractiveMode {
 			this.builtInHeader = new Text("", 0, 0);
 			this.headerContainer.addChild(this.builtInHeader);
 		}
-
-		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
-		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
-		this.ui.addChild(this.footer);
-		this.ui.setFocus(this.editor);
-
-		this.setupKeyHandlers();
-		this.setupEditorSubmitHandler();
-
-		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
-		this.ui.start();
-		this.isInitialized = true;
+		this.ui.requestRender();
 
 		// Initialize extensions first so resources are shown before messages
 		await this.rebindCurrentSession();

@@ -4123,4 +4123,119 @@ describe("Editor component", () => {
 			assert.strictEqual(submitted, pastedText);
 		});
 	});
+
+	describe("Mouse click to move cursor", () => {
+		const click = (x: number) =>
+			({ x, y: 0, action: "up", button: "left", shift: false, alt: false, ctrl: false }) as const;
+
+		it("moves the cursor to the clicked column on a single line", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hello world");
+			editor.render(80);
+
+			editor.handleMouse(click(6), 1); // row 0 is the top border, text starts at row 1
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 6 });
+		});
+
+		it("clamps the cursor to end of line when clicking past the text", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hi");
+			editor.render(80);
+
+			editor.handleMouse(click(40), 1);
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+
+		it("resolves the logical line when clicking a lower row", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("abc\ndefgh");
+			editor.render(80);
+
+			editor.handleMouse(click(3), 2); // row 2 -> second logical line
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 1, col: 3 });
+		});
+
+		it("ignores clicks on the top border row", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("hello");
+			editor.render(80);
+			editor.handleMouse(click(2), 1); // place cursor at col 2 first
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+
+			editor.handleMouse(click(4), 0); // border row -> no change
+
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+
+		it("snaps to the nearer grapheme edge", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("abcd");
+			editor.render(80);
+
+			editor.handleMouse(click(2), 1); // exactly on 'c' left edge -> col 2
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 2 });
+		});
+
+		it("maps clicks on soft-wrapped rows back to the logical line", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			// 20 'a's wrap into multiple visual rows at a narrow width.
+			editor.setText("aaaaaaaaaaaaaaaaaaaa");
+			// content width with borders: render width 12 -> layoutWidth ~10
+			editor.render(12);
+
+			// localY=2 is the second visible text row (first wrap continuation)
+			editor.handleMouse(click(2), 2);
+
+			const cursor = editor.getCursor();
+			assert.strictEqual(cursor.line, 0);
+			assert.ok(cursor.col > 0, `expected wrapped col > 0, got ${cursor.col}`);
+		});
+
+		it("snaps wide CJK graphemes to the nearer edge", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			editor.setText("你好世界");
+			editor.render(80);
+
+			// Each CJK char is width 2. Click at visual col 1 is mid first char -> nearer edge.
+			editor.handleMouse(click(1), 1);
+			const cursor = editor.getCursor();
+			assert.strictEqual(cursor.line, 0);
+			// nearer to start (0) or end of first char (1)
+			assert.ok(cursor.col === 0 || cursor.col === 1, `unexpected col ${cursor.col}`);
+		});
+
+		it("treats paste markers as atomic for click placement", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme);
+			const big = "line\n".repeat(20).trimEnd();
+			editor.handleInput(`\x1b[200~${big}\x1b[201~`);
+			editor.render(80);
+			const text = editor.getText();
+			// Marker form like [paste #1 +20 lines]
+			assert.match(text, /\[paste #\d+/);
+
+			// Click inside the marker visual span should land on a marker boundary, not mid-marker index.
+			editor.handleMouse(click(8), 1);
+			const col = editor.getCursor().col;
+			const line = editor.getText().split("\n")[0] ?? "";
+			// Cursor should be at 0 (before marker) or at marker end / after
+			const markerMatch = line.match(/^\[paste #\d+[\s\S]*?\]/);
+			assert.ok(markerMatch, `expected paste marker line, got: ${line}`);
+			const markerEnd = markerMatch[0].length;
+			assert.ok(col === 0 || col === markerEnd || col >= markerEnd, `col ${col} not on atomic boundary (end=${markerEnd})`);
+		});
+
+		it("accounts for horizontal padding when mapping click columns", () => {
+			const editor = new Editor(createTestTUI(), defaultEditorTheme, { paddingX: 2 });
+			editor.setText("hello");
+			editor.render(80);
+
+			// content-space x includes padding; strip paddingX so col 0 is first text char
+			editor.handleMouse(click(2 + 3), 1); // padding 2 + col 3 -> 'l'
+			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 3 });
+		});
+	});
+
 });

@@ -419,6 +419,7 @@ export class TUI extends Container {
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
 	private stopped = false;
+	private started = false;
 	private pendingOsc11BackgroundReplies = 0;
 	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
@@ -1098,6 +1099,8 @@ export class TUI extends Container {
 	}
 
 	start(): void {
+		if (this.started) return;
+		this.started = true;
 		this.stopped = false;
 		this.terminal.start(
 			(data) => this.handleInput(data),
@@ -1153,6 +1156,7 @@ export class TUI extends Container {
 	}
 
 	stop(): void {
+		this.started = false;
 		this.stopped = true;
 		if (this.removeMouseListener) {
 			this.removeMouseListener();
