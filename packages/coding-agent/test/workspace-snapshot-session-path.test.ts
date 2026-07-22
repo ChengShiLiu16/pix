@@ -9,8 +9,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
 import type { Message } from "@chengshiliu16/pix-ai/compat";
+import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "../src/core/session-manager.ts";
 import {
 	captureWorkspaceSnapshot,
@@ -88,8 +88,8 @@ describe("workspace snapshot session path (S3 probe)", () => {
 		expect(userEntry?.parentId).toBe(snapId);
 
 		const snapEntry = sessionManager.getEntry(snapId);
-		expect(snapEntry?.type).toBe("custom");
-		expect(snapEntry?.customType).toBe(WORKSPACE_SNAPSHOT_CUSTOM_TYPE);
+		if (snapEntry?.type !== "custom") throw new Error("Expected custom snapshot entry");
+		expect(snapEntry.customType).toBe(WORKSPACE_SNAPSHOT_CUSTOM_TYPE);
 	});
 
 	it("restores the workspace when navigateTree would set leaf to the snapshot parent", async () => {

@@ -58,18 +58,8 @@ describe("createAgentSession session manager defaults", () => {
 			sessionManager,
 		});
 
-		// git_evidence_* are lazily activated on first git use, so they are absent from
-		// the cold-start default set (see AgentSession.activateGitEvidenceIfNeeded).
 		expect(session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write", "ls"]);
 		expect(session.systemPrompt).toContain("- ls: List directory contents");
-		expect(session.systemPrompt).not.toContain(
-			"- git_evidence_read: Read/search captured raw git evidence by id or path",
-		);
-		expect(session.systemPrompt).not.toContain(
-			"Commit subjects, file names, and stats only support inventory claims",
-		);
-		// The minimal always-on note keeps the digest behavior discoverable before activation.
-		expect(session.systemPrompt).toContain("automatically captured as a compact evidence digest");
 
 		session.dispose();
 	});

@@ -8,7 +8,6 @@ import {
 } from "./compaction/index.ts";
 import { ageToolResults, compactEditArguments } from "./context-aging.ts";
 import { CONTEXT_DEBUG, contextDebug } from "./context-debug.ts";
-import { applyGitEvidenceTransform } from "./context-git-evidence.ts";
 import { emitContextPhase, emitTokenEstimation, isMetricsEnabled } from "./context-metrics.ts";
 import { pruneStaleReads, pruneThinkingForNonAnthropic } from "./context-prune.ts";
 import { computeReachability } from "./context-reachability.ts";
@@ -66,12 +65,10 @@ export interface OptimizeOutgoingContextOptions {
 	provider: string;
 	sessionId: string; // For metrics correlation
 	compactionSettings?: CompactionSettings; // User-configured compaction settings
-	env?: NodeJS.ProcessEnv;
 }
 
 export type ContextOptimizationStageName =
 	| "assistant_cap"
-	| "git_evidence_transform"
 	| "aging"
 	| "stale_prune"
 	| "thinking_prune"
@@ -282,39 +279,8 @@ async function optimizeOutgoingContextInternal(
 	if (metricsEnabled)
 		emitContextPhase(options.sessionId, options.contextWindow, "optimize_start", 0, previousTokens, 0);
 
-	// 先把大块 git 检查输出替换为结构化 evidence 摘要和原始 evidence 引用。
-	const gitStartTime = performance.now();
-	const beforeGit = next;
-	next = await applyGitEvidenceTransform(next, options.cwd, options.env);
-	const afterGitTokens = estimateIfNeeded(next, options.contextWindow, shouldMeasureStages);
-	stages.push(
-		createStageReport({
-			name: "git_evidence_transform",
-			ran: true,
-			beforeMessages: beforeGit,
-			afterMessages: next,
-			tokensBefore: previousTokens,
-			tokensAfter: afterGitTokens,
-			durationMs: performance.now() - gitStartTime,
-			destructiveLevel: "low",
-			cacheBreakRisk: "medium",
-		}),
-	);
-	if (metricsEnabled) {
-		emitContextPhase(
-			options.sessionId,
-			options.contextWindow,
-			"git_evidence_transform",
-			previousTokens,
-			afterGitTokens,
-			performance.now() - gitStartTime,
-		);
-	}
-	previousTokens = afterGitTokens;
-
 	// 在更具破坏性的 stale-read 剪枝前，先渐进压缩旧工具结果。
-	// 压力计算放在 git evidence 压缩后，避免大块 git 输出触发过度 aging。
-	const baselineTokens = shouldMeasureStages ? afterGitTokens : estimatePressureTokens(next, options.contextWindow);
+	const baselineTokens = shouldMeasureStages ? previousTokens : estimatePressureTokens(next, options.contextWindow);
 	let currentTokens = baselineTokens;
 	let currentRatio = ratioFor(currentTokens, options.contextWindow);
 
@@ -479,8 +445,7 @@ async function optimizeOutgoingContextInternal(
 		}),
 	);
 
-	// Measure aging+prune yield (excludes git-evidence, which ran before the
-	// baseline). The extra estimate only runs under PIX_CONTEXT_DEBUG, which is
+	// Measure aging+prune yield. The extra estimate only runs under PIX_CONTEXT_DEBUG, which is
 	// exactly when metrics are enabled (PIX_CONTEXT_DEBUG=1 also drives the
 	// CONTEXT_DEBUG log below, so no separate CONTEXT_DEBUG guard is needed).
 	const shouldMeasureFinalTokens = shouldMeasureStages;

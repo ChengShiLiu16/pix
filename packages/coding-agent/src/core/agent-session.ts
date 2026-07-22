@@ -51,7 +51,6 @@ import { getAgentDir } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
-import { getShellEnv } from "../utils/shell.ts";
 import { sleep } from "../utils/sleep.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
@@ -68,7 +67,6 @@ import {
 	shouldCompact,
 } from "./compaction/index.ts";
 import { contextDebug } from "./context-debug.ts";
-import { detectGitInspection, isGitEvidenceText } from "./context-git-evidence.ts";
 import {
 	optimizeOutgoingContextWithReport,
 	shouldUseOptimizedContextInsteadOfCompaction,
@@ -323,46 +321,6 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 // ============================================================================
 // AgentSession Class
 // ============================================================================
-
-/**
- * True when the transcript contains a git inspection command (a digest will be
- * or has been created) or an already-captured git evidence digest. Mirrors the
- * createGitEvidenceResult gate (detectGitInspection) so activation lines up
- * exactly with digest creation, plus isGitEvidenceText to cover restored/older
- * sessions whose raw output was already transformed.
- */
-export function messagesHaveGitEvidenceSignal(messages: AgentMessage[]): boolean {
-	for (const message of messages) {
-		const content = (message as { content?: unknown }).content;
-		if ((message as { role?: string }).role === "assistant" && Array.isArray(content)) {
-			for (const block of content) {
-				if (
-					block?.type === "toolCall" &&
-					block?.name === "bash" &&
-					typeof block?.arguments?.command === "string" &&
-					detectGitInspection(block.arguments.command)
-				) {
-					return true;
-				}
-			}
-		}
-		if (Array.isArray(content)) {
-			for (const block of content) {
-				if (block?.type === "text" && typeof block?.text === "string" && isGitEvidenceText(block.text)) {
-					return true;
-				}
-			}
-		}
-		if (
-			(message as { role?: string }).role === "bashExecution" &&
-			typeof (message as { command?: unknown }).command === "string" &&
-			detectGitInspection((message as { command: string }).command)
-		) {
-			return true;
-		}
-	}
-	return false;
-}
 
 export class AgentSession {
 	readonly agent: Agent;
@@ -1015,14 +973,6 @@ export class AgentSession {
 		// Rebuild base system prompt with new tool set
 		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
 		this.agent.state.systemPrompt = this._systemPromptOverride ?? this._baseSystemPrompt;
-	}
-
-	activateGitEvidenceIfNeeded(messages: AgentMessage[]): boolean {
-		if (this.agent.state.tools.some((tool) => tool.name === "git_evidence_read")) return false;
-		if (!this._toolRegistry.has("git_evidence_read")) return false;
-		if (!messagesHaveGitEvidenceSignal(messages)) return false;
-		this.setActiveToolsByName([...this.getActiveToolNames(), "git_evidence_read", "git_evidence_findings"]);
-		return true;
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -2195,7 +2145,6 @@ export class AgentSession {
 			const provider = this.model?.provider ?? "";
 			const optimized = await optimizeOutgoingContextWithReport(messages, {
 				cwd: this._cwd,
-				env: getShellEnv(),
 				contextWindow,
 				provider,
 				sessionId: this.sessionId,

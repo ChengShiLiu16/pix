@@ -89,7 +89,7 @@ describe("Coding Agent Tools", () => {
 			expect(result.details).toBeUndefined();
 		});
 
-		it("should compact raw git diff files into git evidence", async () => {
+		it("should read raw git diff files unchanged", async () => {
 			const localReadTool = createReadTool(testDir);
 			const testFile = join(testDir, "captured-diff.txt");
 			const content = `commit abcdef1234567890
@@ -106,29 +106,11 @@ index 1111111..2222222 100644
 `;
 			writeFileSync(testFile, content);
 
-			const result = await localReadTool.execute("test-call-git-evidence", { path: testFile });
-			const output = getTextOutput(result);
+			const result = await localReadTool.execute("test-call-git-diff", { path: testFile });
 
-			expect(output).toContain("Git evidence captured: git-show-");
-			expect(output).toContain("Files and hunks:");
-			expect(output).toContain("src/todo.ts");
-			expect(output).not.toBe(content);
-			expect(result.details?.gitEvidence?.id).toMatch(/^git-show-[0-9a-f]{12}$/u);
-		});
-
-		it("should redirect raw git evidence files to git_evidence_read", async () => {
-			const localReadTool = createReadTool(testDir);
-			const evidenceDir = join(testDir, ".pix", "session-evidence", "git");
-			mkdirSync(evidenceDir, { recursive: true });
-			const testFile = join(evidenceDir, "git-show-abcdef123456.txt");
-			writeFileSync(testFile, "const secretSourceLine = true;\n");
-
-			const result = await localReadTool.execute("test-call-git-evidence-path", { path: testFile });
-			const output = getTextOutput(result);
-
-			expect(output).toContain("Raw git evidence file not returned through read");
-			expect(output).toContain("Use git_evidence_read instead: id=git-show-abcdef123456 offset=1 limit=120");
-			expect(output).not.toContain("secretSourceLine");
+			expect(getTextOutput(result)).toBe(content);
+			expect(result.details).toBeUndefined();
+			expect(existsSync(join(testDir, ".pix"))).toBe(false);
 		});
 
 		it("should handle non-existent files", async () => {
@@ -777,6 +759,80 @@ index 1111111..2222222 100644
 			expect(getTextOutput(result)).toContain("line 4999");
 		});
 
+		it("should return git output directly without creating project evidence files", async () => {
+			const gitOutput = [
+				"diff --git a/src/todo.ts b/src/todo.ts",
+				"index 1111111..2222222 100644",
+				"--- a/src/todo.ts",
+				"+++ b/src/todo.ts",
+				"@@ -1,3 +1,4 @@",
+				"+validateTodo(nextValue);",
+			].join("\n");
+			const bash = createBashTool(testDir, {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from(gitOutput, "utf-8"));
+						return { exitCode: 0 };
+					},
+				},
+			});
+
+			const result = await bash.execute("test-call-git-output", { command: "git diff" });
+
+			expect(getTextOutput(result)).toBe(gitOutput);
+			expect(result.details).toBeUndefined();
+			expect(existsSync(join(testDir, ".pix"))).toBe(false);
+		});
+
+		it("should return nontruncated large output without creating project evidence files", async () => {
+			const largeOutput = Array.from(
+				{ length: 150 },
+				(_, index) => `line-${String(index + 1).padStart(3, "0")}-${"x".repeat(24)}`,
+			).join("\n");
+			const bash = createBashTool(testDir, {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from(largeOutput, "utf-8"));
+						return { exitCode: 0 };
+					},
+				},
+			});
+
+			const result = await bash.execute("test-call-large-output", { command: "large-output" });
+
+			expect(Buffer.byteLength(largeOutput)).toBeGreaterThan(3000);
+			expect(getTextOutput(result)).toBe(largeOutput);
+			expect(result.details).toBeUndefined();
+			expect(existsSync(join(testDir, ".pix"))).toBe(false);
+		});
+
+		it("should save byte-truncated output only to the system temp directory", async () => {
+			const largeOutput = Array.from(
+				{ length: 400 },
+				(_, index) => `line-${String(index + 1).padStart(3, "0")}-${"x".repeat(200)}`,
+			).join("\n");
+			const bash = createBashTool(testDir, {
+				operations: {
+					exec: async (_command, _cwd, { onData }) => {
+						onData(Buffer.from(largeOutput, "utf-8"));
+						return { exitCode: 0 };
+					},
+				},
+			});
+
+			const result = await bash.execute("test-call-byte-truncation", { command: "large-output" });
+			const fullOutputPath = result.details?.fullOutputPath;
+
+			expect(result.details?.truncation?.truncated).toBe(true);
+			expect(result.details?.truncation?.truncatedBy).toBe("bytes");
+			expect(result.details?.truncation?.totalLines).toBe(400);
+			expect(fullOutputPath).toBeDefined();
+			expect(fullOutputPath?.startsWith(tmpdir())).toBe(true);
+			expect(fullOutputPath).toMatch(/pix-bash-.*\.log$/u);
+			expect(readFileSync(fullOutputPath!, "utf-8")).toBe(largeOutput);
+			expect(existsSync(join(testDir, ".pix"))).toBe(false);
+		});
+
 		it("should not count a trailing newline as an extra truncated bash output line", async () => {
 			const operations: BashOperations = {
 				exec: async (_command, _cwd, { onData }) => {
@@ -791,15 +847,23 @@ index 1111111..2222222 100644
 			const result = await bash.execute("test-call-trailing-newline-line-count", { command: "many-lines" });
 			const output = getTextOutput(result);
 
-			// Output exceeds threshold → saved as evidence, context gets summary.
-			expect(output).toContain("Big output saved as big-output-");
-			expect(output).toContain("2003 lines");
-			expect(output).toContain("last 5 lines");
+			expect(result.details?.truncation?.truncated).toBe(true);
+			expect(result.details?.truncation?.truncatedBy).toBe("lines");
+			expect(result.details?.truncation?.totalLines).toBe(4000);
+			expect(result.details?.truncation?.outputLines).toBe(2000);
+			expect(output).toContain("[Showing lines 2001-4000 of 4000. Full output:");
+			expect(output).not.toContain("line-2000");
+			expect(output).toContain("line-2001");
 			expect(output).toContain("line-3999");
 			expect(output).toContain("line-4000");
-			expect(result.details?.bigOutput).toBeDefined();
-			expect(result.details?.bigOutput.rawLines).toBe(2003);
-			expect(result.details?.bigOutput.exitCode).toBe(0);
+			const fullOutputPath = result.details?.fullOutputPath;
+			expect(fullOutputPath).toBeDefined();
+			expect(fullOutputPath?.startsWith(tmpdir())).toBe(true);
+			expect(fullOutputPath).toMatch(/pix-bash-.*\.log$/u);
+			expect(readFileSync(fullOutputPath!, "utf-8")).toBe(
+				`${Array.from({ length: 4000 }, (_, index) => `line-${String(index + 1).padStart(4, "0")}`).join("\n")}\n`,
+			);
+			expect(existsSync(join(testDir, ".pix"))).toBe(false);
 		});
 
 		it("should decode UTF-8 characters split across output chunks", async () => {

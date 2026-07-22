@@ -845,16 +845,12 @@
         return null;
       }
 
-      function isGitEvidenceOutput(text) {
-        return /(?:^|\n)(?:Git evidence captured:|==== (?:Evidence: |Evidence superseded: )?git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12} ====|\[Evidence span git-(?:log|show|diff|diff-tree|status|blame|grep)-[0-9a-f]{12}:)/u.test(text.trimStart());
-      }
-
       function formatExpandableOutput(text, maxLines, lang) {
         text = replaceTabs(text);
         const lines = text.split('\n');
         const displayLines = lines.slice(0, maxLines);
         const remaining = lines.length - maxLines;
-        const outputClass = isGitEvidenceOutput(text) ? 'tool-output evidence-output' : 'tool-output';
+        const outputClass = 'tool-output';
 
         if (lang) {
           let highlighted;

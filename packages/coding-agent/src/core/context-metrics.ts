@@ -148,7 +148,7 @@ export function emit(event: MetricsEvent): void {
 export function emitContextPhase(
 	sessionId: string,
 	contextWindow: number,
-	phase: "optimize_start" | "git_evidence_transform" | "aging" | "stale_prune" | "optimize_end",
+	phase: "optimize_start" | "aging" | "stale_prune" | "optimize_end",
 	tokensBefore: number,
 	tokensAfter: number,
 	durationMs: number,

@@ -186,7 +186,6 @@ export function builtin(pix: ExtensionAPI) {
 			promptGuidelines: [
 				"Batch all files you need to read into one read_many call (up to 10 files); beyond that, split into the fewest calls.",
 				'Prefer files[] with per-file offset/limit (e.g. [{ path: "big.ts", offset: 580, limit: 260 }, { path: "config.ts" }]); use paths[] + top-level offset/limit only when every file needs the same range. For large files set a per-file limit instead of reading them whole.',
-				"Do not batch-read temporary files containing git diff/show/log output; use git_evidence_read ranges so raw git evidence stays compact and citable.",
 			],
 			parameters: schema,
 			prepareArguments: prepareReadManyArguments,

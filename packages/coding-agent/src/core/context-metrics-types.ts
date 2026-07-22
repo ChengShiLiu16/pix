@@ -2,7 +2,7 @@
  * Event types for structured context metrics.
  */
 
-export type ContextPhase = "optimize_start" | "git_evidence_transform" | "aging" | "stale_prune" | "optimize_end";
+export type ContextPhase = "optimize_start" | "aging" | "stale_prune" | "optimize_end";
 
 export interface ContextPhaseEvent {
 	timestamp: number;

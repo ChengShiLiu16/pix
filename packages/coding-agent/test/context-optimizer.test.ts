@@ -37,6 +37,37 @@ function stage(report: OptimizationReport, name: string) {
 }
 
 describe("optimizeOutgoingContextWithReport", () => {
+	it("keeps git tool results unchanged without an evidence stage", async () => {
+		const gitOutput = [
+			"diff --git a/src/todo.ts b/src/todo.ts",
+			"--- a/src/todo.ts",
+			"+++ b/src/todo.ts",
+			"@@ -1 +1,2 @@",
+			"+validateTodo(nextValue);",
+		].join("\n");
+		const messages: AgentMessage[] = [
+			assistantCall("git-1", "bash", { command: "git diff" }),
+			toolResult("git-1", "bash", gitOutput),
+		];
+
+		const result = await optimizeOutgoingContextWithReport(messages, {
+			cwd: "/repo",
+			contextWindow: 100_000,
+			provider: "anthropic",
+			sessionId: "session-git-output",
+		});
+
+		expect(result.messages).toBe(messages);
+		expect((result.messages[1] as ToolResultMessage).content).toEqual([{ type: "text", text: gitOutput }]);
+		expect(result.report.stages.map((item) => item.name)).toEqual([
+			"assistant_cap",
+			"aging",
+			"stale_prune",
+			"thinking_prune",
+			"edit_compact",
+		]);
+	});
+
 	it("reports stale prune savings and omitted restore coverage", async () => {
 		const bigRead = "x".repeat(40_000);
 		const messages: AgentMessage[] = [
