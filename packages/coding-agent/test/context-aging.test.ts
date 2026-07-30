@@ -2,6 +2,7 @@ import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
 import type { AssistantMessage, ToolResultMessage } from "@chengshiliu16/pix-ai";
 import { describe, expect, it } from "vitest";
 import { ageToolResults, compactEditArguments } from "../src/core/context-aging.ts";
+import { AGING_START_RATIO } from "../src/core/context-thresholds.ts";
 
 const BIG = "x".repeat(1000);
 
@@ -77,14 +78,14 @@ const FIFTY_LINES = Array.from({ length: 50 }, (_, i) => `line ${i + 1}: ${"x".r
 describe("ageToolResults", () => {
 	// --- threshold gating ---
 
-	it("does not age when context ratio is below 50%", () => {
+	it("does not age below the aging start ratio", () => {
 		const messages = buildConversation("read", BIG, 20);
-		expect(ageToolResults(messages, 0.4)).toBe(messages);
+		expect(ageToolResults(messages, AGING_START_RATIO - 0.01)).toBe(messages);
 	});
 
-	it("starts aging at 50% context ratio", () => {
+	it("starts aging at the aging start ratio", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 20);
-		const result = ageToolResults(messages, 0.5);
+		const result = ageToolResults(messages, AGING_START_RATIO);
 		expect(resultText(result[1])).toContain("lines not shown");
 	});
 
@@ -98,14 +99,14 @@ describe("ageToolResults", () => {
 	it("does not age a result that is too recent (age < minAge)", () => {
 		// Light aging requires age >= 10; only 5 user turns after
 		const messages = buildConversation("read", FIFTY_LINES, 5);
-		const result = ageToolResults(messages, 0.6); // light aging
+		const result = ageToolResults(messages, 0.65); // light aging
 		expect(resultText(result[1])).toBe(FIFTY_LINES);
 	});
 
 	it("ages a result that is old enough", () => {
 		// Light aging requires age >= 10; 12 user turns after
 		const messages = buildConversation("read", FIFTY_LINES, 12);
-		const result = ageToolResults(messages, 0.6); // light aging
+		const result = ageToolResults(messages, 0.65); // light aging
 		expect(resultText(result[1])).toContain("lines not shown");
 	});
 
@@ -113,7 +114,7 @@ describe("ageToolResults", () => {
 
 	it("does not age a small result below the threshold", () => {
 		const messages = buildConversation("read", "tiny result", 12);
-		const result = ageToolResults(messages, 0.6);
+		const result = ageToolResults(messages, 0.65);
 		expect(resultText(result[1])).toBe("tiny result");
 	});
 
@@ -153,7 +154,7 @@ describe("ageToolResults", () => {
 
 	it("light aging: keeps head 20 + tail 5 lines for read", () => {
 		const messages = buildConversation("read", FIFTY_LINES, 12);
-		const result = ageToolResults(messages, 0.6); // light
+		const result = ageToolResults(messages, 0.65); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("line 1:");
 		expect(text).toContain("line 20:");
@@ -199,7 +200,7 @@ describe("ageToolResults", () => {
 
 	it("light aging: keeps tail 6 lines for bash", () => {
 		const messages = buildConversation("bash", FIFTY_LINES, 12);
-		const result = ageToolResults(messages, 0.6); // light
+		const result = ageToolResults(messages, 0.65); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("line 45:");
 		expect(text).toContain("line 50:");
@@ -221,7 +222,7 @@ describe("ageToolResults", () => {
 	it("light aging: keeps first 20 matches for grep", () => {
 		const grepOutput = Array.from({ length: 50 }, (_, i) => `/a.ts:${i + 1}: match text here`).join("\n");
 		const messages = buildConversation("grep", grepOutput, 12);
-		const result = ageToolResults(messages, 0.6); // light
+		const result = ageToolResults(messages, 0.65); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("/a.ts:1:");
 		expect(text).toContain("/a.ts:20:");
@@ -243,7 +244,7 @@ describe("ageToolResults", () => {
 	it("light aging: keeps first 30 entries for ls", () => {
 		const lsOutput = Array.from({ length: 50 }, (_, i) => `/src/subdirectory/deeply/nested/file${i}.ts`).join("\n");
 		const messages = buildConversation("ls", lsOutput, 12);
-		const result = ageToolResults(messages, 0.6); // light
+		const result = ageToolResults(messages, 0.65); // light
 		const text = resultText(result[1]);
 		expect(text).toContain("file0.ts");
 		expect(text).toContain("more entries not shown");
@@ -302,7 +303,7 @@ describe("ageToolResults", () => {
 		// 15 lines, each long enough to exceed MIN_AGING_CHARS
 		const shortRead = Array.from({ length: 15 }, (_, i) => `line ${i + 1}: ${"x".repeat(30)}`).join("\n");
 		const messages = buildConversation("read", shortRead, 12);
-		const result = ageToolResults(messages, 0.6); // light, head=20, tail=5
+		const result = ageToolResults(messages, 0.65); // light, head=20, tail=5
 		// 15 lines < 20+5 = 25, no truncation needed
 		expect(resultText(result[1])).toBe(shortRead);
 	});
@@ -320,7 +321,7 @@ describe("ageToolResults", () => {
 			// 2 user turns → too recent
 			...Array.from({ length: 2 }, (_, i) => userMessage(`new turn ${i}`)),
 		];
-		const result = ageToolResults(messages, 0.6); // light aging, minAge=10
+		const result = ageToolResults(messages, 0.65); // light aging, minAge=10
 		// Old result (index 1, age=14) should be aged
 		expect(resultText(result[1])).toContain("lines not shown");
 		// New result (index 15, age=2) should be untouched
@@ -337,7 +338,7 @@ describe("compactEditArguments", () => {
 		const messages: AgentMessage[] = [
 			assistantCall("c1", "edit", { path: "/a.ts", old_string: "x".repeat(500), new_string: "y" }),
 		];
-		expect(compactEditArguments(messages, 0.6)).toBe(messages);
+		expect(compactEditArguments(messages, 0.65)).toBe(messages);
 	});
 
 	it("compacts edit old_string when context ratio >= 70%", () => {
@@ -387,5 +388,116 @@ describe("compactEditArguments", () => {
 		expect(block.arguments.path).toBe("/a.ts");
 		expect(block.arguments.new_string).toBe("y");
 		expect(block.arguments.replace_all).toBe(true);
+	});
+});
+
+describe("read result outlines", () => {
+	/** A file whose head is imports — the case head/tail truncation handles worst. */
+	const SOURCE = [
+		'import { readFile } from "node:fs/promises";',
+		'import { join, resolve } from "node:path";',
+		'import { parse } from "./parser.ts";',
+		'import { format } from "./format.ts";',
+		'import type { Config } from "./types.ts";',
+		"",
+		"const DEFAULT_TIMEOUT = 30_000;",
+		"",
+		"export interface SessionOptions {",
+		"\tcwd: string;",
+		"\ttimeoutMs?: number;",
+		"}",
+		"",
+		"export class SessionRunner {",
+		"\tprivate readonly options: SessionOptions;",
+		"",
+		"\tconstructor(options: SessionOptions) {",
+		"\t\tthis.options = options;",
+		"\t}",
+		"",
+		"\tasync start(): Promise<void> {",
+		"\t\tawait this.prepare();",
+		"\t}",
+		"",
+		"\tprivate async prepare(): Promise<void> {",
+		"\t\tconst raw = await readFile(join(this.options.cwd, 'config.json'), 'utf8');",
+		"\t\tthis.config = parse(raw);",
+		"\t}",
+		"}",
+		"",
+		"export function createRunner(options: SessionOptions): SessionRunner {",
+		"\treturn new SessionRunner(options);",
+		"}",
+		"",
+		"export const formatSession = (runner: SessionRunner): string => format(runner);",
+		...Array.from({ length: 60 }, (_, i) => `\t// filler comment line ${i + 1} ${"y".repeat(40)}`),
+	].join("\n");
+
+	it("replaces an aged source read with a line-numbered declaration outline", () => {
+		const messages = buildConversation("read", SOURCE, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]);
+
+		expect(aged).toContain("Outline");
+		expect(aged).toMatch(/L9: export interface SessionOptions/);
+		expect(aged).toMatch(/L14: export class SessionRunner/);
+		expect(aged).toMatch(/L31: export function createRunner/);
+		// The point of the outline: the imports that head truncation would have
+		// kept are gone, and the API surface that it would have dropped is kept.
+		expect(aged).not.toContain("import { readFile }");
+	});
+
+	it("costs no more than the head/tail truncation it replaces", () => {
+		const messages = buildConversation("read", SOURCE, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]);
+		// Light aging keeps 20 head + 5 tail lines; the outline must not be larger.
+		const lines = SOURCE.split("\n");
+		const headTailChars = [...lines.slice(0, 20), ...lines.slice(-5)].join("\n").length;
+		expect(aged.length).toBeLessThanOrEqual(headTailChars);
+	});
+
+	it("falls back to head/tail for unstructured output", () => {
+		const prose = Array.from({ length: 60 }, (_, i) => `plain output line ${i + 1} ${"z".repeat(30)}`).join("\n");
+		const messages = buildConversation("read", prose, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]);
+
+		expect(aged).not.toContain("Outline");
+		expect(aged).toContain("lines not shown");
+		expect(aged).toContain("plain output line 1 ");
+	});
+});
+
+describe("dropped-line indexes", () => {
+	it("indexes dropped grep matches by file instead of only counting them", () => {
+		const matches = [
+			...Array.from({ length: 20 }, (_, i) => `src/core/a.ts:${i + 1}:const value = ${i};`),
+			...Array.from({ length: 12 }, (_, i) => `src/core/b.ts:${i + 1}:const value = ${i};`),
+			...Array.from({ length: 5 }, (_, i) => `src/tui/c.ts:${i + 1}:const value = ${i};`),
+		].join("\n");
+		const messages = buildConversation("grep", matches, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]); // light: 20 matches kept
+
+		expect(aged).toContain("17 more matches not shown, in:");
+		expect(aged).toContain("src/core/b.ts (12)");
+		expect(aged).toContain("src/tui/c.ts (5)");
+	});
+
+	it("indexes dropped find entries by directory", () => {
+		const entries = [
+			...Array.from({ length: 30 }, (_, i) => `src/core/file${i}.ts`),
+			...Array.from({ length: 20 }, (_, i) => `src/tui/widget${i}.ts`),
+		].join("\n");
+		const messages = buildConversation("find", entries, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]); // light: 30 entries kept
+
+		expect(aged).toContain("20 more entries not shown, in:");
+		expect(aged).toContain("src/tui/ (20)");
+	});
+
+	it("falls back to a plain count when dropped lines have no usable location", () => {
+		const noise = Array.from({ length: 40 }, (_, i) => `unstructured line ${i}`).join("\n");
+		const messages = buildConversation("grep", noise, 12);
+		const aged = resultText(ageToolResults(messages, 0.65)[1]);
+
+		expect(aged).toContain("20 more matches not shown.");
+		expect(aged).not.toContain("in:");
 	});
 });

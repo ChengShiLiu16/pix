@@ -148,8 +148,52 @@ function getAgingLevel(contextRatio: number, effectiveHeavyThreshold?: number): 
 }
 
 /**
- * Age a read result: keep head + tail lines, with a truncation notice.
- * For single-line or few-line results, use character-based truncation.
+ * Lines worth keeping when a source file is reduced to an outline: top-level
+ * declarations across the languages the read tool sees most. Deliberately
+ * anchored at the start of the line (allowing indentation) so that call sites
+ * and string literals containing these words do not match.
+ */
+const DECLARATION_RE =
+	/^\s*(?:export\s+)?(?:default\s+)?(?:public\s+|private\s+|protected\s+|static\s+|abstract\s+|declare\s+)*(?:async\s+)?(?:function\*?|class|interface|type|enum|const\s+enum|struct|impl|trait|def|fn|func|module|namespace)\s+[A-Za-z_$][\w$]*/u;
+
+/** Exported bindings that hold a function/component, e.g. `export const f = (` */
+const EXPORTED_BINDING_RE = /^\s*export\s+(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*[:=]/u;
+
+/** Method signatures inside a class/interface body, e.g. `  doThing(a: X): Y {` */
+const METHOD_RE = /^\s{1,8}(?:public\s+|private\s+|protected\s+|static\s+|readonly\s+|async\s+)*[A-Za-z_$][\w$]*\s*\(/u;
+
+/**
+ * Reduce file content to an outline of its declarations, each tagged with its
+ * line number.
+ *
+ * This is strictly more useful to the model than the equivalent number of head
+ * lines: the head of a source file is imports, whereas the outline tells the
+ * model what the file actually contains and — via the line numbers, which the
+ * raw read result does not even carry — exactly where to `read` next to get it
+ * back. Same token budget, far higher information density, and recovery from an
+ * aged result becomes one targeted read instead of a full re-read.
+ *
+ * Returns undefined when the content does not look like structured source, so
+ * the caller can fall back to head/tail truncation.
+ */
+function extractOutline(lines: string[], maxEntries: number): string[] | undefined {
+	if (maxEntries <= 0) return undefined;
+	const outline: string[] = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i];
+		if (line.length > 400) continue;
+		if (!DECLARATION_RE.test(line) && !EXPORTED_BINDING_RE.test(line) && !METHOD_RE.test(line)) continue;
+		outline.push(`L${i + 1}: ${line.trim().slice(0, 160)}`);
+		if (outline.length >= maxEntries) break;
+	}
+	// Two declarations is not an outline, it is noise; fall back to head/tail.
+	return outline.length >= 3 ? outline : undefined;
+}
+
+/**
+ * Age a read result: prefer a declaration outline, fall back to head + tail
+ * lines, with a truncation notice. For single-line or few-line results, use
+ * character-based truncation.
  */
 function ageReadResult(text: string, level: AgingLevel, anchor?: string): string {
 	const lines = text.split("\n");
@@ -166,6 +210,14 @@ function ageReadResult(text: string, level: AgingLevel, anchor?: string): string
 		if (text.length <= 2000) return text;
 		// Single/few long lines: keep first 1500 chars
 		return `${text.slice(0, 1500)}\n... ${text.length - 1500} more characters not shown.`;
+	}
+
+	const outline = extractOutline(lines, keptLines);
+	if (outline) {
+		const target = anchor ? ` of ${anchor}` : "";
+		return `[Outline${target} — ${totalLines} lines total. Full body dropped to save context; re-read with offset/limit at the line numbers below.]\n${outline.join(
+			"\n",
+		)}`;
 	}
 
 	const head = lines.slice(0, level.readHeadLines);
@@ -203,8 +255,52 @@ function ageBashResult(text: string, level: AgingLevel, anchor?: string): string
 	return `... ${totalLines - level.bashTailLines} earlier lines not shown ...\n${tail.join("\n")}`;
 }
 
+/** How many distinct locations to name when summarizing dropped lines. */
+const DROPPED_SUMMARY_MAX_GROUPS = 6;
+
 /**
- * Age a grep result: keep first N matches with truncation notice.
+ * Summarize dropped lines as a location index instead of a bare count.
+ *
+ * "... 42 more matches not shown" tells the model nothing it can act on, so the
+ * only way to recover is to re-run the search and pay for the entire result
+ * again. Naming where the dropped hits live costs a handful of tokens and turns
+ * recovery into one targeted grep/read. `groupOf` maps a line to the bucket it
+ * should be counted under; lines it rejects are counted but not named.
+ */
+function summarizeDropped(dropped: string[], noun: string, groupOf: (line: string) => string | undefined): string {
+	const counts = new Map<string, number>();
+	for (const line of dropped) {
+		const group = groupOf(line);
+		if (group === undefined || group.length === 0) continue;
+		counts.set(group, (counts.get(group) ?? 0) + 1);
+	}
+	if (counts.size === 0) return `... ${dropped.length} more ${noun} not shown.`;
+
+	const ranked = [...counts].sort((a, b) => b[1] - a[1]);
+	const named = ranked.slice(0, DROPPED_SUMMARY_MAX_GROUPS);
+	const rest = ranked.length - named.length;
+	const list = named.map(([group, count]) => `${group} (${count})`).join(", ");
+	const tail = rest > 0 ? `, and ${rest} more` : "";
+	return `... ${dropped.length} more ${noun} not shown, in: ${list}${tail}.`;
+}
+
+/** ripgrep emits `path:line:content`; take the path. */
+function grepMatchFile(line: string): string | undefined {
+	if (line.length === 0 || line.startsWith("--")) return undefined;
+	const match = /^([^\s:][^:]*):\d+:/u.exec(line);
+	return match?.[1];
+}
+
+/** Bucket a path entry by its parent directory. */
+function entryDirectory(line: string): string | undefined {
+	const trimmed = line.trim();
+	if (trimmed.length === 0) return undefined;
+	const slash = trimmed.lastIndexOf("/");
+	return slash > 0 ? `${trimmed.slice(0, slash)}/` : "./";
+}
+
+/**
+ * Age a grep result: keep first N matches, and index the rest by file.
  */
 function ageGrepResult(text: string, level: AgingLevel, anchor?: string): string {
 	if (level.heavy) {
@@ -217,11 +313,12 @@ function ageGrepResult(text: string, level: AgingLevel, anchor?: string): string
 	const lines = text.split("\n");
 	if (lines.length <= level.grepMaxMatches) return text;
 	const kept = lines.slice(0, level.grepMaxMatches);
-	return `${kept.join("\n")}\n... ${lines.length - level.grepMaxMatches} more matches not shown.`;
+	const dropped = lines.slice(level.grepMaxMatches);
+	return `${kept.join("\n")}\n${summarizeDropped(dropped, "matches", grepMatchFile)}`;
 }
 
 /**
- * Age an ls/find result: keep first N entries with truncation notice.
+ * Age an ls/find result: keep first N entries, and index the rest by directory.
  */
 function ageListResult(text: string, level: AgingLevel, toolName: string, anchor?: string): string {
 	if (level.heavy) {
@@ -233,7 +330,8 @@ function ageListResult(text: string, level: AgingLevel, toolName: string, anchor
 	const lines = text.split("\n");
 	if (lines.length <= level.listMaxEntries) return text;
 	const kept = lines.slice(0, level.listMaxEntries);
-	return `${kept.join("\n")}\n... ${lines.length - level.listMaxEntries} more entries not shown.`;
+	const dropped = lines.slice(level.listMaxEntries);
+	return `${kept.join("\n")}\n${summarizeDropped(dropped, "entries", entryDirectory)}`;
 }
 
 /**

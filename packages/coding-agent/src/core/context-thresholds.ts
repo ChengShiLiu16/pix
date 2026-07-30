@@ -4,7 +4,7 @@
  * As context usage (estimated tokens / model context window) climbs, three
  * passes engage in a fixed order, each more destructive than the last:
  *
- *   AGING_START_RATIO (0.50)       aging begins — old tool results lose detail
+ *   AGING_START_RATIO (0.62)       aging begins — old tool results lose detail
  *   STALE_PRUNE_START_RATIO (0.65) stale-read pruning begins — superseded
  *                                  results are stubbed out
  *   AGING_MEDIUM_RATIO (0.68)      aging escalates from light to medium
@@ -41,8 +41,17 @@ function ratio(n: number): ContextRatio {
 	return n as ContextRatio;
 }
 
-/** Context ratio at/above which tool-result aging begins (lightest level). */
-export const AGING_START_RATIO = ratio(0.5);
+/**
+ * Context ratio at/above which tool-result aging begins (lightest level).
+ *
+ * Deliberately close to STALE_PRUNE_START_RATIO. Aging rewrites history, which
+ * invalidates the provider prefix cache from the rewrite point (see
+ * context-continuity.ts). Below this ratio the token savings almost never repay
+ * the one-off cache miss, so starting earlier costs money without buying
+ * headroom. The cache gate is the hard enforcement; this ratio just avoids
+ * doing the work at all when it is certain to be rejected.
+ */
+export const AGING_START_RATIO = ratio(0.62);
 /** Context ratio at/above which stale-read pruning runs. */
 export const STALE_PRUNE_START_RATIO = ratio(0.65);
 /** Context ratio at/above which aging escalates from light to medium. */
@@ -57,6 +66,62 @@ export const HEAVY_AGING_COMPACTION_GAP = ratio(0.05);
 
 /** Minimum compaction threshold after resolveCompactionSettings clamps reserve <= 0.25 * window. */
 export const COMPACTION_THRESHOLD_MIN = ratio(0.75);
+
+// ---------------------------------------------------------------------------
+// Prefix-cache economics
+// ---------------------------------------------------------------------------
+//
+// Anthropic (and OpenAI's automatic caching) bill a matching prompt prefix at a
+// fraction of the base input price and freshly written cache entries at a
+// premium. Rewriting a message that was part of the previous request's cached
+// prefix invalidates everything from that point on: the whole suffix is re-billed
+// at the write price instead of the read price.
+//
+// Per request, with suffix S (tokens re-sent because of the break) and R tokens
+// removed by the rewrite:
+//   keep:    0.1 * S
+//   rewrite: 1.25 * (S - R)
+// so the immediate extra cost is `1.15 * S - 1.25 * R`, and every later request
+// that reuses the new prefix saves `0.1 * R`. Over a horizon of N later requests
+// the rewrite pays for itself when  R >= 1.15 * S / (1.25 + 0.1 * N).
+
+/** Multiplier applied to base input price for tokens served from prefix cache. */
+export const CACHE_READ_COST_MULTIPLIER = 0.1;
+/** Multiplier applied to base input price for tokens written into prefix cache. */
+export const CACHE_WRITE_COST_MULTIPLIER = 1.25;
+/**
+ * How many subsequent requests are assumed to reuse a freshly written prefix.
+ * Conservative on purpose: a rewrite that only pays off after a very long tail
+ * of future requests is not worth the immediate premium, since compaction or a
+ * new user turn may invalidate the prefix first.
+ */
+export const CACHE_BREAK_REUSE_HORIZON = 8;
+/**
+ * Distance below the compaction threshold at which the cache gate switches to
+ * "relief" mode. Inside this band the alternative to rewriting is compaction —
+ * a full summarization request plus a total cache reset plus information loss —
+ * so almost any rewrite is cheaper than doing nothing.
+ */
+export const CACHE_GATE_RELIEF_MARGIN = ratio(0.05);
+/** Savings floor in relief mode; below this a cache break is never worth it. */
+export const CACHE_GATE_MIN_SAVED_TOKENS = 512;
+
+/**
+ * Tokens a rewrite must remove to justify breaking the prefix cache at a point
+ * with `brokenSuffixTokens` cached tokens after it.
+ *
+ * @param brokenSuffixTokens - Previously cached tokens invalidated by the break.
+ * @param horizon - Expected number of later requests reusing the new prefix.
+ */
+export function requiredSavingsForCacheBreak(
+	brokenSuffixTokens: number,
+	horizon: number = CACHE_BREAK_REUSE_HORIZON,
+): number {
+	if (brokenSuffixTokens <= 0) return 0;
+	const immediatePremium = CACHE_WRITE_COST_MULTIPLIER - CACHE_READ_COST_MULTIPLIER;
+	const perTokenPayoff = CACHE_WRITE_COST_MULTIPLIER + CACHE_READ_COST_MULTIPLIER * Math.max(0, horizon);
+	return Math.ceil((immediatePremium * brokenSuffixTokens) / perTokenPayoff);
+}
 
 /** Minimum text length (chars) of a result before aging is worth it. */
 export const MIN_AGING_CHARS = 800;

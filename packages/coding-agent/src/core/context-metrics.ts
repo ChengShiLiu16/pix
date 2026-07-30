@@ -9,7 +9,7 @@
  */
 
 import { appendFile } from "node:fs/promises";
-import type { MetricsEvent } from "./context-metrics-types.ts";
+import type { ContextPhase, MetricsEvent } from "./context-metrics-types.ts";
 
 type MetricsSink = (event: MetricsEvent) => void | Promise<void>;
 
@@ -148,7 +148,7 @@ export function emit(event: MetricsEvent): void {
 export function emitContextPhase(
 	sessionId: string,
 	contextWindow: number,
-	phase: "optimize_start" | "aging" | "stale_prune" | "optimize_end",
+	phase: ContextPhase,
 	tokensBefore: number,
 	tokensAfter: number,
 	durationMs: number,

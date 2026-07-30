@@ -7,10 +7,16 @@ import {
 	resolveCompactionSettings,
 } from "./compaction/index.ts";
 import { ageToolResults, compactEditArguments } from "./context-aging.ts";
+import {
+	accumulateTurnFocus,
+	type CacheContinuityDecision,
+	detectPrefixCaching,
+	enforceCacheContinuity,
+} from "./context-continuity.ts";
 import { CONTEXT_DEBUG, contextDebug } from "./context-debug.ts";
 import { emitContextPhase, emitTokenEstimation, isMetricsEnabled } from "./context-metrics.ts";
 import { pruneStaleReads, pruneThinkingForNonAnthropic } from "./context-prune.ts";
-import { computeReachability } from "./context-reachability.ts";
+import { buildFocusContext, computeReachability } from "./context-reachability.ts";
 import {
 	AGING_START_RATIO,
 	EDIT_ARGS_COMPACT_RATIO,
@@ -104,6 +110,11 @@ export interface OptimizationReport {
 	changedMessages: number;
 	omittedResultsAdded: number;
 	stages: ContextOptimizationStageReport[];
+	/**
+	 * Outcome of the prefix-cache gate: whether the rewrite was allowed to break
+	 * the provider's cached prefix, and the arithmetic behind that call.
+	 */
+	cacheGate?: CacheContinuityDecision;
 }
 
 export interface OptimizedOutgoingContext {
@@ -247,6 +258,7 @@ async function optimizeOutgoingContextInternal(
 	messages: AgentMessage[],
 	options: OptimizeOutgoingContextOptions,
 	collectReport: boolean,
+	commitLedger: boolean,
 ): Promise<OptimizedOutgoingContext> {
 	const startTime = performance.now();
 	const stages: ContextOptimizationStageReport[] = [];
@@ -301,7 +313,11 @@ async function optimizeOutgoingContextInternal(
 	if (currentRatio >= AGING_START_RATIO) {
 		const agingStartTime = performance.now();
 		const beforeAging = next;
-		const reachability = computeReachability(next, 2, options.cwd);
+		// Focus accumulates across the requests of one user turn so a result cannot
+		// lose its protection (and get aged) mid-turn just because the model moved
+		// on to another file.
+		const focus = accumulateTurnFocus(options.sessionId, next, buildFocusContext(next, 2, options.cwd));
+		const reachability = computeReachability(next, 2, options.cwd, focus);
 		next = ageToolResults(next, currentRatio, reachability, effectiveHeavyThreshold);
 		const afterAgingTokens = estimateIfNeeded(next, options.contextWindow, shouldMeasureStages);
 		stages.push(
@@ -428,14 +444,14 @@ async function optimizeOutgoingContextInternal(
 	const editStartTime = performance.now();
 	const beforeEdit = next;
 	const editRatio = currentRatio;
-	const result = compactEditArguments(next, editRatio);
-	const afterEditTokens = estimateIfNeeded(result, options.contextWindow, shouldMeasureStages);
+	const rewritten = compactEditArguments(next, editRatio);
+	const afterEditTokens = estimateIfNeeded(rewritten, options.contextWindow, shouldMeasureStages);
 	stages.push(
 		createStageReport({
 			name: "edit_compact",
 			ran: editRatio >= EDIT_ARGS_COMPACT_RATIO,
 			beforeMessages: beforeEdit,
-			afterMessages: result,
+			afterMessages: rewritten,
 			tokensBefore: previousTokens,
 			tokensAfter: afterEditTokens,
 			durationMs: performance.now() - editStartTime,
@@ -444,6 +460,28 @@ async function optimizeOutgoingContextInternal(
 			reason: editRatio < EDIT_ARGS_COMPACT_RATIO ? "below_threshold" : undefined,
 		}),
 	);
+
+	// Every pass above rewrites history in place, which invalidates the provider
+	// prefix cache from the first changed message. Charge that cost against the
+	// tokens saved and keep the rewrite only when it repays the cache miss.
+	const gate = enforceCacheContinuity(messages, rewritten, {
+		sessionId: options.sessionId,
+		ratio: currentRatio,
+		compactionRatio: options.contextWindow > 0 ? 1 - clampedSettings.reserveTokens / options.contextWindow : 0,
+		disabled: !detectPrefixCaching(messages),
+		commit: commitLedger,
+	});
+	const result = gate.messages;
+	if (metricsEnabled) {
+		emitContextPhase(
+			options.sessionId,
+			options.contextWindow,
+			"cache_gate",
+			gate.brokenSuffixTokens,
+			gate.applied ? gate.brokenSuffixTokens - gate.savedTokens : gate.brokenSuffixTokens,
+			0,
+		);
+	}
 
 	// Measure aging+prune yield. The extra estimate only runs under PIX_CONTEXT_DEBUG, which is
 	// exactly when metrics are enabled (PIX_CONTEXT_DEBUG=1 also drives the
@@ -462,12 +500,28 @@ async function optimizeOutgoingContextInternal(
 	}
 
 	const report = createReport(messages, result, options.contextWindow, stages);
+	report.cacheGate = gate;
+	if (!gate.applied) {
+		// The rewrite was rolled back inside the cached region: report what is
+		// actually being sent, not what the stages would have produced.
+		const sentTokens = estimateIfNeeded(result, options.contextWindow, shouldMeasureStages);
+		report.tokensAfter = sentTokens || report.tokensBefore;
+		report.savedTokens = Math.max(0, report.tokensBefore - report.tokensAfter);
+		report.ratioAfter = ratioFor(report.tokensAfter, options.contextWindow);
+		report.changed = messages !== result;
+	}
 	if (CONTEXT_DEBUG && options.contextWindow > 0) {
 		contextDebug(
 			`optimize ${report.tokensBefore}->${report.tokensAfter} tok ` +
 				`(ratio ${report.ratioBefore.toFixed(2)}->${report.ratioAfter.toFixed(2)}, ` +
 				`saved ${report.savedTokens}, risk=${report.cacheBreakRisk})`,
 		);
+		if (gate.breakIndex >= 0) {
+			contextDebug(
+				`cache-gate ${gate.regime} @${gate.breakIndex}: saved ${gate.savedTokens} tok vs ` +
+					`required ${gate.requiredSavedTokens} (suffix ${gate.brokenSuffixTokens})`,
+			);
+		}
 	}
 	return { messages: result, report };
 }
@@ -476,7 +530,7 @@ export async function optimizeOutgoingContext(
 	messages: AgentMessage[],
 	options: OptimizeOutgoingContextOptions,
 ): Promise<AgentMessage[]> {
-	const result = await optimizeOutgoingContextInternal(messages, options, false);
+	const result = await optimizeOutgoingContextInternal(messages, options, false, true);
 	return result.messages;
 }
 
@@ -484,5 +538,7 @@ export async function optimizeOutgoingContextWithReport(
 	messages: AgentMessage[],
 	options: OptimizeOutgoingContextOptions,
 ): Promise<OptimizedOutgoingContext> {
-	return optimizeOutgoingContextInternal(messages, options, true);
+	// Dry run: the caller is deciding whether to compact, not sending a request,
+	// so this must not become the ledger's record of what the provider saw.
+	return optimizeOutgoingContextInternal(messages, options, true, false);
 }

@@ -17,7 +17,7 @@ import { Text } from "@chengshiliu16/pix-tui";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "../../index.ts";
 import { TodoOverlay } from "./lib/todo-overlay.ts";
-import { applyMutation, type TodoAction } from "./lib/todo-reducer.ts";
+import { applyMutations, type TodoAction, type TodoBatchEntry, type TodoOp } from "./lib/todo-reducer.ts";
 import { replayTodoFromBranch } from "./lib/todo-replay.ts";
 import {
 	cloneState,
@@ -26,6 +26,7 @@ import {
 	hasOpenTodos,
 	MAX_ACTIVE_FORM_LENGTH,
 	MAX_TODO_TEXT_LENGTH,
+	MAX_TODOS,
 	type TodoState,
 } from "./lib/todo-state.ts";
 import { buildTodoTriggerHint, scoreTodoTrigger } from "./lib/todo-trigger.ts";
@@ -34,6 +35,67 @@ function formatListSummary(state: TodoState): string {
 	const counts = countByStatus(state);
 	if (state.todos.length === 0) return "没有待办事项";
 	return `📋 ${counts.pending} 待做, ${counts.in_progress} 进行中, ${counts.completed} 已做`;
+}
+
+/** Compact per-op marker; the model only needs the id and what happened to it. */
+function opMarker(op: TodoOp): string {
+	switch (op.kind) {
+		case "add":
+			return `+#${op.id}`;
+		case "start":
+			return `◐#${op.id}`;
+		case "done":
+			return `✓#${op.id}`;
+		case "remove":
+			return `✕#${op.id}`;
+		case "list":
+			return "";
+		case "error":
+			return `⚠ ${op.message}`;
+	}
+}
+
+/**
+ * Render a batch outcome. Single-entry calls keep their original one-line shape
+ * so nothing downstream has to special-case the common path.
+ */
+function formatBatchResultText(ops: TodoOp[], state: TodoState): string {
+	if (ops.length === 1) {
+		const op = ops[0];
+		if (op.kind === "list") return formatListSummary(state);
+		if (op.kind === "done" && op.clearedAll) return `✅ ${state.todos.length}`;
+		return `${opMarker(op)} ${formatListSummary(state)}`;
+	}
+	const markers = ops.map(opMarker).filter((marker) => marker.length > 0);
+	return `${markers.join(" ")} ${formatListSummary(state)}`.trim();
+}
+
+/**
+ * Accept either the batched `ops` array or the single-action shape, so existing
+ * sessions and simple one-off calls keep working unchanged.
+ */
+function normalizeTodoEntries(params: {
+	action?: string;
+	text?: string;
+	id?: number;
+	activeForm?: string;
+	ops?: Array<{ action?: string; text?: string; id?: number; activeForm?: string }>;
+}): TodoBatchEntry[] {
+	const source = params.ops?.length
+		? params.ops
+		: params.action
+			? [{ action: params.action, text: params.text, id: params.id, activeForm: params.activeForm }]
+			: [];
+	return source
+		.filter((entry): entry is { action: string; text?: string; id?: number; activeForm?: string } =>
+			Boolean(entry?.action),
+		)
+		.map((entry) => ({
+			action: entry.action as TodoAction,
+			text: entry.text,
+			id: entry.id,
+			activeForm: entry.activeForm,
+		}));
 }
 
 function formatCommandGroups(state: TodoState): string {
@@ -197,33 +259,43 @@ export function builtin(pix: ExtensionAPI) {
 		name: "todo_manage",
 		label: "Todo Manager",
 		description:
-			"管理任务列表。用 add 添加任务，start 标记进行中，done 标记完成，remove 删除，list 查看。适合跟踪多步骤任务的进度。",
+			"管理任务列表：add 添加, start 标记进行中, done 完成, remove 删除, list 查看。多个操作用 ops 数组一次提交。",
 		promptSnippet: "管理任务列表，跟踪多步骤工作进度",
 		promptGuidelines: [
-			"【何时使用 todo_manage】",
-			"用户明确列出多个要做的事情时（如 '帮我做A、B、C' 或 '首先做X，然后做Y'），用 add 逐个添加到 todo 列表",
-			"开始执行某一步时用 start 标记进行中（同时只能有一个 in_progress），完成后用 done 标记",
-			"用户描述一个需要3步以上的任务时（如 '实现完整功能'、'重构模块'），先拆解为步骤 add 到 todo，再逐步执行",
-			"【何时不要使用 todo_manage】",
-			"简单问答、解释代码、单次操作（如 '解释这个函数'、'改一下变量名'、'看看这个文件'）——不要创建 todo",
-			"用户只问一个问题或只需要一个回答——不要创建 todo",
-			"任务只有1-2步且很直接——不需要 todo 跟踪",
-			"【使用原则】",
-			"todo 是跟踪工具不是计划工具，不要先创建一堆 todo 再开始工作，而是在确定需要做多步时边做边加",
-			"不要把已完成的分析、验证结果、总结清单创建成 todo；如果只是要求列出/生成 todo 清单，请直接用文本回答，不要调用 todo_manage",
-			"不要在最终总结阶段新建 todo；如果本轮只 add 而没有 start/done/remove，系统会把这些空转 todo 当作临时清单清理掉",
-			"每个 todo 应该是一个具体的、可完成的动作，不要写模糊的描述",
-			"start 会将其他进行中的任务降回 pending，确保同时只有一个任务处于 in_progress",
-			"add 前先看返回的列表摘要，不要添加与已有任务重复的 todo；如果已有任务描述不够准确，用 remove 删除后再 add，而不是再添加一条",
+			"多步任务（≥3 步）或用户一次列出多件事时用 todo_manage 跟踪；简单问答、解释代码、1-2 步的直接操作不要建 todo。",
+			"多个操作放进一次调用的 ops 数组（一次 add 多条，或 add 完直接 start），不要每个操作单独调一次。",
+			"start 标记进行中并把其他进行中的降回 pending（同时只能有一个），做完用 done。",
+			"todo 是跟踪工具不是计划工具：边做边加，不要先铺一堆再开工。",
+			"不要把分析结论、验证结果、最终总结变成 todo；用户只要求“列出清单”时直接用文本回答。本轮只 add 而没有 start/done/remove 的空转 todo 会被清理。",
+			"每条 todo 是一个具体、可完成的动作；add 前看返回摘要避免重复，描述不准时 remove 后重建而不是再加一条。",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["add", "start", "done", "remove", "list"] as const, {
-				description: "操作类型：add=添加, start=标记进行中, done=标记完成, remove=删除, list=查看列表",
-			}),
+			action: Type.Optional(
+				StringEnum(["add", "start", "done", "remove", "list"] as const, {
+					description: "单个操作；批量时改用 ops。add=添加, start=标记进行中, done=完成, remove=删除, list=查看",
+				}),
+			),
 			text: Type.Optional(Type.String({ description: "任务描述（add 时必填）", maxLength: MAX_TODO_TEXT_LENGTH })),
 			id: Type.Optional(Type.Number({ description: "任务 ID（start/done/remove 时必填）" })),
 			activeForm: Type.Optional(
 				Type.String({ description: "进行中的简短描述（start 时可选）", maxLength: MAX_ACTIVE_FORM_LENGTH }),
+			),
+			ops: Type.Optional(
+				Type.Array(
+					Type.Object({
+						action: StringEnum(["add", "start", "done", "remove", "list"] as const, {
+							description: "操作类型",
+						}),
+						text: Type.Optional(
+							Type.String({ description: "任务描述（add 时必填）", maxLength: MAX_TODO_TEXT_LENGTH }),
+						),
+						id: Type.Optional(Type.Number({ description: "任务 ID（start/done/remove 时必填）" })),
+						activeForm: Type.Optional(
+							Type.String({ description: "进行中的简短描述", maxLength: MAX_ACTIVE_FORM_LENGTH }),
+						),
+					}),
+					{ description: "按顺序执行的一批操作；优先用它代替多次单操作调用", maxItems: MAX_TODOS },
+				),
 			),
 		}),
 		renderCall() {
@@ -243,71 +315,43 @@ export function builtin(pix: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			widgetCtx = ctx;
 
-			const action = params.action as TodoAction;
-			const result = applyMutation(state, action, {
-				text: params.text,
-				id: params.id,
-				activeForm: params.activeForm,
-			});
-
-			const details = { todos: result.state.todos, nextId: result.state.nextId };
-
-			if (result.op.kind === "error") {
+			const entries = normalizeTodoEntries(params);
+			if (entries.length === 0) {
 				return {
-					content: [{ type: "text", text: result.op.message }],
+					content: [{ type: "text", text: "错误：需要 action 或非空的 ops 数组" }],
 					isError: true,
 					details: { todos: state.todos, nextId: state.nextId },
 				} as any;
 			}
 
-			replaceState(result.state);
-			if (result.op.kind === "add") {
-				agentAddedTodoIds.add(result.op.id);
-			} else if (result.op.kind === "start" || result.op.kind === "done" || result.op.kind === "remove") {
-				agentTouchedExistingTodos = true;
+			const batch = applyMutations(state, entries);
+			const details = { todos: batch.state.todos, nextId: batch.state.nextId };
+
+			// A batch that failed outright is an error; a partial failure is not —
+			// the successful entries were applied and the model needs to see that.
+			if (batch.ops.every((op) => op.kind === "error")) {
+				const message = batch.ops.map((op) => (op.kind === "error" ? op.message : "")).join("; ");
+				return {
+					content: [{ type: "text", text: message }],
+					isError: true,
+					details: { todos: state.todos, nextId: state.nextId },
+				} as any;
+			}
+
+			replaceState(batch.state);
+			for (const op of batch.ops) {
+				if (op.kind === "add") agentAddedTodoIds.add(op.id);
+				else if (op.kind === "start" || op.kind === "done" || op.kind === "remove") {
+					agentTouchedExistingTodos = true;
+				}
 			}
 			persistState();
+			refreshWidget();
 
-			switch (result.op.kind) {
-				case "add":
-					refreshWidget();
-					return {
-						content: [{ type: "text", text: `+#${result.op.id} ${formatListSummary(result.state)}` }],
-						details,
-					};
-				case "start":
-					refreshWidget();
-					return {
-						content: [{ type: "text", text: `◐#${result.op.id} ${formatListSummary(result.state)}` }],
-						details,
-					};
-				case "done": {
-					if (result.op.clearedAll) {
-						refreshWidget();
-						return {
-							content: [{ type: "text", text: `✅ ${result.state.todos.length}` }],
-							details,
-						};
-					}
-					refreshWidget();
-					return {
-						content: [{ type: "text", text: `✓#${result.op.id} ${formatListSummary(result.state)}` }],
-						details,
-					};
-				}
-				case "remove":
-					refreshWidget();
-					return {
-						content: [{ type: "text", text: `✕#${result.op.id} ${formatListSummary(result.state)}` }],
-						details,
-					};
-				case "list":
-					refreshWidget();
-					return {
-						content: [{ type: "text", text: formatListSummary(state) }],
-						details,
-					};
-			}
+			return {
+				content: [{ type: "text", text: formatBatchResultText(batch.ops, batch.state) }],
+				details,
+			};
 		},
 	});
 }

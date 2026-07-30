@@ -37,6 +37,14 @@ const UNICODE_HR_PATTERN = /^[ \t]*[\u2500\u2501─━]{3,}[ \t]*$/gm;
 const UNICODE_BLOCKQUOTE_PATTERN = /^[ \t]*[\u2502│](?!.*\|[ \t]*$)\s?(.*)$/gm;
 const TABLE_SEPARATOR_CELL_PATTERN = /^:?-{3,}:?$/;
 const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+const MULTI_COLUMN_LIST_MIN_WIDTH = 88;
+const MULTI_COLUMN_LIST_GAP = 4;
+
+interface MarkdownFence {
+	character: "`" | "~";
+	length: number;
+	info: string;
+}
 
 function assistantTimestamp(message: AssistantMessage): number | undefined {
 	const timestamp = (message as { timestamp?: unknown }).timestamp;
@@ -102,6 +110,85 @@ function normalizeMarkdownVariants(text: string): string {
 	prepared = prepared.replace(/^([ \t]*)([•◦▪‣])\s+/gm, "$1- ");
 
 	return prepared;
+}
+
+function parseMarkdownFence(line: string): MarkdownFence | undefined {
+	const match = line.match(/^\s{0,3}(`{3,}|~{3,})[ \t]*(.*)$/);
+	if (!match) return undefined;
+
+	const marker = match[1] ?? "";
+	const info = match[2] ?? "";
+	if (marker.startsWith("`") && info.includes("`")) return undefined;
+	return {
+		character: marker[0] as "`" | "~",
+		length: marker.length,
+		info,
+	};
+}
+
+function closesMarkdownFence(fence: MarkdownFence, opener: MarkdownFence): boolean {
+	return fence.character === opener.character && fence.length >= opener.length && !fence.info.trim();
+}
+
+function isStandaloneMarkdownBlock(line: string): boolean {
+	if (!line.trim()) return true;
+	if (/^(?: {4,}|\t)/.test(line)) return true;
+	if (/^\s{0,3}(?:#{1,6}\s+|>|[-*+]\s+|\d+[.)]\s+|`{3,}|~{3,})/.test(line)) return true;
+	if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) return true;
+	if (/^\s*\|.*\|\s*$/.test(line)) return true;
+	return /^\s*</.test(line);
+}
+
+/** CommonMark soft line breaks belong to the same paragraph in terminal output. */
+function joinMarkdownParagraphLines(text: string): string {
+	const lines = text.split("\n");
+	const output: string[] = [];
+	let paragraph = "";
+	let codeFence: MarkdownFence | undefined;
+
+	const flushParagraph = (): void => {
+		if (!paragraph) return;
+		output.push(paragraph);
+		paragraph = "";
+	};
+
+	for (const line of lines) {
+		const fence = parseMarkdownFence(line);
+		if (codeFence) {
+			flushParagraph();
+			output.push(line);
+			if (fence && closesMarkdownFence(fence, codeFence)) codeFence = undefined;
+			continue;
+		}
+		if (fence) {
+			flushParagraph();
+			output.push(line);
+			codeFence = fence;
+			continue;
+		}
+
+		if (isStandaloneMarkdownBlock(line)) {
+			flushParagraph();
+			output.push(line);
+			continue;
+		}
+
+		if (!paragraph) {
+			paragraph = line;
+			continue;
+		}
+
+		if (/(?: {2,}|\\)$/.test(paragraph)) {
+			output.push(paragraph);
+			paragraph = line;
+			continue;
+		}
+
+		paragraph = `${paragraph.trimEnd()} ${line.trimStart()}`;
+	}
+
+	flushParagraph();
+	return output.join("\n");
 }
 
 /** Insert blank lines before block elements when models omit them (marked requirement). */
@@ -373,7 +460,24 @@ function distributeTableColumnWidth(widths: number[], naturalWidths: number[], r
 }
 
 function fitTableColumnWidths(naturalWidths: number[], maxWidth?: number): number[] {
-	if (maxWidth === undefined || tableVisibleWidth(naturalWidths) <= maxWidth) return naturalWidths;
+	if (maxWidth === undefined) return naturalWidths;
+	if (tableVisibleWidth(naturalWidths) < maxWidth) {
+		const widths = [...naturalWidths];
+		const widestNaturalWidth = Math.max(...naturalWidths);
+		const flexibleColumns = naturalWidths
+			.map((width, index) => ({ width, index }))
+			.filter((column) => column.width === widestNaturalWidth)
+			.map((column) => column.index);
+		let remaining = maxWidth - tableVisibleWidth(widths);
+		for (let index = 0; remaining > 0; index += 1) {
+			const columnIndex = flexibleColumns[index % flexibleColumns.length];
+			if (columnIndex === undefined) break;
+			widths[columnIndex] = (widths[columnIndex] ?? 1) + 1;
+			remaining -= 1;
+		}
+		return widths;
+	}
+	if (tableVisibleWidth(naturalWidths) === maxWidth) return naturalWidths;
 
 	const columnCount = naturalWidths.length;
 	const availableContentWidth = Math.max(columnCount, maxWidth - (columnCount * 3 + 1));
@@ -453,7 +557,7 @@ function renderTerminalTable(
 	return { lines: rendered, nextIndex: index };
 }
 
-function renderTerminalMarkdownLine(line: string, styler: TerminalMarkdownStyler): string[] {
+function renderTerminalMarkdownLine(line: string, styler: TerminalMarkdownStyler, maxWidth?: number): string[] {
 	const trimmed = line.trim();
 	if (!trimmed) return [""];
 
@@ -462,12 +566,14 @@ function renderTerminalMarkdownLine(line: string, styler: TerminalMarkdownStyler
 		const level = heading[1]?.length ?? 1;
 		const title = styleInlineMarkdown(heading[2] ?? "", styler);
 		if (level <= 2) {
-			return [styler.title(title), styler.mdHr("─".repeat(Math.max(3, visibleWidth(title))))];
+			const titleWidth = visibleWidth(title);
+			const ruleWidth = Math.max(0, (maxWidth ?? titleWidth) - titleWidth - 1);
+			return [ruleWidth > 0 ? `${styler.title(title)} ${styler.mdHr("─".repeat(ruleWidth))}` : styler.title(title)];
 		}
 		return [`${styler.mdListBullet("▸")} ${styler.bold(styleBodyText(title, styler))}`];
 	}
 
-	if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(trimmed)) return [styler.mdHr("────────────────")];
+	if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(trimmed)) return [styler.mdHr("─".repeat(Math.max(1, maxWidth ?? 16)))];
 
 	const blockquote = line.match(/^\s*>\s?(.*)$/);
 	if (blockquote)
@@ -496,6 +602,86 @@ function renderTerminalMarkdownLine(line: string, styler: TerminalMarkdownStyler
 	return [styleBodyText(styleInlineMarkdown(line, styler), styler)];
 }
 
+function isMarkdownHorizontalRule(line: string): boolean {
+	return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+}
+
+function nextNonBlankLine(lines: string[], startIndex: number): string | undefined {
+	for (let index = startIndex; index < lines.length; index += 1) {
+		if (lines[index]?.trim()) return lines[index];
+	}
+	return undefined;
+}
+
+function renderCodeFenceOpening(fence: MarkdownFence, styler: TerminalMarkdownStyler, maxWidth?: number): string {
+	const language = fence.info.trim();
+	if (maxWidth === undefined || maxWidth < 6) {
+		return language ? `${styler.mdCodeBlockBorder("╭─")} ${styler.mdCode(language)}` : styler.mdCodeBlockBorder("╭─");
+	}
+
+	const prefix = language
+		? `${styler.mdCodeBlockBorder("╭─")} ${styler.mdCode(language)} `
+		: styler.mdCodeBlockBorder("╭");
+	const ruleWidth = Math.max(0, maxWidth - visibleWidth(prefix) - 1);
+	return `${prefix}${styler.mdCodeBlockBorder(`${"─".repeat(ruleWidth)}╮`)}`;
+}
+
+function renderCodeFenceBody(line: string, styler: TerminalMarkdownStyler, maxWidth?: number): string[] {
+	const styledLine = styleBodyText(line, styler);
+	if (maxWidth === undefined || maxWidth < 6) {
+		return [`${styler.mdCodeBlockBorder("│")} ${styledLine}`];
+	}
+
+	const contentWidth = maxWidth - 4;
+	const wrapped = wrapTextWithAnsi(styledLine, contentWidth);
+	const bodyLines = wrapped.length > 0 ? wrapped : [""];
+	return bodyLines.map(
+		(bodyLine) =>
+			`${styler.mdCodeBlockBorder("│")} ${padTableCell(bodyLine, contentWidth)} ${styler.mdCodeBlockBorder("│")}`,
+	);
+}
+
+function renderCodeFenceClosing(styler: TerminalMarkdownStyler, maxWidth?: number): string {
+	if (maxWidth === undefined || maxWidth < 6) return styler.mdCodeBlockBorder("╰─");
+	return styler.mdCodeBlockBorder(`╰${"─".repeat(maxWidth - 2)}╯`);
+}
+
+function renderResponsiveBulletList(
+	lines: string[],
+	startIndex: number,
+	styler: TerminalMarkdownStyler,
+	maxWidth?: number,
+): { lines: string[]; nextIndex: number } | undefined {
+	if (maxWidth === undefined || maxWidth < MULTI_COLUMN_LIST_MIN_WIDTH) return undefined;
+
+	const items: string[] = [];
+	let index = startIndex;
+	while (index < lines.length) {
+		const match = lines[index]?.match(/^[-*+]\s+(?!\[[ xX]\]\s)(.+)$/);
+		if (!match) break;
+		items.push(match[1] ?? "");
+		index += 1;
+	}
+	if (items.length < 4) return undefined;
+
+	const leftWidth = Math.floor((maxWidth - MULTI_COLUMN_LIST_GAP) / 2);
+	const rightWidth = maxWidth - MULTI_COLUMN_LIST_GAP - leftWidth;
+	const renderedItems = items.map(
+		(item) => `${styler.mdListBullet("•")} ${styleBodyText(styleInlineMarkdown(item, styler), styler)}`,
+	);
+	if (renderedItems.some((item) => visibleWidth(item) > Math.min(leftWidth, rightWidth))) return undefined;
+
+	const gap = " ".repeat(MULTI_COLUMN_LIST_GAP);
+	const rendered: string[] = [];
+	for (let itemIndex = 0; itemIndex < renderedItems.length; itemIndex += 2) {
+		const left = renderedItems[itemIndex] ?? "";
+		const right = renderedItems[itemIndex + 1];
+		rendered.push(right === undefined ? left : `${padTableCell(left, leftWidth)}${gap}${right}`);
+	}
+
+	return { lines: rendered, nextIndex: index };
+}
+
 function collapseBlankLines(lines: string[]): string[] {
 	const output: string[] = [];
 	for (const line of lines) {
@@ -508,34 +694,29 @@ function collapseBlankLines(lines: string[]): string[] {
 }
 
 export function formatMarkdownForTerminalText(text: string, theme?: NarrativeThemeLike, maxWidth?: number): string {
-	const lines = normalizeMarkdownVariants(text).split("\n");
+	const lines = joinMarkdownParagraphLines(normalizeMarkdownVariants(text)).split("\n");
 	const output: string[] = [];
 	const styler = createTerminalMarkdownStyler(theme);
-	let inCodeFence = false;
+	let codeFence: MarkdownFence | undefined;
 
 	for (let index = 0; index < lines.length; index++) {
 		const line = lines[index] ?? "";
-		const fence = line.match(/^[ \t]*```[ \t]*([^`]*)[ \t]*$/);
-		if (fence) {
-			if (inCodeFence) {
-				output.push(styler.mdCodeBlockBorder("╰─"));
-				inCodeFence = false;
+		const fence = parseMarkdownFence(line);
+		if (codeFence) {
+			if (fence && closesMarkdownFence(fence, codeFence)) {
+				output.push(renderCodeFenceClosing(styler, maxWidth));
+				codeFence = undefined;
 			} else {
-				const language = fence[1]?.trim();
-				output.push(
-					language
-						? `${styler.mdCodeBlockBorder("╭─")} ${styler.mdCode(language)}`
-						: styler.mdCodeBlockBorder("╭─"),
-				);
-				inCodeFence = true;
+				output.push(...renderCodeFenceBody(line, styler, maxWidth));
 			}
 			continue;
 		}
-
-		if (inCodeFence) {
-			output.push(`${styler.mdCodeBlockBorder("│")} ${styleBodyText(line, styler)}`);
+		if (fence) {
+			output.push(renderCodeFenceOpening(fence, styler, maxWidth));
+			codeFence = fence;
 			continue;
 		}
+		if (isMarkdownHorizontalRule(line) && /^\s*#{1,2}\s+/.test(nextNonBlankLine(lines, index + 1) ?? "")) continue;
 
 		const table = renderTerminalTable(lines, index, styler, maxWidth);
 		if (table) {
@@ -544,10 +725,17 @@ export function formatMarkdownForTerminalText(text: string, theme?: NarrativeThe
 			continue;
 		}
 
-		output.push(...renderTerminalMarkdownLine(line, styler));
+		const responsiveList = renderResponsiveBulletList(lines, index, styler, maxWidth);
+		if (responsiveList) {
+			output.push(...responsiveList.lines);
+			index = responsiveList.nextIndex - 1;
+			continue;
+		}
+
+		output.push(...renderTerminalMarkdownLine(line, styler, maxWidth));
 	}
 
-	if (inCodeFence) output.push(styler.mdCodeBlockBorder("╰─"));
+	if (codeFence) output.push(renderCodeFenceClosing(styler, maxWidth));
 	return collapseBlankLines(output).join("\n");
 }
 

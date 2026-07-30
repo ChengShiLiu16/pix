@@ -163,3 +163,79 @@ describe("formatMarkdownForTerminalText sustained color", () => {
 		}
 	});
 });
+
+describe("formatMarkdownForTerminalText responsive layout", () => {
+	it("joins soft-wrapped prose into one terminal paragraph", () => {
+		const out = formatMarkdownForTerminalText("This is one\nparagraph across\nseveral source lines.");
+
+		expect(out).toBe("This is one paragraph across several source lines.");
+	});
+
+	it("preserves hard breaks and fenced code lines", () => {
+		const out = formatMarkdownForTerminalText("First line  \nSecond line\n\n```text\na\nb\n```");
+
+		expect(out).toContain("First line  \nSecond line");
+		expect(out).toContain("╭─ text\n│ a\n│ b\n╰─");
+	});
+
+	it("preserves shorter nested fences inside longer code fences", () => {
+		const out = formatMarkdownForTerminalText('````text\n```json\n{"ok": true}\n```\n````');
+
+		expect(out).toBe('╭─ text\n│ ```json\n│ {"ok": true}\n│ ```\n╰─');
+	});
+
+	it("fills the available width with code block borders and wraps inside them", () => {
+		const out = formatMarkdownForTerminalText("```ts\nconst value = 'a long value';\n```", undefined, 24).split("\n");
+
+		expect(out).toHaveLength(4);
+		expect(out.every((line) => line.length === 24)).toBe(true);
+		expect(out[0]).toMatch(/^╭─ ts ─+╮$/);
+		expect(out[1]).toBe("│ const value = 'a     │");
+		expect(out[2]).toBe("│ long value';         │");
+		expect(out[3]).toBe(`╰${"─".repeat(22)}╯`);
+	});
+
+	it("expands the widest table column to the available width", () => {
+		const out = formatMarkdownForTerminalText("| Key | Description |\n|---|---|\n| A | Value |", undefined, 40).split(
+			"\n",
+		);
+
+		expect(out.every((line) => line.length === 40)).toBe(true);
+		expect(out[1]).toContain(" Key ");
+		expect(out[1]).toContain(" Description ");
+	});
+
+	it("extends section headings across the available width", () => {
+		const out = formatMarkdownForTerminalText("## Result", undefined, 40).split("\n");
+
+		expect(out).toEqual([`Result ${"─".repeat(33)}`]);
+	});
+
+	it("removes a redundant horizontal rule immediately before a section heading", () => {
+		const out = formatMarkdownForTerminalText("Intro\n\n---\n\n## Result", undefined, 40).split("\n");
+
+		expect(out).toEqual(["Intro", "", `Result ${"─".repeat(33)}`]);
+	});
+
+	it("lays out short top-level lists in two columns on wide terminals", () => {
+		const out = formatMarkdownForTerminalText("- Alpha\n- Beta\n- Gamma\n- Delta", undefined, 88).split("\n");
+
+		expect(out).toHaveLength(2);
+		expect(out[0]).toContain("• Alpha");
+		expect(out[0]).toContain("• Beta");
+		expect(out[1]).toContain("• Gamma");
+		expect(out[1]).toContain("• Delta");
+	});
+
+	it("keeps lists in one column on narrow terminals", () => {
+		const out = formatMarkdownForTerminalText("- Alpha\n- Beta\n- Gamma\n- Delta", undefined, 60).split("\n");
+
+		expect(out).toEqual(["• Alpha", "• Beta", "• Gamma", "• Delta"]);
+	});
+
+	it("keeps task lists in task form on wide terminals", () => {
+		const out = formatMarkdownForTerminalText("- [ ] Alpha\n- [x] Beta\n- [ ] Gamma\n- [x] Delta", undefined, 100);
+
+		expect(out.split("\n")).toEqual(["□ Alpha", "✓ Beta", "□ Gamma", "✓ Delta"]);
+	});
+});

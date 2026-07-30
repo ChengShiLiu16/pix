@@ -239,4 +239,113 @@ describe("todo tracker lifecycle", () => {
 			data: { todos: [{ id: 1, text: "task", status: "in_progress" }], nextId: 2 },
 		});
 	});
+
+	it("applies a batch of operations in one tool call", async () => {
+		const { handlers, tool, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+
+		const result = await tool.execute(
+			"batch",
+			{
+				ops: [
+					{ action: "add", text: "first" },
+					{ action: "add", text: "second" },
+					{ action: "add", text: "third" },
+					{ action: "start", id: 1 },
+				],
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		expect(result.details).toEqual({
+			todos: [
+				{ id: 1, text: "first", status: "in_progress" },
+				{ id: 2, text: "second", status: "pending" },
+				{ id: 3, text: "third", status: "pending" },
+			],
+			nextId: 4,
+		});
+		expect(result.content[0].text).toContain("+#1 +#2 +#3 \u25d0#1");
+	});
+
+	it("keeps the successful entries when one entry of a batch fails", async () => {
+		const { handlers, tool, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+
+		const result = await tool.execute(
+			"batch",
+			{
+				ops: [
+					{ action: "add", text: "keep me" },
+					{ action: "start", id: 99 },
+					{ action: "add", text: "keep me too" },
+				],
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		expect(result.isError).toBeFalsy();
+		expect(result.details.todos.map((todo: { text: string }) => todo.text)).toEqual(["keep me", "keep me too"]);
+		expect(result.content[0].text).toContain("\u627e\u4e0d\u5230 #99");
+	});
+
+	it("reports an error when every entry of a batch fails", async () => {
+		const { handlers, tool, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+
+		const result = await tool.execute(
+			"batch",
+			{
+				ops: [
+					{ action: "done", id: 1 },
+					{ action: "remove", id: 2 },
+				],
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.details.todos).toEqual([]);
+	});
+
+	it("rejects a call with neither action nor ops", async () => {
+		const { handlers, tool, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+
+		const result = await tool.execute("empty", {}, undefined, undefined, ctx);
+		expect(result.isError).toBe(true);
+	});
+
+	it("counts a batch that starts work as touching existing todos", async () => {
+		const { handlers, tool, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "\u5b9e\u73b0\u529f\u80fd" },
+			ctx,
+		);
+		await tool.execute(
+			"batch",
+			{
+				ops: [
+					{ action: "add", text: "task" },
+					{ action: "start", id: 1 },
+				],
+			},
+			undefined,
+			undefined,
+			ctx,
+		);
+		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
+
+		expect(entries.at(-1)).toEqual({
+			customType: "todo-state",
+			data: { todos: [{ id: 1, text: "task", status: "in_progress" }], nextId: 2 },
+		});
+	});
 });

@@ -22,6 +22,19 @@ import {
 
 export type ReachabilityLevel = "active" | "adjacent" | "unrelated";
 
+/**
+ * The set of paths, scopes and tool calls the current work is about.
+ *
+ * Exposed so callers can accumulate it across the requests of a single user turn
+ * (see context-continuity.ts) instead of recomputing it per tool call, which
+ * would let results flip between protected and unprotected mid-turn.
+ */
+export interface FocusContext {
+	targetPaths: Set<string>;
+	targetScopes: Set<string>;
+	focusToolCallIds: Set<string>;
+}
+
 const FILE_PATH_RE =
 	/\b(?:\.{1,2}\/|\/)?[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_.-]+)+\.(?:ts|js|tsx|jsx|py|rs|go|java|cpp|c|h|json|md|txt)\b/gu;
 
@@ -120,11 +133,7 @@ function extractToolScope(
  * This ensures we only capture tool calls that belong to the current demand
  * chain, not leftover work from earlier turns.
  */
-function buildFocusContext(
-	messages: AgentMessage[],
-	lookbackUserTurns: number,
-	cwd?: string,
-): { targetPaths: Set<string>; targetScopes: Set<string>; focusToolCallIds: Set<string> } {
+export function buildFocusContext(messages: AgentMessage[], lookbackUserTurns: number, cwd?: string): FocusContext {
 	const targetPaths = new Set<string>();
 	const targetScopes = new Set<string>();
 	const focusToolCallIds = new Set<string>();
@@ -207,14 +216,18 @@ function isInAnyScope(path: string, scopes: Set<string>, cwd?: string): boolean 
  * @param lookbackUserTurns - How many recent user turns to consider as the
  *   active focus. Default is 2.
  * @param cwd - Working directory for resolving relative paths.
+ * @param focus - Pre-built focus context. Callers pass the turn-accumulated
+ *   focus so protection cannot retract between the requests of one user turn;
+ *   omitted, the focus is derived from `messages` alone.
  * @returns A map from message index to its ReachabilityLevel.
  */
 export function computeReachability(
 	messages: AgentMessage[],
 	lookbackUserTurns: number = 2,
 	cwd?: string,
+	focus?: FocusContext,
 ): Map<number, ReachabilityLevel> {
-	const { targetPaths, targetScopes, focusToolCallIds } = buildFocusContext(messages, lookbackUserTurns, cwd);
+	const { targetPaths, targetScopes, focusToolCallIds } = focus ?? buildFocusContext(messages, lookbackUserTurns, cwd);
 
 	// Pre-scan: map toolCallId → scope info
 	const callInfo = new Map<string, { toolName: string; path?: string; scope?: string; allPaths?: string[] }>();

@@ -162,3 +162,38 @@ export function applyMutation(state: TodoState, action: TodoAction, params: Todo
 export function commitState(current: TodoState, result: ApplyResult): TodoState {
 	return result.op.kind === "error" ? current : result.state;
 }
+
+/** One entry of a batched todo_manage call. */
+export interface TodoBatchEntry extends TodoMutationParams {
+	action: TodoAction;
+}
+
+export interface BatchResult {
+	state: TodoState;
+	ops: TodoOp[];
+}
+
+/**
+ * Fold a batch of mutations over the state.
+ *
+ * Planning a multi-step task means adding several todos at once. One mutation
+ * per tool call turns that into several assistant turns, and every turn re-sends
+ * the whole conversation to the provider — the expensive part is the round trip,
+ * not the todo. Batching collapses them into one.
+ *
+ * A failing entry does not abort the batch: rejecting four valid todos because
+ * the fifth duplicates an existing one would force the model to retry the whole
+ * plan. Each entry's outcome is reported in order, errors included, and the
+ * state carries forward only successful ones — so ids assigned earlier in the
+ * batch are visible to later entries (add then start in a single call).
+ */
+export function applyMutations(state: TodoState, entries: TodoBatchEntry[]): BatchResult {
+	let current = state;
+	const ops: TodoOp[] = [];
+	for (const entry of entries) {
+		const result = applyMutation(current, entry.action, entry);
+		ops.push(result.op);
+		current = commitState(current, result);
+	}
+	return { state: current, ops };
+}
