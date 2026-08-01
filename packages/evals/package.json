@@ -1,0 +1,19 @@
+{
+	"name": "@chengshiliu16/pix-evals",
+	"version": "0.83.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"clean": "shx rm -rf .eval",
+		"eval": "node scripts/run-evals.mjs"
+	},
+	"devDependencies": {
+		"@chengshiliu16/pix-ai": "^0.83.0",
+		"@chengshiliu16/pix-coding-agent": "^0.83.0",
+		"@types/node": "24.12.4",
+		"shx": "0.4.0",
+		"typescript": "5.9.3",
+		"vitest-evals": "0.15.0",
+		"vitest": "4.1.9"
+	}
+}

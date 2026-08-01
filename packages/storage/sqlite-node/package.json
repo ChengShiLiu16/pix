@@ -1,6 +1,6 @@
 {
 	"name": "@chengshiliu16/pix-storage-sqlite-node",
-	"version": "0.81.1",
+	"version": "0.83.0",
 	"description": "Node sqlite storage backend for @chengshiliu16/pix-agent-core sessions",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -32,7 +32,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@chengshiliu16/pix-ai": "^0.81.1",
-		"@chengshiliu16/pix-agent-core": "^0.81.1"
+		"@chengshiliu16/pix-ai": "^0.83.0",
+		"@chengshiliu16/pix-agent-core": "^0.83.0"
 	}
 }

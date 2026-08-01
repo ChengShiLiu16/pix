@@ -31,12 +31,7 @@ export async function getLatestPixRelease(
 	currentVersion: string,
 	options: { timeoutMs?: number } = {},
 ): Promise<LatestPixRelease | undefined> {
-	if (
-		process.env.PIX_SKIP_VERSION_CHECK ||
-		process.env.PI_SKIP_VERSION_CHECK ||
-		process.env.PIX_OFFLINE ||
-		process.env.PI_OFFLINE
-	) {
+	if (process.env.PIX_SKIP_VERSION_CHECK || process.env.PIX_OFFLINE || process.env.PI_OFFLINE) {
 		return undefined;
 	}
 
@@ -75,6 +70,8 @@ export async function getLatestPixVersion(
 }
 
 export async function checkForNewPixVersion(currentVersion: string): Promise<LatestPixRelease | undefined> {
+	if (process.env.PI_SKIP_VERSION_CHECK || process.env.PIX_SKIP_VERSION_CHECK) return undefined;
+
 	try {
 		const latestRelease = await getLatestPixRelease(currentVersion);
 		if (latestRelease && isNewerPackageVersion(latestRelease.version, currentVersion)) {

@@ -1,6 +1,6 @@
 {
 	"name": "@chengshiliu16/pix-agent-core",
-	"version": "0.81.1",
+	"version": "0.83.0",
 	"description": "General-purpose agent with transport abstraction, state management, and attachment support",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -29,9 +29,10 @@
 		"prepublishOnly": "npm run build"
 	},
 	"dependencies": {
-		"@chengshiliu16/pix-ai": "^0.81.1",
+		"diff": "8.0.4",
+		"@chengshiliu16/pix-ai": "^0.83.0",
 		"ignore": "7.0.5",
-		"typebox": "1.1.38",
+		"typebox": "1.3.7",
 		"yaml": "2.9.0"
 	},
 	"keywords": [

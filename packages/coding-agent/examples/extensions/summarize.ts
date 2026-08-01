@@ -1,3 +1,4 @@
+import { uuidv7 } from "@chengshiliu16/pix-ai";
 import { complete, getModel } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI, ExtensionCommandContext } from "@chengshiliu16/pix-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@chengshiliu16/pix-coding-agent";
@@ -193,6 +194,8 @@ export default function (pix: ExtensionAPI) {
 					headers: auth.headers,
 					env: auth.env,
 					reasoningEffort: "high",
+					cacheRetention: "none",
+					sessionId: uuidv7(),
 				},
 			);
 

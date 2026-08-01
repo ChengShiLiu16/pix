@@ -424,6 +424,7 @@ export class TUI extends Container {
 	private pendingOsc11BackgroundQueries: PendingOsc11BackgroundQuery[] = [];
 	private terminalColorSchemeListeners = new Set<(scheme: TerminalColorScheme) => void>();
 	private terminalColorSchemeNotificationsEnabled = false;
+	private readonly logDirectory: string;
 
 	// App-managed scrolling (alternate-screen mode). When enabled, the TUI renders
 	// only a height-sized window of the full content and owns scroll position,
@@ -477,9 +478,11 @@ export class TUI extends Container {
 		terminal: Terminal,
 		showHardwareCursor?: boolean,
 		options: { appScroll?: boolean; marginX?: number } = {},
+		logDirectory?: string,
 	) {
 		super();
 		this.terminal = terminal;
+		this.logDirectory = logDirectory ?? process.env.PIX_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pix", "agent");
 		if (showHardwareCursor !== undefined) {
 			this.showHardwareCursor = showHardwareCursor;
 		}
@@ -1968,8 +1971,9 @@ export class TUI extends Container {
 		const debugRedraw = process.env.PIX_DEBUG_REDRAW === "1";
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
-			const logPath = path.join(os.homedir(), ".pix", "agent", "pix-debug.log");
+			const logPath = path.join(this.logDirectory, "pix-debug.log");
 			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
+			fs.mkdirSync(path.dirname(logPath), { recursive: true });
 			fs.appendFileSync(logPath, msg);
 		};
 
@@ -2164,7 +2168,7 @@ export class TUI extends Container {
 			buffer += "\x1b[2K"; // Clear current line
 			if (!isImage && visibleWidth(line) > width) {
 				// Log all lines to crash file for debugging
-				const crashLogPath = path.join(os.homedir(), ".pix", "agent", "pix-crash.log");
+				const crashLogPath = path.join(this.logDirectory, "pix-crash.log");
 				const crashData = [
 					`Crash at ${new Date().toISOString()}`,
 					`Terminal width: ${width}`,

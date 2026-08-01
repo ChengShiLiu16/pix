@@ -1,6 +1,6 @@
 {
 	"name": "@chengshiliu16/pix-server",
-	"version": "0.81.1",
+	"version": "0.83.0",
 	"description": "experimental server package for pi",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -40,7 +40,7 @@
 		"node": ">=22.19.0"
 	},
 	"dependencies": {
-		"@chengshiliu16/pix-coding-agent": "^0.81.1"
+		"@chengshiliu16/pix-coding-agent": "^0.83.0"
 	},
 	"devDependencies": {
 		"shx": "0.4.0"

@@ -699,6 +699,31 @@ describe("Editor component", () => {
 		});
 	});
 
+	describe("Scroll indicators", () => {
+		it("keeps truncated scroll indicators within width and preserves their color (issue #6962)", () => {
+			const width = 10;
+			const borderColor = (text: string) => `\x1b[35m${text}\x1b[39m`;
+			const editor = new Editor(createTestTUI(width), { ...defaultEditorTheme, borderColor });
+			editor.setText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n"));
+
+			// Render once to initialize wrapping, then move the cursor so content remains above and below the viewport.
+			editor.render(width);
+			for (let index = 0; index < 10; index++) editor.handleInput("\x1b[A");
+
+			const lines = editor.render(width);
+			const topBorder = lines[0]!;
+			const bottomBorder = lines.at(-1)!;
+
+			assert.match(stripVTControlCharacters(topBorder), /^─── ↑/);
+			assert.match(stripVTControlCharacters(bottomBorder), /^─── ↓/);
+			assert.strictEqual(topBorder, borderColor(stripVTControlCharacters(topBorder)));
+			assert.strictEqual(bottomBorder, borderColor(stripVTControlCharacters(bottomBorder)));
+			for (const line of lines) {
+				assert.strictEqual(visibleWidth(line), width, `line exceeds width ${width}: ${JSON.stringify(line)}`);
+			}
+		});
+	});
+
 	describe("Grapheme-aware text wrapping", () => {
 		it("wraps lines correctly when text contains wide emojis", () => {
 			const editor = new Editor(createTestTUI(), defaultEditorTheme);
@@ -4224,7 +4249,10 @@ describe("Editor component", () => {
 			const markerMatch = line.match(/^\[paste #\d+[\s\S]*?\]/);
 			assert.ok(markerMatch, `expected paste marker line, got: ${line}`);
 			const markerEnd = markerMatch[0].length;
-			assert.ok(col === 0 || col === markerEnd || col >= markerEnd, `col ${col} not on atomic boundary (end=${markerEnd})`);
+			assert.ok(
+				col === 0 || col === markerEnd || col >= markerEnd,
+				`col ${col} not on atomic boundary (end=${markerEnd})`,
+			);
 		});
 
 		it("accounts for horizontal padding when mapping click columns", () => {
@@ -4237,5 +4265,4 @@ describe("Editor component", () => {
 			assert.deepStrictEqual(editor.getCursor(), { line: 0, col: 3 });
 		});
 	});
-
 });

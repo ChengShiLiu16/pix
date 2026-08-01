@@ -119,6 +119,10 @@ interface Usage {
 
 ### Extended Message Types (from pix-coding-agent)
 
+The exported pix-ai `StopReason` type also includes `"pending"`, but that value is reserved for partial messages in streaming events. Terminal `done`/`error` messages replace it with a completion reason before pix persists the assistant message, so `"pending"` should never appear in session JSONL.
+
+### Extended Message Types (from pi-coding-agent)
+
 ```typescript
 interface BashExecutionMessage {
   role: "bashExecution";

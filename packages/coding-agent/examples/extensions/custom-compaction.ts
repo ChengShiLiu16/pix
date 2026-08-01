@@ -13,6 +13,7 @@
  *   pi --extension examples/extensions/custom-compaction.ts
  */
 
+import { uuidv7 } from "@chengshiliu16/pix-ai";
 import { complete } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI } from "@chengshiliu16/pix-coding-agent";
 import { convertToLlm, serializeConversation } from "@chengshiliu16/pix-coding-agent";
@@ -96,6 +97,8 @@ ${conversationText}
 					env: auth.env,
 					maxTokens: 8192,
 					signal,
+					cacheRetention: "none",
+					sessionId: uuidv7(),
 				},
 			);
 

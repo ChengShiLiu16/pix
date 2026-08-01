@@ -13,6 +13,7 @@
  */
 
 import type { AgentMessage } from "@chengshiliu16/pix-agent-core";
+import { uuidv7 } from "@chengshiliu16/pix-ai";
 import { complete, type Message } from "@chengshiliu16/pix-ai/compat";
 import type { ExtensionAPI, SessionEntry } from "@chengshiliu16/pix-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@chengshiliu16/pix-coding-agent";
@@ -136,7 +137,14 @@ export default function (pix: ExtensionAPI) {
 					const response = await complete(
 						ctx.model!,
 						{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-						{ apiKey: auth.apiKey, headers: auth.headers, env: auth.env, signal: loader.signal },
+						{
+							apiKey: auth.apiKey,
+							headers: auth.headers,
+							env: auth.env,
+							signal: loader.signal,
+							cacheRetention: "none",
+							sessionId: uuidv7(),
+						},
 					);
 
 					if (response.stopReason === "aborted") {
