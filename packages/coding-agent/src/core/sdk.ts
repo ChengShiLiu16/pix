@@ -356,6 +356,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				provider,
 				sessionId: sessionManager.getSessionId(),
 				compactionSettings: settingsManager.getCompactionSettings(),
+				// Cache-hit pricing for the gate is model specific on OpenAI-style
+				// auto caching (rates.cacheRead / rates.input), so hand the active
+				// model's cost metadata through.
+				model: agent.state.model,
 			});
 			const runner = extensionRunnerRef.current;
 			if (!runner) return next;

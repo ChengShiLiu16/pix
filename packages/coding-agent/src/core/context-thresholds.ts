@@ -71,24 +71,75 @@ export const COMPACTION_THRESHOLD_MIN = ratio(0.75);
 // Prefix-cache economics
 // ---------------------------------------------------------------------------
 //
-// Anthropic (and OpenAI's automatic caching) bill a matching prompt prefix at a
-// fraction of the base input price and freshly written cache entries at a
-// premium. Rewriting a message that was part of the previous request's cached
-// prefix invalidates everything from that point on: the whole suffix is re-billed
-// at the write price instead of the read price.
+// Providers cache the prompt as one contiguous prefix and bill matching tokens
+// at a fraction of the base input price. Rewriting a message that was part of
+// the previous request's cached prefix invalidates everything from that point
+// on. The cost of that break depends on the provider's cache pricing, which
+// differs by protocol:
+//
+//   Anthropic (anthropic-messages, explicit cache_control):
+//     hits at CACHE_READ price, freshly written entries at a premium
+//     (CACHE_WRITE price). A break re-bills the suffix at the write price.
+//
+//   OpenAI-style auto caching (openai-completions / openai-responses):
+//     hits are billed from the model's `cacheRead` rate and writes are NOT
+//     billed separately (`cacheWrite` is 0 in the model metadata). A break
+//     re-bills the suffix at the full input price once; the auto cache then
+//     re-arms for free, so there is no per-request write premium.
 //
 // Per request, with suffix S (tokens re-sent because of the break) and R tokens
 // removed by the rewrite:
-//   keep:    0.1 * S
-//   rewrite: 1.25 * (S - R)
-// so the immediate extra cost is `1.15 * S - 1.25 * R`, and every later request
-// that reuses the new prefix saves `0.1 * R`. Over a horizon of N later requests
-// the rewrite pays for itself when  R >= 1.15 * S / (1.25 + 0.1 * N).
+//   keep:    readPrice  * S
+//   rewrite: writePrice * (S - R)
+// so the immediate extra cost is `(writePrice - readPrice) * S - writePrice * R`,
+// and every later request that reuses the new prefix saves `readPrice * R`.
+// Over a horizon of N later requests the rewrite pays for itself when
+//   R >= (writePrice - readPrice) * S / (writePrice + readPrice * N).
 
-/** Multiplier applied to base input price for tokens served from prefix cache. */
-export const CACHE_READ_COST_MULTIPLIER = 0.1;
-/** Multiplier applied to base input price for tokens written into prefix cache. */
-export const CACHE_WRITE_COST_MULTIPLIER = 1.25;
+/**
+ * Cache pricing semantics for one provider, derived from the model's cost
+ * metadata (rates.cacheRead / rates.input) and the usage the provider reports.
+ *
+ * The multipliers are ratios over the base input price:
+ *   readMultiplier  - price of a cache-hit token (0.1 for Anthropic, model
+ *                     specific for OpenAI-style auto caching, e.g. 0.17 for
+ *                     opencode-go kimi-k2.6).
+ *   writeMultiplier - price of freshly written cache tokens. Anthropic bills
+ *                     writes at a premium (1.25); OpenAI-style auto caching
+ *                     does not bill writes separately, so the break re-bills
+ *                     the suffix at full input price (1.0).
+ */
+export interface CacheSemantics {
+	/** Cache category driving the gate's arithmetic. */
+	kind: "anthropic" | "auto" | "none";
+	readMultiplier: number;
+	writeMultiplier: number;
+}
+
+/** Anthropic explicit-prefix-cache pricing: hits cheap, writes at a premium. */
+export const ANTHROPIC_CACHE_SEMANTICS: CacheSemantics = {
+	kind: "anthropic",
+	readMultiplier: 0.1,
+	writeMultiplier: 1.25,
+};
+
+/**
+ * OpenAI-style automatic prefix caching: hits at the model's cacheRead rate,
+ * writes not billed separately (suffix re-billed at full input price on break).
+ */
+export const OPENAI_AUTO_CACHE_SEMANTICS: CacheSemantics = {
+	kind: "auto",
+	readMultiplier: 0.5,
+	writeMultiplier: 1,
+};
+
+/** No prefix caching: rewrites are unconditional wins, the gate is disabled. */
+export const NO_CACHE_SEMANTICS: CacheSemantics = {
+	kind: "none",
+	readMultiplier: 1,
+	writeMultiplier: 1,
+};
+
 /**
  * How many subsequent requests are assumed to reuse a freshly written prefix.
  * Conservative on purpose: a rewrite that only pays off after a very long tail
@@ -110,16 +161,23 @@ export const CACHE_GATE_MIN_SAVED_TOKENS = 512;
  * Tokens a rewrite must remove to justify breaking the prefix cache at a point
  * with `brokenSuffixTokens` cached tokens after it.
  *
+ * The arithmetic follows the provider's cache pricing (see CacheSemantics): a
+ * rewrite inside the cached region re-bills the suffix at `writeMultiplier`
+ * instead of `readMultiplier`, and each removed token is never re-sent again,
+ * saving `writeMultiplier` now plus `readMultiplier` per later request.
+ *
  * @param brokenSuffixTokens - Previously cached tokens invalidated by the break.
+ * @param semantics - Provider cache pricing; defaults to Anthropic semantics.
  * @param horizon - Expected number of later requests reusing the new prefix.
  */
 export function requiredSavingsForCacheBreak(
 	brokenSuffixTokens: number,
+	semantics: CacheSemantics = ANTHROPIC_CACHE_SEMANTICS,
 	horizon: number = CACHE_BREAK_REUSE_HORIZON,
 ): number {
-	if (brokenSuffixTokens <= 0) return 0;
-	const immediatePremium = CACHE_WRITE_COST_MULTIPLIER - CACHE_READ_COST_MULTIPLIER;
-	const perTokenPayoff = CACHE_WRITE_COST_MULTIPLIER + CACHE_READ_COST_MULTIPLIER * Math.max(0, horizon);
+	if (brokenSuffixTokens <= 0 || semantics.kind === "none") return 0;
+	const immediatePremium = semantics.writeMultiplier - semantics.readMultiplier;
+	const perTokenPayoff = semantics.writeMultiplier + semantics.readMultiplier * Math.max(0, horizon);
 	return Math.ceil((immediatePremium * brokenSuffixTokens) / perTokenPayoff);
 }
 

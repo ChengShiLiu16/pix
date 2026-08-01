@@ -36,8 +36,12 @@ import type { AssistantMessage, ToolResultMessage } from "@chengshiliu16/pix-ai"
 import { estimateTokens } from "./compaction/index.ts";
 import type { FocusContext } from "./context-reachability.ts";
 import {
+	ANTHROPIC_CACHE_SEMANTICS,
 	CACHE_GATE_MIN_SAVED_TOKENS,
 	CACHE_GATE_RELIEF_MARGIN,
+	type CacheSemantics,
+	NO_CACHE_SEMANTICS,
+	OPENAI_AUTO_CACHE_SEMANTICS,
 	requiredSavingsForCacheBreak,
 } from "./context-thresholds.ts";
 
@@ -259,27 +263,94 @@ export function accumulateTurnFocus(sessionId: string, messages: AgentMessage[],
 const CACHE_DETECTION_LOOKBACK = 6;
 
 /**
- * Whether this session is actually getting prefix-cache hits.
+ * Cache pricing semantics for the current session.
  *
  * Gating rewrites only pays off against a provider that caches the prompt
  * prefix; where nothing is cached, every request re-sends the whole history at
  * full price and shrinking it is an unconditional win. Rather than maintaining a
  * provider allowlist that silently rots, we read it off the usage the provider
- * itself reported. With no usage yet (first request of a session) we assume
- * caching, which is the safe direction: the ledger is empty then anyway, so the
- * assumption cannot suppress a rewrite.
+ * itself reported:
+ *
+ *   - `cacheWrite > 0`      → Anthropic-style explicit cache (hits cheap, writes
+ *                             at a premium): the Anthropic arithmetic applies.
+ *                             Write evidence wins even when a more recent
+ *                             read-only usage is visible, so a session that ever
+ *                             paid for cache writes keeps Anthropic pricing.
+ *   - `cacheRead > 0` only  → OpenAI-style auto caching: hits are billed from
+ *                             the model's cacheRead rate and writes are free,
+ *                             so a break only re-bills the suffix at full input
+ *                             price once (writeMultiplier = 1).
+ *   - neither reported      → no prefix caching; rewrites are unconditional.
+ *
+ * With no usage yet (first request of a session) we fall back to the model's
+ * API protocol — anthropic-messages gets the Anthropic arithmetic, everything
+ * else (openai-completions, openai-responses, …) the auto-cache arithmetic.
+ * The ledger is empty then anyway, so the fallback cannot suppress a rewrite
+ * that would have paid off under the true pricing.
  */
-export function detectPrefixCaching(messages: AgentMessage[]): boolean {
+export function detectCacheSemantics(
+	messages: AgentMessage[],
+	model?: { cost?: { input?: number; cacheRead?: number } },
+): CacheSemantics {
 	let inspected = 0;
+	let sawCacheRead = false;
 	for (let i = messages.length - 1; i >= 0 && inspected < CACHE_DETECTION_LOOKBACK; i--) {
 		const message = messages[i];
 		if (message.role !== "assistant") continue;
 		const usage = (message as { usage?: { cacheRead?: number; cacheWrite?: number } }).usage;
 		if (!usage) continue;
 		inspected++;
-		if ((usage.cacheRead ?? 0) > 0 || (usage.cacheWrite ?? 0) > 0) return true;
+		// Write evidence wins over read evidence: a provider that bills cache
+		// writes at a premium is Anthropic-style regardless of what a more
+		// recent read-only usage reports, and mixing the two arithmetic models
+		// would systematically misprice the gate.
+		if ((usage.cacheWrite ?? 0) > 0) return ANTHROPIC_CACHE_SEMANTICS;
+		if ((usage.cacheRead ?? 0) > 0) sawCacheRead = true;
 	}
-	return inspected === 0;
+	if (sawCacheRead) return autoCacheSemantics(model);
+	if (inspected > 0) return NO_CACHE_SEMANTICS;
+	return protocolSemantics(messages, model);
+}
+
+/**
+ * OpenAI-style auto-cache pricing from the model's cost metadata.
+ *
+ * The read multiplier is `cacheRead / input` from the model's rates (e.g. kimi
+ * k2.6 on opencode-go bills cache hits at 0.16 vs 0.95 input ≈ 0.17x). When the
+ * metadata is missing or degenerate, fall back to the conservative OpenAI
+ * default (0.5x) — overestimating the hit price keeps the gate from breaking
+ * the cache for too little savings, which is the safe direction.
+ */
+function autoCacheSemantics(model?: { cost?: { input?: number; cacheRead?: number } }): CacheSemantics {
+	const input = model?.cost?.input;
+	const cacheRead = model?.cost?.cacheRead;
+	if (typeof input === "number" && typeof cacheRead === "number" && input > 0 && cacheRead > 0) {
+		const ratio = cacheRead / input;
+		if (Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
+			return { kind: "auto", readMultiplier: ratio, writeMultiplier: 1 };
+		}
+	}
+	return OPENAI_AUTO_CACHE_SEMANTICS;
+}
+
+/**
+ * Protocol fallback for the first request of a session, when no usage has been
+ * reported yet. anthropic-messages is the only API with explicit write-priced
+ * cache entries; every other protocol uses automatic caching at worst. Without
+ * any assistant message to read the api from, treat the session as uncached.
+ */
+function protocolSemantics(
+	messages: AgentMessage[],
+	model?: { cost?: { input?: number; cacheRead?: number } },
+): CacheSemantics {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message.role !== "assistant") continue;
+		const api = (message as { api?: string }).api;
+		if (api === "anthropic-messages") return ANTHROPIC_CACHE_SEMANTICS;
+		if (api) return autoCacheSemantics(model);
+	}
+	return NO_CACHE_SEMANTICS;
 }
 
 export type CacheGateRegime =
@@ -309,8 +380,11 @@ export interface CacheContinuityOptions {
 	ratio: number;
 	/** Ratio at/above which compaction would fire. */
 	compactionRatio: number;
-	/** Skip the ledger entirely (providers without prefix caching). */
-	disabled?: boolean;
+	/**
+	 * Provider cache pricing for the gate's arithmetic. Defaults to Anthropic
+	 * semantics; pass the detected semantics for OpenAI-style auto caching.
+	 */
+	semantics?: CacheSemantics;
 	/**
 	 * Whether to record the outcome as "what we sent".
 	 *
@@ -361,7 +435,8 @@ export function enforceCacheContinuity(
 	});
 
 	const commit = options.commit !== false;
-	if (options.disabled) return noop("no_break");
+	const semantics = options.semantics ?? ANTHROPIC_CACHE_SEMANTICS;
+	if (semantics.kind === "none") return noop("no_break");
 	// Rewrite passes never add or drop messages; a length change means the
 	// caller handed us mismatched arrays, in which case alignment is meaningless.
 	if (candidate.length !== original.length) return noop("no_break");
@@ -401,7 +476,7 @@ export function enforceCacheContinuity(
 	const inRelief = options.compactionRatio > 0 && options.ratio >= reliefRatio;
 	const requiredSavedTokens = inRelief
 		? CACHE_GATE_MIN_SAVED_TOKENS
-		: Math.max(CACHE_GATE_MIN_SAVED_TOKENS, requiredSavingsForCacheBreak(brokenSuffixTokens));
+		: Math.max(CACHE_GATE_MIN_SAVED_TOKENS, requiredSavingsForCacheBreak(brokenSuffixTokens, semantics));
 
 	if (savedTokens >= requiredSavedTokens) {
 		if (commit) record(state, keys, original, candidate);

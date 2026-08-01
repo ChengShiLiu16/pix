@@ -3,11 +3,15 @@ import type { ToolResultMessage } from "@chengshiliu16/pix-ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	accumulateTurnFocus,
-	detectPrefixCaching,
+	detectCacheSemantics,
 	enforceCacheContinuity,
 	resetContinuityState,
 } from "../src/core/context-continuity.ts";
-import { requiredSavingsForCacheBreak } from "../src/core/context-thresholds.ts";
+import {
+	NO_CACHE_SEMANTICS,
+	OPENAI_AUTO_CACHE_SEMANTICS,
+	requiredSavingsForCacheBreak,
+} from "../src/core/context-thresholds.ts";
 
 function userMessage(text: string): AgentMessage {
 	return { role: "user", content: text, timestamp: 0 } as AgentMessage;
@@ -164,6 +168,25 @@ describe("enforceCacheContinuity", () => {
 		expect(resultText(decision.messages[7])).toBe("[read result omitted]");
 	});
 
+	it("keeps a modest rewrite under OpenAI auto-cache semantics that anthropic pricing rejects", () => {
+		// Same 30k-char trim that anthropic semantics rolls back (see the rollback
+		// test): auto-caching bills hits at 0.5x and never charges write premium,
+		// so the same savings clear the gate. This is the opencode-go/kimi case:
+		// usage reports cacheRead but no cacheWrite, and the gate must not apply
+		// Anthropic's 1.25x write arithmetic to it.
+		const messages = conversation();
+		const options = { ...BASE_OPTIONS, semantics: OPENAI_AUTO_CACHE_SEMANTICS };
+		enforceCacheContinuity(messages, messages, options);
+
+		const candidate = messages.slice();
+		candidate[2] = withText(messages[2], "x".repeat(30_000));
+
+		const decision = enforceCacheContinuity(messages, candidate, options);
+		expect(decision.regime).toBe("economic_pass");
+		expect(decision.applied).toBe(true);
+		expect(resultText(decision.messages[2])).toHaveLength(30_000);
+	});
+
 	it("does not gate when the provider is not serving cache hits", () => {
 		const messages = conversation();
 		enforceCacheContinuity(messages, messages, BASE_OPTIONS);
@@ -171,7 +194,10 @@ describe("enforceCacheContinuity", () => {
 		const candidate = messages.slice();
 		candidate[2] = withText(messages[2], "x".repeat(39_000));
 
-		const decision = enforceCacheContinuity(messages, candidate, { ...BASE_OPTIONS, disabled: true });
+		const decision = enforceCacheContinuity(messages, candidate, {
+			...BASE_OPTIONS,
+			semantics: NO_CACHE_SEMANTICS,
+		});
 		expect(decision.applied).toBe(true);
 		expect(resultText(decision.messages[2])).toHaveLength(39_000);
 	});
@@ -207,12 +233,12 @@ describe("enforceCacheContinuity", () => {
 	});
 });
 
-describe("detectPrefixCaching", () => {
-	function assistantWithUsage(cacheRead: number, cacheWrite: number): AgentMessage {
+describe("detectCacheSemantics", () => {
+	function assistantWithUsage(cacheRead: number, cacheWrite: number, api = "anthropic-messages"): AgentMessage {
 		return {
 			role: "assistant",
 			content: [{ type: "text", text: "ok" }],
-			api: "anthropic-messages",
+			api,
 			provider: "anthropic",
 			model: "test",
 			stopReason: "stop",
@@ -221,17 +247,69 @@ describe("detectPrefixCaching", () => {
 		} as AgentMessage;
 	}
 
-	it("assumes caching when no usage has been reported yet", () => {
-		expect(detectPrefixCaching([userMessage("hi")])).toBe(true);
+	it("falls back to the model's api protocol when no usage has been reported", () => {
+		const anthropic = [userMessage("hi"), assistantCall("t1", "read", { path: "/a.ts" })];
+		expect(detectCacheSemantics(anthropic).kind).toBe("anthropic");
+
+		const openai = [
+			userMessage("hi"),
+			{ ...assistantCall("t1", "read", { path: "/a.ts" }), api: "openai-completions" } as AgentMessage,
+		];
+		expect(detectCacheSemantics(openai).kind).toBe("auto");
 	});
 
-	it("detects caching from reported cache reads", () => {
-		expect(detectPrefixCaching([userMessage("hi"), assistantWithUsage(1200, 0)])).toBe(true);
+	it("treats a session with no assistant messages as uncached", () => {
+		expect(detectCacheSemantics([userMessage("hi")]).kind).toBe("none");
+	});
+
+	it("derives the auto-cache read price from the model cost metadata", () => {
+		// kimi-k2.6 on opencode-go: cacheRead 0.16 vs input 0.95 ≈ 0.17x.
+		const messages = [userMessage("hi"), assistantWithUsage(1200, 0, "openai-completions")];
+		const semantics = detectCacheSemantics(messages, {
+			cost: { input: 0.95, cacheRead: 0.16 },
+		});
+		expect(semantics.kind).toBe("auto");
+		expect(semantics.readMultiplier).toBeCloseTo(0.168, 3);
+		expect(semantics.writeMultiplier).toBe(1);
+	});
+
+	it("falls back to the conservative auto default when model cost is missing", () => {
+		const messages = [userMessage("hi"), assistantWithUsage(1200, 0, "openai-completions")];
+		const semantics = detectCacheSemantics(messages);
+		expect(semantics.kind).toBe("auto");
+		expect(semantics.readMultiplier).toBe(0.5);
+		expect(semantics.writeMultiplier).toBe(1);
+	});
+
+	it("detects anthropic semantics from reported cache writes", () => {
+		const messages = [
+			userMessage("hi"),
+			assistantWithUsage(0, 4096),
+			userMessage("again"),
+			assistantWithUsage(500, 0),
+		];
+		expect(detectCacheSemantics(messages).kind).toBe("anthropic");
 	});
 
 	it("detects the absence of caching when usage never reports cache activity", () => {
 		const messages = [userMessage("hi"), assistantWithUsage(0, 0), userMessage("again"), assistantWithUsage(0, 0)];
-		expect(detectPrefixCaching(messages)).toBe(false);
+		expect(detectCacheSemantics(messages).kind).toBe("none");
+	});
+
+	describe("requiredSavingsForCacheBreak", () => {
+		it("requires far less savings under auto-cache semantics than anthropic", () => {
+			const brokenSuffix = 10_000;
+			const anthropic = requiredSavingsForCacheBreak(brokenSuffix); // 默认 anthropic
+			const auto = requiredSavingsForCacheBreak(brokenSuffix, OPENAI_AUTO_CACHE_SEMANTICS);
+			expect(auto).toBeLessThan(anthropic);
+			// anthropic: (1.25-0.1)/(1.25+0.1*8) ≈ 0.561; auto: (1.0-0.5)/(1.0+0.5*8) = 0.1
+			expect(anthropic).toBe(5610);
+			expect(auto).toBe(1000);
+		});
+
+		it("waives the requirement entirely for uncached providers", () => {
+			expect(requiredSavingsForCacheBreak(10_000, NO_CACHE_SEMANTICS)).toBe(0);
+		});
 	});
 });
 

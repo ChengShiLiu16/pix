@@ -10,7 +10,7 @@ import { ageToolResults, compactEditArguments } from "./context-aging.ts";
 import {
 	accumulateTurnFocus,
 	type CacheContinuityDecision,
-	detectPrefixCaching,
+	detectCacheSemantics,
 	enforceCacheContinuity,
 } from "./context-continuity.ts";
 import { CONTEXT_DEBUG, contextDebug } from "./context-debug.ts";
@@ -71,6 +71,13 @@ export interface OptimizeOutgoingContextOptions {
 	provider: string;
 	sessionId: string; // For metrics correlation
 	compactionSettings?: CompactionSettings; // User-configured compaction settings
+	/**
+	 * Active model's cost metadata (input/cacheRead rates). Used to derive the
+	 * cache-gate pricing for OpenAI-style auto caching, where the hit price is
+	 * model specific (e.g. opencode-go kimi-k2.6 bills cacheRead at 0.16 vs 0.95
+	 * input ≈ 0.17x).
+	 */
+	model?: { cost?: { input?: number; cacheRead?: number } };
 }
 
 export type ContextOptimizationStageName =
@@ -464,11 +471,12 @@ async function optimizeOutgoingContextInternal(
 	// Every pass above rewrites history in place, which invalidates the provider
 	// prefix cache from the first changed message. Charge that cost against the
 	// tokens saved and keep the rewrite only when it repays the cache miss.
+	const semantics = detectCacheSemantics(messages, options.model);
 	const gate = enforceCacheContinuity(messages, rewritten, {
 		sessionId: options.sessionId,
 		ratio: currentRatio,
 		compactionRatio: options.contextWindow > 0 ? 1 - clampedSettings.reserveTokens / options.contextWindow : 0,
-		disabled: !detectPrefixCaching(messages),
+		semantics,
 		commit: commitLedger,
 	});
 	const result = gate.messages;
