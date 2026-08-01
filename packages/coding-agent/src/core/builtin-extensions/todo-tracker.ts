@@ -172,15 +172,12 @@ export function builtin(pix: ExtensionAPI) {
 	 * - no real tools at all (pure Q&A) → drop them as no-ops.
 	 * Historical todos are never touched.
 	 */
-	function settleAgentTodos(messages: unknown[]): void {
+	function settleAgentTodos(finished: boolean): void {
 		if (agentAddedTodoIds.size === 0) return;
 		if (!didMajorToolRun) {
 			clearAddOnlyAgentTodos();
 			return;
 		}
-		const lastAssistant = [...messages].reverse().find((m) => (m as any)?.role === "assistant");
-		const content = ((lastAssistant as any)?.content ?? []) as Array<{ type?: string }>;
-		const finished = content.some((b) => b.type === "text") && !content.some((b) => b.type === "toolCall");
 		if (!finished) return;
 		const ids = [...agentAddedTodoIds].filter((id) => state.todos.find((t) => t.id === id)?.status !== "completed");
 		if (ids.length === 0) return;
@@ -226,13 +223,26 @@ export function builtin(pix: ExtensionAPI) {
 
 	// Mid-turn backfill: the prompt did not look multi-step, but the agent
 	// started executing real tools anyway — give the user a progress list.
+	// Also auto-advance “in progress”: with no in_progress item, promote the
+	// first pending todo (sequential-execution assumption) so the widget shows
+	// what the agent is working on — without any model round trips.
 	pix.on("tool_execution_end", async (event) => {
 		if (!MAJOR_TOOLS.has(event.toolName)) return;
 		didMajorToolRun = true;
-		refreshWidget();
 		if (state.todos.length === 0 && agentAddedTodoIds.size === 0 && lastPrompt) {
 			autoCreateTodos(lastPrompt, true);
 		}
+		if (!state.todos.some((t) => t.status === "in_progress")) {
+			const next = state.todos.find((t) => t.status === "pending");
+			if (next) {
+				const batch = applyMutations(state, [{ action: "start" as TodoAction, id: next.id }]);
+				if (batch.ops.some((op) => op.kind !== "error")) {
+					replaceState(batch.state);
+					persistState();
+				}
+			}
+		}
+		refreshWidget();
 	});
 
 	pix.on("session_shutdown", async (_event, _ctx) => {
@@ -241,8 +251,26 @@ export function builtin(pix: ExtensionAPI) {
 		widgetCtx = null;
 	});
 
-	pix.on("agent_end", async (event) => {
-		settleAgentTodos(event.messages ?? []);
+	let lastAssistantFinalText = false;
+	let pendingSettle = false;
+
+	pix.on("message_end", async (event) => {
+		const message = event.message;
+		if (message?.role !== "assistant") return;
+		const content = (message.content ?? []) as Array<{ type?: string }>;
+		lastAssistantFinalText = content.some((b) => b.type === "text") && !content.some((b) => b.type === "toolCall");
+	});
+
+	// 结算推迟到 agent_settled：agent_end 可能在 error 轮触发（随后 willRetry
+	// 重试成功），此时用 message_end 累积的最终消息判定，避免误判。
+	pix.on("agent_end", async () => {
+		pendingSettle = true;
+	});
+
+	pix.on("agent_settled", async () => {
+		if (!pendingSettle) return;
+		pendingSettle = false;
+		settleAgentTodos(lastAssistantFinalText);
 		resetAgentTodoTracking();
 	});
 

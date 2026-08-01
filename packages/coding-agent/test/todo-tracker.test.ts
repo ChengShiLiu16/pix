@@ -230,16 +230,30 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			ctx,
 		);
 		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
-		await handlers.get("agent_end")?.(
-			{
-				type: "agent_end",
-				messages: [{ role: "assistant", content: [{ type: "text", text: "完成" }] }],
-			},
+		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
+		// 模拟最终文本回复到达
+		await handlers.get("message_end")?.(
+			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "完成" }] } },
 			ctx,
 		);
+		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		const last = entries.at(-1);
 		expect((last?.data as any).todos.every((t: any) => t.status === "completed")).toBe(true);
+	});
+
+	it("auto-advances the first pending todo to in_progress when a real tool runs", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "1. 读取文件\n2. 修复问题" },
+			ctx,
+		);
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos[0].status).toBe("in_progress");
+		expect(todos[1].status).toBe("pending");
 	});
 
 	it("clears no-op todos when no real tool ran", async () => {
@@ -250,6 +264,7 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			ctx,
 		);
 		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
+		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
 	});
@@ -265,13 +280,12 @@ describe("todo tracker lifecycle (system-managed)", () => {
 		expect(backfilled?.customType).toBe("todo-state");
 		expect((backfilled?.data as any).todos.length).toBe(1);
 
-		await handlers.get("agent_end")?.(
-			{
-				type: "agent_end",
-				messages: [{ role: "assistant", content: [{ type: "text", text: "搞定" }] }],
-			},
+		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
+		await handlers.get("message_end")?.(
+			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "搞定" }] } },
 			ctx,
 		);
+		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 		expect((entries.at(-1)?.data as any).todos[0].status).toBe("completed");
 	});
 
@@ -288,6 +302,7 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			{ type: "agent_end", messages: [{ role: "toolResult", toolName: "read" }] },
 			ctx,
 		);
+		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		// 第二轮：新任务 + 执行工具 + 最终文本 → 仅新任务 done
 		await handlers.get("before_agent_start")?.(
@@ -295,16 +310,16 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			ctx,
 		);
 		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "bash", isError: false }, ctx);
-		await handlers.get("agent_end")?.(
-			{
-				type: "agent_end",
-				messages: [{ role: "assistant", content: [{ type: "text", text: "完成" }] }],
-			},
+		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
+		// 模拟最终文本回复到达
+		await handlers.get("message_end")?.(
+			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "完成" }] } },
 			ctx,
 		);
+		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		const todos = (entries.at(-1)?.data as any).todos;
-		expect(todos.find((t: any) => t.text === "修复历史遗留 bug").status).toBe("pending");
+		expect(todos.find((t: any) => t.text === "修复历史遗留 bug").status).toBe("in_progress");
 		expect(todos.find((t: any) => t.text === "新增导出功能").status).toBe("completed");
 	});
 });
