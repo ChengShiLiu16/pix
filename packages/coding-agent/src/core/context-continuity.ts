@@ -288,10 +288,18 @@ const CACHE_DETECTION_LOOKBACK = 6;
  * The ledger is empty then anyway, so the fallback cannot suppress a rewrite
  * that would have paid off under the true pricing.
  */
-export function detectCacheSemantics(
-	messages: AgentMessage[],
-	model?: { cost?: { input?: number; cacheRead?: number } },
-): CacheSemantics {
+/**
+ * Model cost metadata used to derive cache pricing semantics.
+ */
+export interface CacheModelCost {
+	cost?: {
+		input?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+	};
+}
+
+export function detectCacheSemantics(messages: AgentMessage[], model?: CacheModelCost): CacheSemantics {
 	let inspected = 0;
 	let sawCacheRead = false;
 	for (let i = messages.length - 1; i >= 0 && inspected < CACHE_DETECTION_LOOKBACK; i--) {
@@ -313,21 +321,41 @@ export function detectCacheSemantics(
 }
 
 /**
- * OpenAI-style auto-cache pricing from the model's cost metadata.
+ * Cache pricing from the model's cost metadata.
  *
- * The read multiplier is `cacheRead / input` from the model's rates (e.g. kimi
- * k2.6 on opencode-go bills cache hits at 0.16 vs 0.95 input ≈ 0.17x). When the
- * metadata is missing or degenerate, fall back to the conservative OpenAI
- * default (0.5x) — overestimating the hit price keeps the gate from breaking
- * the cache for too little savings, which is the safe direction.
+ * The multipliers are ratios over the base input price. Two distinct pricing
+ * shapes exist:
+ *
+ *   Anthropic-style (explicit cache_control): hits are cheap and freshly
+ *   written entries carry a premium. OpenAI's own models bill this way too
+ *   (gpt-5.6-sol: cacheRead 0.5 / input 5 = 0.1x, cacheWrite 6.25 = 1.25x) even
+ *   though their usage reports no cacheWrite — the write premium still applies
+ *   server-side when a rewritten prefix re-arms the cache. Detecting it from
+ *   the cost metadata (cacheWrite > input) keeps the gate conservative where
+ *   breaking the cache is genuinely expensive.
+ *
+ *   OpenAI-style auto caching (third-party gateways such as opencode-go): hits
+ *   are billed from the model's cacheRead rate and writes are NOT billed
+ *   separately (cacheWrite is 0 in the metadata). A break only re-bills the
+ *   suffix at full input price once (writeMultiplier = 1).
+ *
+ * When the metadata is missing or degenerate, fall back to the conservative
+ * OpenAI default (0.5x read) — overestimating the hit price keeps the gate from
+ * breaking the cache for too little savings, which is the safe direction.
  */
-function autoCacheSemantics(model?: { cost?: { input?: number; cacheRead?: number } }): CacheSemantics {
+function autoCacheSemantics(model?: CacheModelCost): CacheSemantics {
 	const input = model?.cost?.input;
 	const cacheRead = model?.cost?.cacheRead;
+	const cacheWrite = model?.cost?.cacheWrite;
 	if (typeof input === "number" && typeof cacheRead === "number" && input > 0 && cacheRead > 0) {
-		const ratio = cacheRead / input;
-		if (Number.isFinite(ratio) && ratio > 0 && ratio < 1) {
-			return { kind: "auto", readMultiplier: ratio, writeMultiplier: 1 };
+		const readRatio = cacheRead / input;
+		if (Number.isFinite(readRatio) && readRatio > 0 && readRatio < 1) {
+			// Write premium in the metadata means breaks are genuinely expensive:
+			// treat it as Anthropic-style pricing, whatever the usage reports.
+			if (typeof cacheWrite === "number" && cacheWrite > input) {
+				return { kind: "anthropic", readMultiplier: readRatio, writeMultiplier: cacheWrite / input };
+			}
+			return { kind: "auto", readMultiplier: readRatio, writeMultiplier: 1 };
 		}
 	}
 	return OPENAI_AUTO_CACHE_SEMANTICS;
@@ -339,10 +367,7 @@ function autoCacheSemantics(model?: { cost?: { input?: number; cacheRead?: numbe
  * cache entries; every other protocol uses automatic caching at worst. Without
  * any assistant message to read the api from, treat the session as uncached.
  */
-function protocolSemantics(
-	messages: AgentMessage[],
-	model?: { cost?: { input?: number; cacheRead?: number } },
-): CacheSemantics {
+function protocolSemantics(messages: AgentMessage[], model?: CacheModelCost): CacheSemantics {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message.role !== "assistant") continue;

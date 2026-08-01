@@ -273,6 +273,21 @@ describe("detectCacheSemantics", () => {
 		expect(semantics.writeMultiplier).toBe(1);
 	});
 
+	it("treats a write premium in the cost metadata as anthropic pricing even when usage reports no cacheWrite", () => {
+		// gpt-5.6-sol bills cacheRead 0.5 / input 5 = 0.1x and cacheWrite 6.25 =
+		// 1.25x — Anthropic-shaped pricing, but its usage never reports a
+		// cacheWrite count. The gate must stay conservative there: breaking the
+		// cache re-bills the suffix at 1.25x, so the same savings that clear the
+		// auto gate must be rejected.
+		const messages = [userMessage("hi"), assistantWithUsage(1200, 0, "openai-responses")];
+		const semantics = detectCacheSemantics(messages, {
+			cost: { input: 5, cacheRead: 0.5, cacheWrite: 6.25 },
+		});
+		expect(semantics.kind).toBe("anthropic");
+		expect(semantics.readMultiplier).toBeCloseTo(0.1, 3);
+		expect(semantics.writeMultiplier).toBeCloseTo(1.25, 3);
+	});
+
 	it("falls back to the conservative auto default when model cost is missing", () => {
 		const messages = [userMessage("hi"), assistantWithUsage(1200, 0, "openai-completions")];
 		const semantics = detectCacheSemantics(messages);

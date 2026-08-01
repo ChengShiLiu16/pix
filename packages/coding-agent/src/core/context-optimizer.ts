@@ -72,12 +72,14 @@ export interface OptimizeOutgoingContextOptions {
 	sessionId: string; // For metrics correlation
 	compactionSettings?: CompactionSettings; // User-configured compaction settings
 	/**
-	 * Active model's cost metadata (input/cacheRead rates). Used to derive the
-	 * cache-gate pricing for OpenAI-style auto caching, where the hit price is
-	 * model specific (e.g. opencode-go kimi-k2.6 bills cacheRead at 0.16 vs 0.95
-	 * input ≈ 0.17x).
+	 * Active model's cost metadata (input/cacheRead/cacheWrite rates). Used to
+	 * derive the cache-gate pricing: the hit price is model specific on
+	 * OpenAI-style auto caching (e.g. opencode-go kimi-k2.6 bills cacheRead at
+	 * 0.16 vs 0.95 input ≈ 0.17x), and a write premium in the metadata (gpt-5.6
+	 * bills cacheWrite at 1.25x) marks Anthropic-style pricing that the gate must
+	 * keep conservative.
 	 */
-	model?: { cost?: { input?: number; cacheRead?: number } };
+	model?: { cost?: { input?: number; cacheRead?: number; cacheWrite?: number } };
 }
 
 export type ContextOptimizationStageName =
