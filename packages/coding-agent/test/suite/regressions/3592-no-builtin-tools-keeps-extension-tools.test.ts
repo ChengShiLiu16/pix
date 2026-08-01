@@ -111,7 +111,7 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			noTools: "builtin",
 		});
 
-		expect(session.getActiveToolNames().sort()).toEqual(["Brave_Search", "todo_manage"]);
+		expect(session.getActiveToolNames().sort()).toEqual(["Brave_Search"]);
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
 	});

@@ -28,6 +28,62 @@ const HARD_SUPPRESSORS: RegExp[] = [
 const ACTION_VERB =
 	/(?:实现|修复|添加|删除|更新|创建|重构|编写|写|改|跑|运行|测试|部署|安装|配置|迁移|优化|排查|检查|整理|提交|合并|拉取|推送|读取|查看|下载|上传|导出|导入|解决|完成|处理|执行|搭建|构建|生成|移除|清理|验证|确认|设置|修改|调整|翻译|总结|对比|搜索|查找|备份|恢复|refactor|implement|fix|add|create|update|write|run|test|deploy|install|configure|migrate|build|remove|verify|check)/iu;
 
+/**
+ * Minimum number of parsed steps before the system auto-creates todos without
+ * the scorer's approval. Covers multi-step prompts the scorer misses (e.g.
+ * terse “先 A 再 B 然后 C” chains) while staying clear of one-shot requests.
+ */
+export const AUTO_TODO_MIN_STEPS = 2;
+
+/** Push a step while enforcing the shared todo-text limits. */
+function pushStep(steps: string[], raw: string): void {
+	const text = raw
+		.replace(/^[-*•·]\s*/u, "")
+		.trim()
+		.replace(/[。！？!?]+$/u, "");
+	if (text.length < 4) return;
+	if (steps.length >= 20) return;
+	steps.push(text.slice(0, 120));
+}
+
+/**
+ * Extract concrete executable steps from a user prompt, independent of the
+ * trigger score. Recognizes numbered items (“1. xxx” / “第1步：xxx”), action
+ * bullet lines (“- 修复 xxx”) and comma-enumerated action lists. Returns [] for
+ * prompts without an explicit step structure — those stay single-shot unless
+ * the scorer fires.
+ */
+export function parseStepsFromPrompt(input: string): string[] {
+	const steps: string[] = [];
+	for (const line of input.split(/\r?\n/u)) {
+		const t = line.trim();
+		if (!t) continue;
+		const numbered = t.match(/^(?:\d+[.)）、]|第[一二三四五六七八九十百千\d]+步[：:、]?)\s*(.+)$/u);
+		if (numbered) {
+			pushStep(steps, numbered[1] ?? "");
+			continue;
+		}
+		const bullet = t.match(/^[-*•·]\s*(.+)$/u);
+		if (bullet && ACTION_VERB.test(bullet[1] ?? "")) {
+			pushStep(steps, bullet[1] ?? "");
+		}
+	}
+	if (steps.length === 0) {
+		// 逗号枚举：先去掉冒号前的引导句（“请分别处理以下三件事：A、B、C” → A、B、C）
+		let body = input;
+		const colon = input.search(/[：:]/u);
+		if (colon >= 0 && colon < input.length * 0.6) body = input.slice(colon + 1);
+		const parts = body
+			.split(/[、，,;；]+/u)
+			.map((s) => s.trim())
+			.filter((s) => s.length >= 4 && ACTION_VERB.test(s));
+		if (parts.length >= 3) {
+			for (const part of parts) pushStep(steps, part);
+		}
+	}
+	return steps;
+}
+
 const NUMBERED_ITEM = /(?:^|[\s：:\n])\d+[.)）、]\s+|(?:^|\n)\s*第[一二三四五六七八九十百千\d]+步[：:、]?\s*/gu;
 
 const BULLET_LINE = /(?:^|\n)\s*[-*•·]\s*(.+)/gu;

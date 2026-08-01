@@ -152,18 +152,17 @@ describe("todo overlay", () => {
 	});
 });
 
-describe("todo tracker lifecycle", () => {
+describe("todo tracker lifecycle (system-managed)", () => {
 	function createHarness() {
 		const handlers = new Map<string, (event: any, ctx: any) => Promise<any>>();
-		let tool: any;
 		const entries: Array<{ customType: string; data: unknown }> = [];
+		const commands = new Map<string, { handler: (args: any, ctx: any) => Promise<void> | void }>();
 		const pi = {
 			on(event: string, handler: (event: any, ctx: any) => Promise<any>) {
 				handlers.set(event, handler);
 			},
-			registerCommand() {},
-			registerTool(definition: unknown) {
-				tool = definition;
+			registerCommand(name: string, options: any) {
+				commands.set(name, options);
 			},
 			appendEntry(customType: string, data: unknown) {
 				entries.push({ customType, data });
@@ -173,6 +172,7 @@ describe("todo tracker lifecycle", () => {
 			hasUI: true,
 			ui: {
 				setWidget() {},
+				notify() {},
 			},
 			sessionManager: {
 				getBranch: () => [],
@@ -180,172 +180,131 @@ describe("todo tracker lifecycle", () => {
 		};
 
 		todoTrackerBuiltin(pi as any);
-		return {
-			handlers,
-			get tool() {
-				return tool;
-			},
-			entries,
-			ctx,
-		};
+		return { handlers, entries, commands, ctx };
 	}
 
-	it("clears completed state on the next user prompt", async () => {
-		const { handlers, tool, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await tool.execute("add", { action: "add", text: "task" }, undefined, undefined, ctx);
-		await tool.execute("done", { action: "done", id: 1 }, undefined, undefined, ctx);
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "继续" }, ctx);
-
-		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
-	});
-
-	it("clears add-only todos when an agent turn ends", async () => {
-		const { handlers, tool, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "列出至少 10 个 todo" }, ctx);
-		await tool.execute("add-1", { action: "add", text: "first" }, undefined, undefined, ctx);
-		await tool.execute("add-2", { action: "add", text: "second" }, undefined, undefined, ctx);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-
-		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
-	});
-
-	it("preserves historical pending todos when clearing add-only todos", async () => {
-		const { handlers, tool, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await tool.execute("historical", { action: "add", text: "historical" }, undefined, undefined, ctx);
-
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "列出至少 10 个 todo" }, ctx);
-		await tool.execute("new", { action: "add", text: "new task" }, undefined, undefined, ctx);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-
-		expect(entries.at(-1)).toEqual({
-			customType: "todo-state",
-			data: { todos: [{ id: 1, text: "historical", status: "pending" }], nextId: 3 },
-		});
-	});
-
-	it("keeps todos when the same agent turn starts work", async () => {
-		const { handlers, tool, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "实现功能" }, ctx);
-		await tool.execute("add", { action: "add", text: "task" }, undefined, undefined, ctx);
-		await tool.execute("start", { action: "start", id: 1 }, undefined, undefined, ctx);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-
-		expect(entries.at(-1)).toEqual({
-			customType: "todo-state",
-			data: { todos: [{ id: 1, text: "task", status: "in_progress" }], nextId: 2 },
-		});
-	});
-
-	it("applies a batch of operations in one tool call", async () => {
-		const { handlers, tool, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-
-		const result = await tool.execute(
-			"batch",
-			{
-				ops: [
-					{ action: "add", text: "first" },
-					{ action: "add", text: "second" },
-					{ action: "add", text: "third" },
-					{ action: "start", id: 1 },
-				],
-			},
-			undefined,
-			undefined,
-			ctx,
-		);
-
-		expect(result.details).toEqual({
-			todos: [
-				{ id: 1, text: "first", status: "in_progress" },
-				{ id: 2, text: "second", status: "pending" },
-				{ id: 3, text: "third", status: "pending" },
-			],
-			nextId: 4,
-		});
-		expect(result.content[0].text).toContain("+#1 +#2 +#3 \u25d0#1");
-	});
-
-	it("keeps the successful entries when one entry of a batch fails", async () => {
-		const { handlers, tool, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-
-		const result = await tool.execute(
-			"batch",
-			{
-				ops: [
-					{ action: "add", text: "keep me" },
-					{ action: "start", id: 99 },
-					{ action: "add", text: "keep me too" },
-				],
-			},
-			undefined,
-			undefined,
-			ctx,
-		);
-
-		expect(result.isError).toBeFalsy();
-		expect(result.details.todos.map((todo: { text: string }) => todo.text)).toEqual(["keep me", "keep me too"]);
-		expect(result.content[0].text).toContain("\u627e\u4e0d\u5230 #99");
-	});
-
-	it("reports an error when every entry of a batch fails", async () => {
-		const { handlers, tool, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-
-		const result = await tool.execute(
-			"batch",
-			{
-				ops: [
-					{ action: "done", id: 1 },
-					{ action: "remove", id: 2 },
-				],
-			},
-			undefined,
-			undefined,
-			ctx,
-		);
-
-		expect(result.isError).toBe(true);
-		expect(result.details.todos).toEqual([]);
-	});
-
-	it("rejects a call with neither action nor ops", async () => {
-		const { handlers, tool, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-
-		const result = await tool.execute("empty", {}, undefined, undefined, ctx);
-		expect(result.isError).toBe(true);
-	});
-
-	it("counts a batch that starts work as touching existing todos", async () => {
-		const { handlers, tool, entries, ctx } = createHarness();
+	it("auto-creates todos from numbered steps on agent start", async () => {
+		const { handlers, entries, ctx } = createHarness();
 		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
 		await handlers.get("before_agent_start")?.(
-			{ type: "before_agent_start", prompt: "\u5b9e\u73b0\u529f\u80fd" },
+			{ type: "before_agent_start", prompt: "请完成：\n1. 修复登录 bug\n2. 添加导出功能\n3. 更新文档" },
 			ctx,
 		);
-		await tool.execute(
-			"batch",
+
+		const last = entries.at(-1);
+		expect(last?.customType).toBe("todo-state");
+		const todos = (last?.data as any).todos;
+		expect(todos.map((t: any) => t.text)).toEqual(["修复登录 bug", "添加导出功能", "更新文档"]);
+		expect(todos.every((t: any) => t.status === "pending")).toBe(true);
+	});
+
+	it("auto-creates a single summary todo when the scorer fires without parseable steps", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "请分别处理以下三件事并逐一汇报：重构核心模块、补充单元测试、提交代码" },
+			ctx,
+		);
+
+		const last = entries.at(-1);
+		expect(last?.customType).toBe("todo-state");
+		const todos = (last?.data as any).todos;
+		// 逗号枚举解析出三个动作 → 三条 todo
+		expect(todos.map((t: any) => t.text)).toEqual(["重构核心模块", "补充单元测试", "提交代码"]);
+		expect(todos.every((t: any) => t.status === "pending")).toBe(true);
+	});
+
+	it("does not create todos for a simple prompt", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "继续" }, ctx);
+
+		expect(entries.at(-1)).toBeUndefined();
+	});
+
+	it("completes auto-created todos when real tools ran", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "1. 读取文件\n2. 修复问题" },
+			ctx,
+		);
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
+		await handlers.get("agent_end")?.(
 			{
-				ops: [
-					{ action: "add", text: "task" },
-					{ action: "start", id: 1 },
-				],
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [{ type: "text", text: "完成" }] }],
 			},
-			undefined,
-			undefined,
+			ctx,
+		);
+
+		const last = entries.at(-1);
+		expect((last?.data as any).todos.every((t: any) => t.status === "completed")).toBe(true);
+	});
+
+	it("clears no-op todos when no real tool ran", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "1. 读取文件\n2. 修复问题" },
 			ctx,
 		);
 		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
 
-		expect(entries.at(-1)).toEqual({
-			customType: "todo-state",
-			data: { todos: [{ id: 1, text: "task", status: "in_progress" }], nextId: 2 },
-		});
+		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
+	});
+
+	it("backfills todos mid-turn when the agent starts working without a multi-step prompt", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "修复这个 bug" }, ctx);
+		expect(entries.at(-1)).toBeUndefined();
+
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
+		const backfilled = entries.at(-1);
+		expect(backfilled?.customType).toBe("todo-state");
+		expect((backfilled?.data as any).todos.length).toBe(1);
+
+		await handlers.get("agent_end")?.(
+			{
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [{ type: "text", text: "搞定" }] }],
+			},
+			ctx,
+		);
+		expect((entries.at(-1)?.data as any).todos[0].status).toBe("completed");
+	});
+
+	it("preserves historical pending todos when settling the current turn", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		// 第一轮：历史 todo + 执行工具但被打断（无最终文本）→ 保留 pending
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "1. 修复历史遗留 bug\n2. 整理历史文档" },
+			ctx,
+		);
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
+		await handlers.get("agent_end")?.(
+			{ type: "agent_end", messages: [{ role: "toolResult", toolName: "read" }] },
+			ctx,
+		);
+
+		// 第二轮：新任务 + 执行工具 + 最终文本 → 仅新任务 done
+		await handlers.get("before_agent_start")?.(
+			{ type: "before_agent_start", prompt: "1. 新增导出功能\n2. 更新测试文档" },
+			ctx,
+		);
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "bash", isError: false }, ctx);
+		await handlers.get("agent_end")?.(
+			{
+				type: "agent_end",
+				messages: [{ role: "assistant", content: [{ type: "text", text: "完成" }] }],
+			},
+			ctx,
+		);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos.find((t: any) => t.text === "修复历史遗留 bug").status).toBe("pending");
+		expect(todos.find((t: any) => t.text === "新增导出功能").status).toBe("completed");
 	});
 });

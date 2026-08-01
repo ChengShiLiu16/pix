@@ -1,102 +1,48 @@
 /**
- * TODO 列表工具（Widget 版）
+ * TODO 列表工具（系统自动维护版）
  *
  * todo 状态通过 Widget 固定在编辑器上方，原地更新，不污染对话上下文。
- * 工具返回值只包含操作结果，不重复输出完整列表。
+ * 任务列表由系统在会话开始时从用户 prompt 自动解析创建（触发评分 + 步骤
+ * 解析双重检测），agent 结束时自动标记完成——不再暴露 todo_manage 工具给
+ * 模型，消除模型逐项 start/done 维护产生的额外 API 轮次（实测占会话成本
+ * 45%）。
  *
  * 命令：
  *   /todos           — 在对话中查看当前 todo 列表（按状态分组）
  *   /todos clear     — 清空所有 todo
- *
- * 工具：
- *   todo_manage      — LLM 可调用的 todo 管理工具
  */
 
-import { StringEnum } from "@chengshiliu16/pix-ai";
-import { Text } from "@chengshiliu16/pix-tui";
-import { Type } from "typebox";
 import type { ExtensionAPI } from "../../index.ts";
 import { TodoOverlay } from "./lib/todo-overlay.ts";
-import { applyMutations, type TodoAction, type TodoBatchEntry, type TodoOp } from "./lib/todo-reducer.ts";
+import { applyMutations, type TodoAction, type TodoBatchEntry } from "./lib/todo-reducer.ts";
 import { replayTodoFromBranch } from "./lib/todo-replay.ts";
-import {
-	cloneState,
-	countByStatus,
-	EMPTY_TODO_STATE,
-	hasOpenTodos,
-	MAX_ACTIVE_FORM_LENGTH,
-	MAX_TODO_TEXT_LENGTH,
-	MAX_TODOS,
-	type TodoState,
-} from "./lib/todo-state.ts";
-import { buildTodoTriggerHint, scoreTodoTrigger } from "./lib/todo-trigger.ts";
-
-function formatListSummary(state: TodoState): string {
-	const counts = countByStatus(state);
-	if (state.todos.length === 0) return "没有待办事项";
-	return `📋 ${counts.pending} 待做, ${counts.in_progress} 进行中, ${counts.completed} 已做`;
-}
-
-/** Compact per-op marker; the model only needs the id and what happened to it. */
-function opMarker(op: TodoOp): string {
-	switch (op.kind) {
-		case "add":
-			return `+#${op.id}`;
-		case "start":
-			return `◐#${op.id}`;
-		case "done":
-			return `✓#${op.id}`;
-		case "remove":
-			return `✕#${op.id}`;
-		case "list":
-			return "";
-		case "error":
-			return `⚠ ${op.message}`;
-	}
-}
+import { cloneState, EMPTY_TODO_STATE, hasOpenTodos, MAX_TODOS, type TodoState } from "./lib/todo-state.ts";
+import { AUTO_TODO_MIN_STEPS, parseStepsFromPrompt, scoreTodoTrigger } from "./lib/todo-trigger.ts";
 
 /**
- * Render a batch outcome. Single-entry calls keep their original one-line shape
- * so nothing downstream has to special-case the common path.
+ * Tools whose execution proves the agent is doing real work. Used to decide
+ * whether auto-created todos should be completed (agent_end) or dropped as
+ * no-ops (pure Q&A turn), and to backfill todos mid-turn when the initial
+ * prompt did not look multi-step but the agent started working anyway.
  */
-function formatBatchResultText(ops: TodoOp[], state: TodoState): string {
-	if (ops.length === 1) {
-		const op = ops[0];
-		if (op.kind === "list") return formatListSummary(state);
-		if (op.kind === "done" && op.clearedAll) return `✅ ${state.todos.length}`;
-		return `${opMarker(op)} ${formatListSummary(state)}`;
-	}
-	const markers = ops.map(opMarker).filter((marker) => marker.length > 0);
-	return `${markers.join(" ")} ${formatListSummary(state)}`.trim();
-}
-
-/**
- * Accept either the batched `ops` array or the single-action shape, so existing
- * sessions and simple one-off calls keep working unchanged.
- */
-function normalizeTodoEntries(params: {
-	action?: string;
-	text?: string;
-	id?: number;
-	activeForm?: string;
-	ops?: Array<{ action?: string; text?: string; id?: number; activeForm?: string }>;
-}): TodoBatchEntry[] {
-	const source = params.ops?.length
-		? params.ops
-		: params.action
-			? [{ action: params.action, text: params.text, id: params.id, activeForm: params.activeForm }]
-			: [];
-	return source
-		.filter((entry): entry is { action: string; text?: string; id?: number; activeForm?: string } =>
-			Boolean(entry?.action),
-		)
-		.map((entry) => ({
-			action: entry.action as TodoAction,
-			text: entry.text,
-			id: entry.id,
-			activeForm: entry.activeForm,
-		}));
-}
+const MAJOR_TOOLS = new Set([
+	"read",
+	"read_many",
+	"bash",
+	"bash_many",
+	"grep",
+	"grep_many",
+	"ffgrep",
+	"fff-multi-grep",
+	"multi_grep",
+	"find",
+	"ffind",
+	"fffind",
+	"ls",
+	"ls_many",
+	"write",
+	"edit",
+]);
 
 function formatCommandGroups(state: TodoState): string {
 	const inProgress = state.todos.filter((t) => t.status === "in_progress");
@@ -132,6 +78,8 @@ export function builtin(pix: ExtensionAPI) {
 	let todoOverlay: TodoOverlay | undefined;
 	let agentAddedTodoIds = new Set<number>();
 	let agentTouchedExistingTodos = false;
+	let didMajorToolRun = false;
+	let lastPrompt = "";
 
 	function getState(): TodoState {
 		return state;
@@ -166,8 +114,11 @@ export function builtin(pix: ExtensionAPI) {
 	function resetAgentTodoTracking(): void {
 		agentAddedTodoIds = new Set<number>();
 		agentTouchedExistingTodos = false;
+		didMajorToolRun = false;
+		lastPrompt = "";
 	}
 
+	/** Drop todos this turn added when the agent never started any work. */
 	function clearAddOnlyAgentTodos(): void {
 		if (agentAddedTodoIds.size === 0 || agentTouchedExistingTodos) return;
 		const addedIds = agentAddedTodoIds;
@@ -175,6 +126,69 @@ export function builtin(pix: ExtensionAPI) {
 
 		const todos = state.todos.filter((t) => !addedIds.has(t.id));
 		replaceState(todos.length === 0 ? EMPTY_TODO_STATE : { todos, nextId: state.nextId });
+		persistState();
+		refreshWidget();
+	}
+
+	/** Auto-create todos from the user prompt when the trigger fires or enough
+	 * explicit steps parse out. With `allowFallback`, a summary todo is created
+	 * for prompts without a step structure (used for mid-turn backfill once the
+	 * agent demonstrably started working). When todos already exist, only newly
+	 * parsed steps are appended (cross-turn follow-ups); the single-task fallback
+	 * is skipped. Returns the number of created todos. */
+	function autoCreateTodos(prompt: string, allowFallback: boolean): number {
+		const steps = parseStepsFromPrompt(prompt);
+		const trigger = scoreTodoTrigger(prompt);
+		if (!trigger.shouldTrigger && steps.length < AUTO_TODO_MIN_STEPS && !allowFallback) return 0;
+
+		let entries: TodoBatchEntry[];
+		if (hasOpenTodos(state)) {
+			// 跨轮续做：只追加新解析出的步骤，避免重复建总任务
+			if (steps.length < AUTO_TODO_MIN_STEPS) return 0;
+			entries = steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }));
+		} else {
+			entries = steps.length
+				? steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }))
+				: [{ action: "add" as TodoAction, text: prompt.replace(/\s+/gu, " ").trim().slice(0, 120) }];
+		}
+
+		const batch = applyMutations(state, entries);
+		if (batch.ops.every((op) => op.kind === "error")) return 0;
+
+		replaceState(batch.state);
+		for (const op of batch.ops) {
+			if (op.kind === "add") agentAddedTodoIds.add(op.id);
+		}
+		persistState();
+		refreshWidget();
+		return batch.ops.filter((op) => op.kind === "add").length;
+	}
+
+	/**
+	 * Settle todos added this turn:
+	 * - real tools ran AND the turn ended with a final text reply → complete them;
+	 * - real tools ran but the turn was cut off (no final reply) → keep pending
+	 *   so cross-turn work stays tracked;
+	 * - no real tools at all (pure Q&A) → drop them as no-ops.
+	 * Historical todos are never touched.
+	 */
+	function settleAgentTodos(messages: unknown[]): void {
+		if (agentAddedTodoIds.size === 0) return;
+		if (!didMajorToolRun) {
+			clearAddOnlyAgentTodos();
+			return;
+		}
+		const lastAssistant = [...messages].reverse().find((m) => (m as any)?.role === "assistant");
+		const content = ((lastAssistant as any)?.content ?? []) as Array<{ type?: string }>;
+		const finished = content.some((b) => b.type === "text") && !content.some((b) => b.type === "toolCall");
+		if (!finished) return;
+		const ids = [...agentAddedTodoIds].filter((id) => state.todos.find((t) => t.id === id)?.status !== "completed");
+		if (ids.length === 0) return;
+		const batch = applyMutations(
+			state,
+			ids.map((id) => ({ action: "done" as TodoAction, id })),
+		);
+		replaceState(batch.state);
 		persistState();
 		refreshWidget();
 	}
@@ -206,18 +220,19 @@ export function builtin(pix: ExtensionAPI) {
 	pix.on("before_agent_start", async (event) => {
 		resetAgentTodoTracking();
 		clearCompletedState();
-		if (hasOpenTodos(state)) return;
+		lastPrompt = event.prompt ?? "";
+		autoCreateTodos(lastPrompt, false);
+	});
 
-		const trigger = scoreTodoTrigger(event.prompt);
-		if (!trigger.shouldTrigger) return;
-
-		return {
-			message: {
-				customType: "todo-hint",
-				content: buildTodoTriggerHint(trigger),
-				display: false,
-			},
-		};
+	// Mid-turn backfill: the prompt did not look multi-step, but the agent
+	// started executing real tools anyway — give the user a progress list.
+	pix.on("tool_execution_end", async (event) => {
+		if (!MAJOR_TOOLS.has(event.toolName)) return;
+		didMajorToolRun = true;
+		refreshWidget();
+		if (state.todos.length === 0 && agentAddedTodoIds.size === 0 && lastPrompt) {
+			autoCreateTodos(lastPrompt, true);
+		}
 	});
 
 	pix.on("session_shutdown", async (_event, _ctx) => {
@@ -226,14 +241,9 @@ export function builtin(pix: ExtensionAPI) {
 		widgetCtx = null;
 	});
 
-	pix.on("agent_end", async () => {
-		clearAddOnlyAgentTodos();
+	pix.on("agent_end", async (event) => {
+		settleAgentTodos(event.messages ?? []);
 		resetAgentTodoTracking();
-	});
-
-	pix.on("tool_execution_end", async (event) => {
-		if (event.toolName !== "todo_manage" || event.isError) return;
-		refreshWidget();
 	});
 
 	// ---- 命令 ----
@@ -249,109 +259,6 @@ export function builtin(pix: ExtensionAPI) {
 			}
 			const text = state.todos.length ? formatCommandGroups(state) : "📝 没有待办事项";
 			ctx.ui.notify(text, "info");
-		},
-	});
-
-	// ---- LLM 工具 ----
-	const EMPTY = new Text("", 0, 0);
-
-	pix.registerTool({
-		name: "todo_manage",
-		label: "Todo Manager",
-		description:
-			"管理任务列表：add 添加, start 标记进行中, done 完成, remove 删除, list 查看。多个操作用 ops 数组一次提交。",
-		promptSnippet: "管理任务列表，跟踪多步骤工作进度",
-		promptGuidelines: [
-			"多步任务（≥3 步）或用户一次列出多件事时用 todo_manage 跟踪；简单问答、解释代码、1-2 步的直接操作不要建 todo。",
-			"多个操作放进一次调用的 ops 数组（一次 add 多条，或 add 完直接 start），不要每个操作单独调一次。",
-			"start 标记进行中并把其他进行中的降回 pending（同时只能有一个），做完用 done。",
-			"todo 是跟踪工具不是计划工具：边做边加，不要先铺一堆再开工。",
-			"不要把分析结论、验证结果、最终总结变成 todo；用户只要求“列出清单”时直接用文本回答。本轮只 add 而没有 start/done/remove 的空转 todo 会被清理。",
-			"每条 todo 是一个具体、可完成的动作；add 前看返回摘要避免重复，描述不准时 remove 后重建而不是再加一条。",
-		],
-		parameters: Type.Object({
-			action: Type.Optional(
-				StringEnum(["add", "start", "done", "remove", "list"] as const, {
-					description: "单个操作；批量时改用 ops。add=添加, start=标记进行中, done=完成, remove=删除, list=查看",
-				}),
-			),
-			text: Type.Optional(Type.String({ description: "任务描述（add 时必填）", maxLength: MAX_TODO_TEXT_LENGTH })),
-			id: Type.Optional(Type.Number({ description: "任务 ID（start/done/remove 时必填）" })),
-			activeForm: Type.Optional(
-				Type.String({ description: "进行中的简短描述（start 时可选）", maxLength: MAX_ACTIVE_FORM_LENGTH }),
-			),
-			ops: Type.Optional(
-				Type.Array(
-					Type.Object({
-						action: StringEnum(["add", "start", "done", "remove", "list"] as const, {
-							description: "操作类型",
-						}),
-						text: Type.Optional(
-							Type.String({ description: "任务描述（add 时必填）", maxLength: MAX_TODO_TEXT_LENGTH }),
-						),
-						id: Type.Optional(Type.Number({ description: "任务 ID（start/done/remove 时必填）" })),
-						activeForm: Type.Optional(
-							Type.String({ description: "进行中的简短描述", maxLength: MAX_ACTIVE_FORM_LENGTH }),
-						),
-					}),
-					{ description: "按顺序执行的一批操作；优先用它代替多次单操作调用", maxItems: MAX_TODOS },
-				),
-			),
-		}),
-		renderCall() {
-			return EMPTY;
-		},
-		renderResult(result: any, _opts: any, theme: any, context: any) {
-			if (context.isError) {
-				const text = result?.content?.[0]?.text ?? "";
-				const colored = text
-					.split("\n")
-					.map((line: string) => theme.fg("error", line || " "))
-					.join("\n");
-				return new Text(colored, 0, 0);
-			}
-			return EMPTY;
-		},
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			widgetCtx = ctx;
-
-			const entries = normalizeTodoEntries(params);
-			if (entries.length === 0) {
-				return {
-					content: [{ type: "text", text: "错误：需要 action 或非空的 ops 数组" }],
-					isError: true,
-					details: { todos: state.todos, nextId: state.nextId },
-				} as any;
-			}
-
-			const batch = applyMutations(state, entries);
-			const details = { todos: batch.state.todos, nextId: batch.state.nextId };
-
-			// A batch that failed outright is an error; a partial failure is not —
-			// the successful entries were applied and the model needs to see that.
-			if (batch.ops.every((op) => op.kind === "error")) {
-				const message = batch.ops.map((op) => (op.kind === "error" ? op.message : "")).join("; ");
-				return {
-					content: [{ type: "text", text: message }],
-					isError: true,
-					details: { todos: state.todos, nextId: state.nextId },
-				} as any;
-			}
-
-			replaceState(batch.state);
-			for (const op of batch.ops) {
-				if (op.kind === "add") agentAddedTodoIds.add(op.id);
-				else if (op.kind === "start" || op.kind === "done" || op.kind === "remove") {
-					agentTouchedExistingTodos = true;
-				}
-			}
-			persistState();
-			refreshWidget();
-
-			return {
-				content: [{ type: "text", text: formatBatchResultText(batch.ops, batch.state) }],
-				details,
-			};
 		},
 	});
 }
