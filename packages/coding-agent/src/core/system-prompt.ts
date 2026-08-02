@@ -143,6 +143,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	if (hasBash && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
 	}
+	// Batch tool calls: independent tool calls belong in one message. This is the
+	// single biggest lever on round-trip cost (serial calls multiply per-turn
+	// context resends; parallel batches collapse them into one).
+	addGuideline(
+		"Batch independent tool calls into one message (e.g. read several files, or read_many with all paths at once) instead of sending one call per round; do not wait for a result before issuing the next independent call",
+	);
 	for (const guideline of promptGuidelines ?? []) {
 		const normalized = guideline.trim();
 		if (normalized.length > 0) {
