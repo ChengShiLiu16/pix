@@ -166,6 +166,15 @@ describe("todo tracker lifecycle (system-managed)", () => {
 				entries.push({ customType, data });
 			},
 		};
+		const branch = [
+			{
+				type: "message",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "建议列表：\n1. 修复登录 bug\n2. 添加导出功能" }],
+				},
+			},
+		];
 		const ctx = {
 			hasUI: true,
 			ui: {
@@ -173,7 +182,7 @@ describe("todo tracker lifecycle (system-managed)", () => {
 				notify() {},
 			},
 			sessionManager: {
-				getBranch: () => [],
+				getBranch: () => branch,
 			},
 		};
 
@@ -211,9 +220,121 @@ describe("todo tracker lifecycle (system-managed)", () => {
 	it("does not create todos for a simple prompt", async () => {
 		const { handlers, entries, ctx } = createHarness();
 		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "继续" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "你好" }, ctx);
 
 		expect(entries.at(-1)).toBeUndefined();
+	});
+
+	it("creates todos from suggestions in the last assistant message when the prompt references them", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		// 上一轮模型给出建议列表
+		await handlers.get("message_end")?.(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "text",
+							text: "建议按以下顺序调整：\n- 重构核心模块接口\n- 补充单元测试\n- 更新文档",
+						},
+					],
+				},
+			},
+			ctx,
+		);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "按建议调整进行修改" }, ctx);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos.map((t: any) => t.text)).toEqual(["重构核心模块接口", "补充单元测试", "更新文档"]);
+	});
+
+	it("does not create todos from history for confirmation-only prompts", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("message_end")?.(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "- 方案一\n- 方案二\n- 方案三" }],
+				},
+			},
+			ctx,
+		);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "好的" }, ctx);
+
+		expect(entries.at(-1)).toBeUndefined();
+	});
+
+	it("restores the last assistant text from the branch on session start", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		// session_start 的 branch 里带历史 assistant 建议（重启场景）
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "按照上面建议继续修改" }, ctx);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos.map((t: any) => t.text)).toEqual(["修复登录 bug", "添加导出功能"]);
+	});
+
+	it("creates todos from the model's own plan list in its first message", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "修复这个 bug" }, ctx);
+		expect(entries.at(-1)).toBeUndefined();
+
+		// 模型首条消息列计划
+		await handlers.get("message_end")?.(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [
+						{
+							type: "text",
+							text: "我按以下步骤修复：\n1. 定位问题代码\n2. 修复逻辑错误\n3. 运行测试验证",
+						},
+					],
+				},
+			},
+			ctx,
+		);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos.map((t: any) => t.text)).toEqual(["定位问题代码", "修复逻辑错误", "运行测试验证"]);
+	});
+
+	it("does not treat analysis conclusion lists as todos", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "为什么慢" }, ctx);
+		await handlers.get("message_end")?.(
+			{
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "原因有三：\n1. 缓存未命中\n2. 网络延迟\n3. 磁盘 IO" }],
+				},
+			},
+			ctx,
+		);
+
+		expect(entries.at(-1)).toBeUndefined();
+	});
+
+	it("backfills a summary todo when the agent works without any list source", async () => {
+		const { handlers, entries, ctx } = createHarness();
+		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "修复这个 bug" }, ctx);
+		expect(entries.at(-1)).toBeUndefined();
+
+		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
+
+		const todos = (entries.at(-1)?.data as any).todos;
+		expect(todos.length).toBe(1);
+		expect(todos[0].text).toBe("修复这个 bug");
+		expect(todos[0].status).toBe("pending");
 	});
 
 	it("completes auto-created todos when real tools ran", async () => {

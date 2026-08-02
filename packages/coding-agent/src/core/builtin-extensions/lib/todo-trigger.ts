@@ -26,7 +26,7 @@ const HARD_SUPPRESSORS: RegExp[] = [
 ];
 
 const ACTION_VERB =
-	/(?:实现|修复|添加|删除|更新|创建|重构|编写|写|改|跑|运行|测试|部署|安装|配置|迁移|优化|排查|检查|整理|提交|合并|拉取|推送|读取|查看|下载|上传|导出|导入|解决|完成|处理|执行|搭建|构建|生成|移除|清理|验证|确认|设置|修改|调整|翻译|总结|对比|搜索|查找|备份|恢复|refactor|implement|fix|add|create|update|write|run|test|deploy|install|configure|migrate|build|remove|verify|check)/iu;
+	/(?:实现|修复|添加|删除|更新|创建|重构|编写|写|改|跑|运行|测试|部署|安装|配置|迁移|优化|排查|检查|整理|提交|合并|拉取|推送|读取|查看|下载|上传|导出|导入|解决|完成|处理|执行|搭建|构建|生成|移除|清理|验证|确认|设置|修改|调整|翻译|总结|对比|搜索|查找|备份|恢复|定位|复现|调试|审查|评估|阅读|refactor|implement|fix|add|create|update|write|run|test|deploy|install|configure|migrate|build|remove|verify|check)/iu;
 
 /**
  * Minimum number of parsed steps before the system auto-creates todos without
@@ -37,7 +37,10 @@ export const AUTO_TODO_MIN_STEPS = 2;
 
 /** Push a step while enforcing the shared todo-text limits. */
 function pushStep(steps: string[], raw: string): void {
+	// 去掉 markdown 强调/代码标记残留（**加粗**、`反引号`）
 	const text = raw
+		.replace(/\*\*/gu, "")
+		.replace(/`/gu, "")
 		.replace(/^[-*•·]\s*/u, "")
 		.trim()
 		.replace(/[。！？!?]+$/u, "");
@@ -79,6 +82,31 @@ export function parseStepsFromPrompt(input: string): string[] {
 			.filter((s) => s.length >= 4 && ACTION_VERB.test(s));
 		if (parts.length >= 3) {
 			for (const part of parts) pushStep(steps, part);
+		}
+	}
+	return steps;
+}
+
+/**
+ * Extract action steps from an assistant message body (e.g. a list of
+ * suggestions the model gave in the previous turn). Recognizes bullet lines
+ * and numbered items; a leading code fence aborts the scan so code blocks are
+ * not misread as task lists.
+ */
+export function parseStepsFromText(text: string): string[] {
+	const steps: string[] = [];
+	for (const line of text.split(/\r?\n/u)) {
+		const t = line.trim();
+		if (!t) continue;
+		if (t.startsWith("```")) break;
+		const bullet = t.match(/^[-*•·]\s*(.+)$/u);
+		if (bullet) {
+			pushStep(steps, bullet[1] ?? "");
+			continue;
+		}
+		const numbered = t.match(/^(?:\d+[.)）、])\s*(.+)$/u);
+		if (numbered && ACTION_VERB.test(numbered[1] ?? "")) {
+			pushStep(steps, numbered[1] ?? "");
 		}
 	}
 	return steps;

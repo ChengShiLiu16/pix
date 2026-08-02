@@ -22,7 +22,7 @@ import { TodoOverlay } from "./lib/todo-overlay.ts";
 import { applyMutations, type TodoAction, type TodoBatchEntry } from "./lib/todo-reducer.ts";
 import { replayTodoFromBranch } from "./lib/todo-replay.ts";
 import { cloneState, EMPTY_TODO_STATE, hasOpenTodos, MAX_TODOS, type TodoState } from "./lib/todo-state.ts";
-import { AUTO_TODO_MIN_STEPS, parseStepsFromPrompt, scoreTodoTrigger } from "./lib/todo-trigger.ts";
+import { AUTO_TODO_MIN_STEPS, parseStepsFromPrompt, parseStepsFromText, scoreTodoTrigger } from "./lib/todo-trigger.ts";
 
 /**
  * Tools whose execution proves the agent is doing real work. Used to decide
@@ -47,6 +47,9 @@ const MAJOR_TOOLS = new Set([
 	"write",
 	"edit",
 ]);
+
+/** Prompts that reference the previous turn's suggestions without restating them. */
+const REFERENCES_ADVICE = /(?:按|照|根据|依据|按照|上面|上述|建议|继续|接着|都|全部|这些|那些|逐一|逐条|接着改)/u;
 
 function formatCommandGroups(state: TodoState): string {
 	const inProgress = state.todos.filter((t) => t.status === "in_progress");
@@ -82,6 +85,10 @@ export function builtin(pix: ExtensionAPI) {
 	let todoOverlay: TodoOverlay | undefined;
 	let agentAddedTodoIds = new Set<number>();
 	let didMajorToolRun = false;
+	// 最近一条 assistant 文本（含重启后从 branch 恢复），供“按建议修改”类
+	// prompt 从历史建议列表建 todo；以及当前轮用户 prompt（回填用）
+	let lastAssistantText = "";
+	let lastPrompt = "";
 
 	function getState(): TodoState {
 		return state;
@@ -109,6 +116,7 @@ export function builtin(pix: ExtensionAPI) {
 	function resetAgentTodoTracking(): void {
 		agentAddedTodoIds = new Set<number>();
 		didMajorToolRun = false;
+		lastPrompt = "";
 	}
 
 	/** Drop todos this turn added when the agent never started any work. */
@@ -134,12 +142,28 @@ export function builtin(pix: ExtensionAPI) {
 		if (hasOpenTodos(state)) return 0;
 		const steps = parseStepsFromPrompt(prompt);
 		const trigger = scoreTodoTrigger(prompt);
-		if (!trigger.shouldTrigger && steps.length < AUTO_TODO_MIN_STEPS) return 0;
+		if (!trigger.shouldTrigger && steps.length < AUTO_TODO_MIN_STEPS) {
+			// 无结构 prompt 但引用了上一轮的建议（“按建议修改”类）→ 从历史列表建
+			if (REFERENCES_ADVICE.test(prompt)) {
+				const hist = parseStepsFromText(lastAssistantText);
+				if (hist.length >= AUTO_TODO_MIN_STEPS) {
+					const created = createTodos(
+						hist.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text })),
+					);
+					if (created > 0) return created;
+				}
+			}
+			return 0;
+		}
 
 		const entries: TodoBatchEntry[] = steps.length
 			? steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }))
 			: [{ action: "add" as TodoAction, text: prompt.replace(/\s+/gu, " ").trim().slice(0, 120) }];
+		return createTodos(entries);
+	}
 
+	/** Apply a batch of adds and persist. Returns the number created. */
+	function createTodos(entries: TodoBatchEntry[]): number {
 		const batch = applyMutations(state, entries);
 		if (batch.ops.every((op) => op.kind === "error")) return 0;
 
@@ -174,6 +198,21 @@ export function builtin(pix: ExtensionAPI) {
 	function handleLifecycle(ctx: any): void {
 		widgetCtx = ctx;
 		restoreFromBranch(ctx);
+		// 重启场景：从历史 branch 恢复最近一条 assistant 文本
+		try {
+			for (const entry of ctx.sessionManager.getBranch()) {
+				const m = entry?.message;
+				if (m?.role === "assistant") {
+					const text = (m.content ?? [])
+						.filter((b: any) => b.type === "text")
+						.map((b: any) => b.text ?? "")
+						.join("\n");
+					if (text.trim()) lastAssistantText = text;
+				}
+			}
+		} catch {
+			// branch 不可读时忽略，仅影响历史建议解析
+		}
 		if (ctx.hasUI) {
 			todoOverlay ??= new TodoOverlay(getState);
 			todoOverlay.setUICtx(ctx.ui);
@@ -203,12 +242,37 @@ export function builtin(pix: ExtensionAPI) {
 			persistState();
 			refreshWidget();
 		}
-		autoCreateTodos(event.prompt ?? "");
+		lastPrompt = event.prompt ?? "";
+		autoCreateTodos(lastPrompt);
 	});
 
-	// 只记录"干过活"标记，不做任何列表维护
+	// 累积最近一条 assistant 文本，供"按建议修改"类 prompt 解析历史建议；
+	// 同时：列表仍为空时，从模型首条消息的列表（计划/清单）直接建 todo——
+	// 覆盖无结构 prompt 下模型自主列计划的任务（信号源④）。
+	pix.on("message_end", async (event) => {
+		const message = event.message;
+		if (message?.role !== "assistant") return;
+		const text = (message.content ?? [])
+			.filter((b: any) => b.type === "text")
+			.map((b: any) => b.text ?? "")
+			.join("\n");
+		if (!text.trim()) return;
+		lastAssistantText = text;
+		if (state.todos.length === 0 && agentAddedTodoIds.size === 0) {
+			const steps = parseStepsFromText(text);
+			if (steps.length >= AUTO_TODO_MIN_STEPS) {
+				createTodos(steps.slice(0, MAX_TODOS).map((t) => ({ action: "add" as TodoAction, text: t })));
+			}
+		}
+	});
+
+	// 只记录"干过活"标记；列表仍为空时回填单条总任务（信号源⑤，最后兜底）
 	pix.on("tool_execution_end", async (event) => {
-		if (MAJOR_TOOLS.has(event.toolName)) didMajorToolRun = true;
+		if (!MAJOR_TOOLS.has(event.toolName)) return;
+		didMajorToolRun = true;
+		if (state.todos.length === 0 && agentAddedTodoIds.size === 0 && lastPrompt) {
+			createTodos([{ action: "add" as TodoAction, text: lastPrompt.replace(/\s+/gu, " ").trim().slice(0, 120) }]);
+		}
 	});
 
 	pix.on("session_shutdown", async (_event, _ctx) => {
