@@ -156,14 +156,12 @@ describe("todo tracker lifecycle (system-managed)", () => {
 	function createHarness() {
 		const handlers = new Map<string, (event: any, ctx: any) => Promise<any>>();
 		const entries: Array<{ customType: string; data: unknown }> = [];
-		const commands = new Map<string, { handler: (args: any, ctx: any) => Promise<void> | void }>();
 		const pi = {
 			on(event: string, handler: (event: any, ctx: any) => Promise<any>) {
 				handlers.set(event, handler);
 			},
-			registerCommand(name: string, options: any) {
-				commands.set(name, options);
-			},
+			registerCommand() {},
+			registerTool() {},
 			appendEntry(customType: string, data: unknown) {
 				entries.push({ customType, data });
 			},
@@ -180,10 +178,10 @@ describe("todo tracker lifecycle (system-managed)", () => {
 		};
 
 		todoTrackerBuiltin(pi as any);
-		return { handlers, entries, commands, ctx };
+		return { handlers, entries, ctx };
 	}
 
-	it("auto-creates todos from numbered steps on agent start", async () => {
+	it("creates todos from numbered steps on agent start", async () => {
 		const { handlers, entries, ctx } = createHarness();
 		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
 		await handlers.get("before_agent_start")?.(
@@ -198,20 +196,16 @@ describe("todo tracker lifecycle (system-managed)", () => {
 		expect(todos.every((t: any) => t.status === "pending")).toBe(true);
 	});
 
-	it("auto-creates a single summary todo when the scorer fires without parseable steps", async () => {
+	it("creates todos from enumerated actions when the scorer misses but steps parse", async () => {
 		const { handlers, entries, ctx } = createHarness();
 		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
 		await handlers.get("before_agent_start")?.(
-			{ type: "before_agent_start", prompt: "请分别处理以下三件事并逐一汇报：重构核心模块、补充单元测试、提交代码" },
+			{ type: "before_agent_start", prompt: "帮我看看 A：重构核心模块、补充单元测试、提交代码" },
 			ctx,
 		);
 
-		const last = entries.at(-1);
-		expect(last?.customType).toBe("todo-state");
-		const todos = (last?.data as any).todos;
-		// 逗号枚举解析出三个动作 → 三条 todo
+		const todos = (entries.at(-1)?.data as any).todos;
 		expect(todos.map((t: any) => t.text)).toEqual(["重构核心模块", "补充单元测试", "提交代码"]);
-		expect(todos.every((t: any) => t.status === "pending")).toBe(true);
 	});
 
 	it("does not create todos for a simple prompt", async () => {
@@ -230,30 +224,10 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			ctx,
 		);
 		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-		// 模拟最终文本回复到达
-		await handlers.get("message_end")?.(
-			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "完成" }] } },
-			ctx,
-		);
 		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		const last = entries.at(-1);
 		expect((last?.data as any).todos.every((t: any) => t.status === "completed")).toBe(true);
-	});
-
-	it("auto-advances the first pending todo to in_progress when a real tool runs", async () => {
-		const { handlers, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await handlers.get("before_agent_start")?.(
-			{ type: "before_agent_start", prompt: "1. 读取文件\n2. 修复问题" },
-			ctx,
-		);
-		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
-
-		const todos = (entries.at(-1)?.data as any).todos;
-		expect(todos[0].status).toBe("in_progress");
-		expect(todos[1].status).toBe("pending");
 	});
 
 	it("clears no-op todos when no real tool ran", async () => {
@@ -263,63 +237,30 @@ describe("todo tracker lifecycle (system-managed)", () => {
 			{ type: "before_agent_start", prompt: "1. 读取文件\n2. 修复问题" },
 			ctx,
 		);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
 		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
 		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
 	});
 
-	it("backfills todos mid-turn when the agent starts working without a multi-step prompt", async () => {
+	it("keeps historical pending todos untouched when settling the current turn", async () => {
 		const { handlers, entries, ctx } = createHarness();
 		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		await handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt: "修复这个 bug" }, ctx);
-		expect(entries.at(-1)).toBeUndefined();
-
-		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
-		const backfilled = entries.at(-1);
-		expect(backfilled?.customType).toBe("todo-state");
-		expect((backfilled?.data as any).todos.length).toBe(1);
-
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-		await handlers.get("message_end")?.(
-			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "搞定" }] } },
-			ctx,
-		);
-		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
-		expect((entries.at(-1)?.data as any).todos[0].status).toBe("completed");
-	});
-
-	it("preserves historical pending todos when settling the current turn", async () => {
-		const { handlers, entries, ctx } = createHarness();
-		await handlers.get("session_start")?.({ type: "session_start" }, ctx);
-		// 第一轮：历史 todo + 执行工具但被打断（无最终文本）→ 保留 pending
 		await handlers.get("before_agent_start")?.(
 			{ type: "before_agent_start", prompt: "1. 修复历史遗留 bug\n2. 整理历史文档" },
 			ctx,
 		);
-		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "read", isError: false }, ctx);
-		await handlers.get("agent_end")?.(
-			{ type: "agent_end", messages: [{ role: "toolResult", toolName: "read" }] },
-			ctx,
-		);
 		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
-		// 第二轮：新任务 + 执行工具 + 最终文本 → 仅新任务 done
+		// 空转 → 清理
+		expect(entries.at(-1)).toEqual({ customType: "todo-state", data: EMPTY_TODO_STATE });
+
+		// 下一轮独立重建
 		await handlers.get("before_agent_start")?.(
 			{ type: "before_agent_start", prompt: "1. 新增导出功能\n2. 更新测试文档" },
 			ctx,
 		);
-		await handlers.get("tool_execution_end")?.({ type: "tool_execution_end", toolName: "bash", isError: false }, ctx);
-		await handlers.get("agent_end")?.({ type: "agent_end", messages: [] }, ctx);
-		// 模拟最终文本回复到达
-		await handlers.get("message_end")?.(
-			{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "完成" }] } },
-			ctx,
-		);
-		await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
-
 		const todos = (entries.at(-1)?.data as any).todos;
-		expect(todos.find((t: any) => t.text === "修复历史遗留 bug").status).toBe("in_progress");
-		expect(todos.find((t: any) => t.text === "新增导出功能").status).toBe("completed");
+		expect(todos.map((t: any) => t.text)).toEqual(["新增导出功能", "更新测试文档"]);
+		expect(todos[0].status).toBe("pending");
 	});
 });

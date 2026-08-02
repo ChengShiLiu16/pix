@@ -1,11 +1,16 @@
 /**
  * TODO 列表工具（系统自动维护版）
  *
- * todo 状态通过 Widget 固定在编辑器上方，原地更新，不污染对话上下文。
- * 任务列表由系统在会话开始时从用户 prompt 自动解析创建（触发评分 + 步骤
- * 解析双重检测），agent 结束时自动标记完成——不再暴露 todo_manage 工具给
- * 模型，消除模型逐项 start/done 维护产生的额外 API 轮次（实测占会话成本
- * 45%）。
+ * 模型不参与 todo 维护（不暴露工具），避免模型逐项 start/done 产生的
+ * 额外 API 轮次（实测占会话成本 45%）。系统闭环：
+ *
+ *   1. before_agent_start：触发评分 + 步骤解析命中 → 系统解析用户 prompt
+ *      直接建列表（唯一建入口）
+ *   2. agent_settled：本轮干过活（执行过主要工具）→ 全部标完成；纯问答
+ *      空转 → 清理本轮建的列表
+ *
+ * 跨轮语义：上一轮列表已全部 completed，下一轮开始前自动清空并按新
+ * prompt 重建，无需保留中间状态。
  *
  * 命令：
  *   /todos           — 在对话中查看当前 todo 列表（按状态分组）
@@ -21,9 +26,8 @@ import { AUTO_TODO_MIN_STEPS, parseStepsFromPrompt, scoreTodoTrigger } from "./l
 
 /**
  * Tools whose execution proves the agent is doing real work. Used to decide
- * whether auto-created todos should be completed (agent_end) or dropped as
- * no-ops (pure Q&A turn), and to backfill todos mid-turn when the initial
- * prompt did not look multi-step but the agent started working anyway.
+ * whether auto-created todos should be completed (agent_settled) or dropped as
+ * no-ops (pure Q&A turn).
  */
 const MAJOR_TOOLS = new Set([
 	"read",
@@ -77,9 +81,7 @@ export function builtin(pix: ExtensionAPI) {
 	let widgetCtx: any = null;
 	let todoOverlay: TodoOverlay | undefined;
 	let agentAddedTodoIds = new Set<number>();
-	let agentTouchedExistingTodos = false;
 	let didMajorToolRun = false;
-	let lastPrompt = "";
 
 	function getState(): TodoState {
 		return state;
@@ -104,23 +106,14 @@ export function builtin(pix: ExtensionAPI) {
 		todoOverlay.update();
 	}
 
-	function clearCompletedState(): void {
-		if (state.todos.length === 0 || hasOpenTodos(state)) return;
-		replaceState(cloneState(EMPTY_TODO_STATE));
-		persistState();
-		refreshWidget();
-	}
-
 	function resetAgentTodoTracking(): void {
 		agentAddedTodoIds = new Set<number>();
-		agentTouchedExistingTodos = false;
 		didMajorToolRun = false;
-		lastPrompt = "";
 	}
 
 	/** Drop todos this turn added when the agent never started any work. */
 	function clearAddOnlyAgentTodos(): void {
-		if (agentAddedTodoIds.size === 0 || agentTouchedExistingTodos) return;
+		if (agentAddedTodoIds.size === 0) return;
 		const addedIds = agentAddedTodoIds;
 		if (![...addedIds].every((id) => state.todos.find((t) => t.id === id)?.status === "pending")) return;
 
@@ -130,27 +123,22 @@ export function builtin(pix: ExtensionAPI) {
 		refreshWidget();
 	}
 
-	/** Auto-create todos from the user prompt when the trigger fires or enough
-	 * explicit steps parse out. With `allowFallback`, a summary todo is created
-	 * for prompts without a step structure (used for mid-turn backfill once the
-	 * agent demonstrably started working). When todos already exist, only newly
-	 * parsed steps are appended (cross-turn follow-ups); the single-task fallback
-	 * is skipped. Returns the number of created todos. */
-	function autoCreateTodos(prompt: string, allowFallback: boolean): number {
+	/**
+	 * Create todos from the user prompt when the scorer fires or enough explicit
+	 * steps parse out. Parsed steps become individual todos; a prompt the scorer
+	 * approves but yields no steps becomes a single summary todo. Historical
+	 * todos are left untouched (cross-turn follow-ups append nothing by design —
+	 * the previous round's list is completed and cleared at the next start).
+	 */
+	function autoCreateTodos(prompt: string): number {
+		if (hasOpenTodos(state)) return 0;
 		const steps = parseStepsFromPrompt(prompt);
 		const trigger = scoreTodoTrigger(prompt);
-		if (!trigger.shouldTrigger && steps.length < AUTO_TODO_MIN_STEPS && !allowFallback) return 0;
+		if (!trigger.shouldTrigger && steps.length < AUTO_TODO_MIN_STEPS) return 0;
 
-		let entries: TodoBatchEntry[];
-		if (hasOpenTodos(state)) {
-			// 跨轮续做：只追加新解析出的步骤，避免重复建总任务
-			if (steps.length < AUTO_TODO_MIN_STEPS) return 0;
-			entries = steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }));
-		} else {
-			entries = steps.length
-				? steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }))
-				: [{ action: "add" as TodoAction, text: prompt.replace(/\s+/gu, " ").trim().slice(0, 120) }];
-		}
+		const entries: TodoBatchEntry[] = steps.length
+			? steps.slice(0, MAX_TODOS).map((text) => ({ action: "add" as TodoAction, text }))
+			: [{ action: "add" as TodoAction, text: prompt.replace(/\s+/gu, " ").trim().slice(0, 120) }];
 
 		const batch = applyMutations(state, entries);
 		if (batch.ops.every((op) => op.kind === "error")) return 0;
@@ -164,21 +152,14 @@ export function builtin(pix: ExtensionAPI) {
 		return batch.ops.filter((op) => op.kind === "add").length;
 	}
 
-	/**
-	 * Settle todos added this turn:
-	 * - real tools ran AND the turn ended with a final text reply → complete them;
-	 * - real tools ran but the turn was cut off (no final reply) → keep pending
-	 *   so cross-turn work stays tracked;
-	 * - no real tools at all (pure Q&A) → drop them as no-ops.
-	 * Historical todos are never touched.
-	 */
-	function settleAgentTodos(finished: boolean): void {
+	/** Complete todos added this turn when real work happened; clear them as
+	 * no-ops otherwise. Historical todos are never touched. */
+	function settleAgentTodos(): void {
 		if (agentAddedTodoIds.size === 0) return;
 		if (!didMajorToolRun) {
 			clearAddOnlyAgentTodos();
 			return;
 		}
-		if (!finished) return;
 		const ids = [...agentAddedTodoIds].filter((id) => state.todos.find((t) => t.id === id)?.status !== "completed");
 		if (ids.length === 0) return;
 		const batch = applyMutations(
@@ -216,33 +197,18 @@ export function builtin(pix: ExtensionAPI) {
 
 	pix.on("before_agent_start", async (event) => {
 		resetAgentTodoTracking();
-		clearCompletedState();
-		lastPrompt = event.prompt ?? "";
-		autoCreateTodos(lastPrompt, false);
+		// 每轮独立：上一轮列表（无论 pending/completed）一律清空，按新 prompt 重建
+		if (state.todos.length > 0) {
+			replaceState(cloneState(EMPTY_TODO_STATE));
+			persistState();
+			refreshWidget();
+		}
+		autoCreateTodos(event.prompt ?? "");
 	});
 
-	// Mid-turn backfill: the prompt did not look multi-step, but the agent
-	// started executing real tools anyway — give the user a progress list.
-	// Also auto-advance “in progress”: with no in_progress item, promote the
-	// first pending todo (sequential-execution assumption) so the widget shows
-	// what the agent is working on — without any model round trips.
+	// 只记录"干过活"标记，不做任何列表维护
 	pix.on("tool_execution_end", async (event) => {
-		if (!MAJOR_TOOLS.has(event.toolName)) return;
-		didMajorToolRun = true;
-		if (state.todos.length === 0 && agentAddedTodoIds.size === 0 && lastPrompt) {
-			autoCreateTodos(lastPrompt, true);
-		}
-		if (!state.todos.some((t) => t.status === "in_progress")) {
-			const next = state.todos.find((t) => t.status === "pending");
-			if (next) {
-				const batch = applyMutations(state, [{ action: "start" as TodoAction, id: next.id }]);
-				if (batch.ops.some((op) => op.kind !== "error")) {
-					replaceState(batch.state);
-					persistState();
-				}
-			}
-		}
-		refreshWidget();
+		if (MAJOR_TOOLS.has(event.toolName)) didMajorToolRun = true;
 	});
 
 	pix.on("session_shutdown", async (_event, _ctx) => {
@@ -251,26 +217,9 @@ export function builtin(pix: ExtensionAPI) {
 		widgetCtx = null;
 	});
 
-	let lastAssistantFinalText = false;
-	let pendingSettle = false;
-
-	pix.on("message_end", async (event) => {
-		const message = event.message;
-		if (message?.role !== "assistant") return;
-		const content = (message.content ?? []) as Array<{ type?: string }>;
-		lastAssistantFinalText = content.some((b) => b.type === "text") && !content.some((b) => b.type === "toolCall");
-	});
-
-	// 结算推迟到 agent_settled：agent_end 可能在 error 轮触发（随后 willRetry
-	// 重试成功），此时用 message_end 累积的最终消息判定，避免误判。
-	pix.on("agent_end", async () => {
-		pendingSettle = true;
-	});
-
+	// agent_settled 在 willRetry 重试全部结束后触发，避免 error 轮误判
 	pix.on("agent_settled", async () => {
-		if (!pendingSettle) return;
-		pendingSettle = false;
-		settleAgentTodos(lastAssistantFinalText);
+		settleAgentTodos();
 		resetAgentTodoTracking();
 	});
 
