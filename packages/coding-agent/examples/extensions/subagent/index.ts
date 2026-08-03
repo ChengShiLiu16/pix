@@ -259,7 +259,11 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 		return { command: process.execPath, args };
 	}
 
-	return { command: "pi", args };
+	// Fallback must not assume "pi" is on PATH: it may resolve to an unrelated
+	// program (e.g. a wrapper from another toolchain). Prefer "pix"; allow
+	// override via PIX_BIN for unusual installs.
+	const pixBin = process.env.PIX_BIN || "pix";
+	return { command: pixBin, args };
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
@@ -410,7 +414,13 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
-		if (wasAborted) throw new Error("Subagent was aborted");
+		if (wasAborted) {
+			throw new Error(
+				"Subagent was aborted (interrupted before completion: user cancelled, or it ran too long). " +
+					"Do not retry subagent for this task. Complete it yourself in the main session, " +
+					"or delegate a smaller, more specific task.",
+			);
+		}
 		return currentResult;
 	} finally {
 		if (tmpPromptPath)
@@ -567,7 +577,14 @@ export default function (pi: ExtensionAPI) {
 					if (isError) {
 						const errorMsg = getResultOutput(result);
 						return {
-							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
+							content: [
+								{
+									type: "text",
+									text:
+										`Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}. ` +
+										"If this task is long-running, complete it yourself in the main session instead of retrying subagent.",
+								},
+							],
 							details: makeDetails("chain")(results),
 							isError: true,
 						};
@@ -645,6 +662,7 @@ export default function (pi: ExtensionAPI) {
 				});
 
 				const successCount = results.filter((r) => !isFailedResult(r)).length;
+				const allFailed = successCount === 0;
 				const summaries = results.map((r) => {
 					const output = truncateParallelOutput(getResultOutput(r));
 					const status = isFailedResult(r)
@@ -656,10 +674,15 @@ export default function (pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
+							text:
+								`Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}` +
+								(allFailed
+									? "\n\nAll parallel subagents failed. Complete the task yourself in the main session instead of retrying subagent, or delegate a smaller, more specific task."
+									: ""),
 						},
 					],
 					details: makeDetails("parallel")(results),
+					isError: allFailed,
 				};
 			}
 
@@ -679,7 +702,14 @@ export default function (pi: ExtensionAPI) {
 				if (isError) {
 					const errorMsg = getResultOutput(result);
 					return {
-						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
+						content: [
+							{
+								type: "text",
+								text:
+									`Agent ${result.stopReason || "failed"}: ${errorMsg}. ` +
+									"If this task is long-running, complete it yourself in the main session instead of retrying subagent.",
+							},
+						],
 						details: makeDetails("single")([result]),
 						isError: true,
 					};

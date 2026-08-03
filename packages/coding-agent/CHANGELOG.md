@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed the subagent example extension leaving the main task stuck after an interrupted run: aborted subagents now return a detailed error guiding the model to complete the task itself instead of retrying, and the subprocess fallback no longer assumes `pi` is on PATH (prefers `pix`, overridable via `PIX_BIN`).
+
 ## [0.83.0] - 2026-07-29
 
 ### New Features
